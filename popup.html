@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="popup.css">
+    <title>Amazon Seller Scraper</title>
+    <script src="xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Amazon Seller Scraper</h1>
+        </header>
+        <main>
+            <button id="scrapeButton">Scrape Items</button>
+            <button id="stopButton" style="display: none;">Stop Scraping</button>
+            <div id="notification">Status: Awaiting start...</div>
+            <button id="downloadButton" style="display: none;">Download Excel</button>
+        </main>
+        <footer>
+            <span id="version">Version 0.1</span>
+            <span id="credits">Enes Yilmaz</span>
+        </footer>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>
