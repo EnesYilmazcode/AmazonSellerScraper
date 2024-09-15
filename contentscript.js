@@ -10,21 +10,34 @@ function scrapeCurrentPage() {
     const resultsText = document.documentElement.innerText.match(/1-\d+ of ([\d,]+) results/);
     let totalListed = resultsText ? parseInt(resultsText[1].replace(/,/g, ''), 10) : 0;
 
+    // Find the number of products sold by the seller and send to the popup
+    const sellerProductsElement = document.querySelector('.a-section.a-spacing-none.sf-rib-v1-summary-sort-container span');
+    if (sellerProductsElement) {
+        const sellerProductsCount = sellerProductsElement.innerText.match(/\d+/)[0];
+        chrome.runtime.sendMessage({
+            type: 'SELLER_PRODUCT_COUNT',
+            count: sellerProductsCount
+        });
+    } else {
+        chrome.runtime.sendMessage({
+            type: 'SELLER_PRODUCT_COUNT',
+            count: "Unknown" // Handle case where count is not found
+        });
+    }
+
     const listings = document.querySelectorAll('.s-result-item');
     listings.forEach(listing => {
         const nameElement = listing.querySelector('h2 a span');
         const asin = listing.dataset.asin;
         const priceElement = listing.querySelector('.a-price .a-offscreen');
         const ratingElement = listing.querySelector('.a-icon-star-small .a-icon-alt');
-        const reviewCountElement = listing.querySelector('span[aria-label$="stars"]');
 
         if (nameElement && asin) {
             results.push({
                 name: nameElement.innerText.trim(),
                 asin: asin,
                 price: priceElement ? priceElement.innerText.trim() : 'N/A',
-                rating: ratingElement ? ratingElement.innerText.split(' ')[0] : 'N/A',
-                reviewCount: reviewCountElement ? reviewCountElement.innerText.split(' ')[0] : 'N/A'
+                rating: ratingElement ? ratingElement.innerText.split(' ')[0] : 'N/A'
             });
         }
     });
@@ -51,7 +64,7 @@ function scrapeCurrentPage() {
             });
 
             if (isScrapingActive) {
-                const nextPageUrl = getNextPageUrl();
+                const nextPageUrl = getNextPageUrl(totalListed, allResults.length);
                 if (nextPageUrl) {
                     const randomWait = Math.floor(Math.random() * (5000 - 2000 + 1) + 2000);
                     setTimeout(() => {
@@ -65,30 +78,14 @@ function scrapeCurrentPage() {
     });
 }
 
-function getNextPageUrl() {
-    const url = new URL(window.location.href);
-    const params = new URLSearchParams(url.search);
+function getNextPageUrl(totalListed, scrapedItemsCount) {
+    const nextPageButton = document.querySelector('a.s-pagination-next');
     
-    // Check if we're on the first page
-    if (!params.has('page')) {
-        // If on first page, construct URL for second page
-        params.set('i', 'merchant-items');
-        params.set('page', '2');
-        if (!params.has('qid')) {
-            params.set('qid', Date.now().toString());
-        }
-        params.set('ref', 'sr_pg_2');
-        url.search = params.toString();
-        return url.href;
-    } else {
-        // For subsequent pages, increment the page number
-        const currentPage = parseInt(params.get('page'));
-        const nextPage = currentPage + 1;
-        params.set('page', nextPage.toString());
-        params.set('ref', `sr_pg_${nextPage}`);
-        url.search = params.toString();
-        return url.href;
+    if (nextPageButton && !nextPageButton.classList.contains('s-pagination-disabled')) {
+        return nextPageButton.href;
     }
+    
+    return null;
 }
 
 function finishScraping(totalScraped) {
@@ -114,7 +111,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     }
 });
 
-// Start scraping when the page loads if scraping is active
 window.addEventListener('load', function() {
     chrome.storage.local.get('isScrapingActive', function(data) {
         isScrapingActive = data.isScrapingActive;
