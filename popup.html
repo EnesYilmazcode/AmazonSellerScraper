@@ -1,27 +1,105 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="popup.css">
-    <title>Amazon Seller Scraper</title>
-    <script src="xlsx.full.min.js"></script>
+    <style>
+        body {
+            width: 300px;
+            padding: 24px;
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            background: #FFFFFF;
+        }
+
+        .card {
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            font-size: 20px;
+            margin: 0 0 24px 0;
+            color: #1F1F1F;
+        }
+
+        .metric {
+            background: #F8F8F8;
+            padding: 16px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: #276EF1;
+            margin-bottom: 4px;
+        }
+
+        .metric-label {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .status {
+            text-align: center;
+            margin: 16px 0;
+            padding: 8px;
+            border-radius: 6px;
+            background: #E8F2FF;
+            color: #276EF1;
+            font-size: 14px;
+        }
+
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+        }
+
+        .primary-button {
+            background: #276EF1;
+            color: white;
+        }
+
+        .primary-button:hover {
+            background: #1E54B7;
+        }
+
+        .primary-button.stop {
+            background: #E11900;
+        }
+
+        .download-button {
+            background: #05944F;
+            color: white;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>Amazon Seller Scraper</h1>
-        </header>
-        <main>
-            <button id="scrapeButton">Scrape Items</button>
-            <button id="stopButton" style="display: none;">Stop Scraping</button>
-            <div id="notification">Status: Awaiting start...</div>
-            <button id="downloadButton" style="display: none;">Download Excel</button>
-        </main>
-        <footer>
-            <span id="version">Version 0.1</span>
-            <span id="credits">Enes Yilmaz</span>
-        </footer>
+    <div class="card">
+        <h1>Amazon Scraper</h1>
+        
+        <div class="metric">
+            <div class="metric-value" id="itemCount">0</div>
+            <div class="metric-label">Items Scraped</div>
+        </div>
+
+        <div class="status" id="status">Ready to start</div>
+
+        <button id="actionButton" class="primary-button">Start Scraping</button>
+        <button id="downloadButton" class="download-button hidden">Download Results</button>
     </div>
     <script src="popup.js"></script>
 </body>

@@ -1,108 +1,121 @@
-// contentScript.js
+
 let isScrapingActive = false;
-let retryCount = 0;
-const MAX_RETRIES = 3;
 
-function scrapeCurrentPage() {
-    if (!isScrapingActive) return;
+function updateItemCount(items) {
+    document.getElementById('itemCount').textContent = items;
+}
 
-    let results = [];
-    const resultsText = document.documentElement.innerText.match(/1-(\d+) of ([\d,]+) results/);
-    let itemsOnPage = resultsText ? parseInt(resultsText[1], 10) : 0;
-    let totalListed = resultsText ? parseInt(resultsText[2].replace(/,/g, ''), 10) : 0;
+function updateStatus(message) {
+    document.getElementById('status').textContent = message;
+}
 
-    const listings = document.querySelectorAll('.s-result-item');
-    listings.forEach(listing => {
-        const nameElement = listing.querySelector('h2 a span');
-        const asin = listing.dataset.asin;
-        const priceElement = listing.querySelector('.a-price .a-offscreen');
-        const ratingElement = listing.querySelector('.a-icon-star-small .a-icon-alt');
-        const reviewCountElement = listing.querySelector('span[aria-label$="stars"]');
+function setScrapingState(isActive) {
+    const actionButton = document.getElementById('actionButton');
+    const downloadButton = document.getElementById('downloadButton');
+    
+    isScrapingActive = isActive;
+    actionButton.textContent = isActive ? 'Stop Scraping' : 'Start Scraping';
+    actionButton.classList.toggle('stop', isActive);
+    downloadButton.classList.toggle('hidden', isActive);
+}
 
-        if (nameElement && asin) {
-            results.push({
-                name: nameElement.innerText.trim(),
-                asin: asin,
-                price: priceElement ? priceElement.innerText.trim() : 'N/A',
-                rating: ratingElement ? ratingElement.innerText.split(' ')[0] : 'N/A',
-                reviewCount: reviewCountElement ? reviewCountElement.innerText.split(' ')[0] : 'N/A'
+// Initialize UI
+chrome.storage.local.get(['isScrapingActive', 'currentItemCount'], function(data) {
+    isScrapingActive = data.isScrapingActive || false;
+    updateItemCount(data.currentItemCount || 0);
+    setScrapingState(isScrapingActive);
+});
+
+document.getElementById('actionButton').addEventListener('click', function() {
+    if (!isScrapingActive) {
+        chrome.storage.local.set({
+            isScrapingActive: true,
+            currentItemCount: 0,
+            results: []
+        }, function() {
+            chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+                chrome.tabs.sendMessage(tabs[0].id, {type: 'START_SCRAPING'});
             });
-        }
-    });
-
-    if (results.length === 0 && retryCount < MAX_RETRIES) {
-        retryCount++;
-        chrome.runtime.sendMessage({
-            type: 'UPDATE_PROGRESS',
-            message: `No results found. Retrying... (Attempt ${retryCount} of ${MAX_RETRIES})`
         });
-        setTimeout(scrapeCurrentPage, 5000); // Wait 5 seconds before retrying
-        return;
-    }
-
-    retryCount = 0; // Reset retry count on successful scrape
-
-    chrome.storage.local.get('results', function(data) {
-        let allResults = data.results || [];
-        allResults = allResults.concat(results);
-        chrome.storage.local.set({results: allResults}, function() {
-            chrome.runtime.sendMessage({
-                type: 'UPDATE_PROGRESS', 
-                message: `Scraped ${allResults.length} out of ${totalListed} items`
-            });
-
-            if (isScrapingActive && allResults.length < totalListed) {
-                const nextPageUrl = getNextPageUrl();
-                if (nextPageUrl) {
-                    const randomWait = Math.floor(Math.random() * (5000 - 2000 + 1) + 2000);
-                    setTimeout(() => {
-                        window.location.href = nextPageUrl;
-                    }, randomWait);
-                } else {
-                    finishScraping(allResults.length);
-                }
-            } else {
-                finishScraping(allResults.length);
-            }
-        });
-    });
-}
-
-function getNextPageUrl() {
-    const nextPageLink = document.querySelector('a.s-pagination-next:not(.s-pagination-disabled)');
-    return nextPageLink ? nextPageLink.href : null;
-}
-
-function finishScraping(totalScraped) {
-    isScrapingActive = false;
-    chrome.storage.local.set({isScrapingActive: false}, function() {
-        chrome.runtime.sendMessage({
-            type: 'SCRAPING_COMPLETE', 
-            message: `Scraping complete. Total items: ${totalScraped}`
-        });
-    });
-}
-
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-    if (request.type === 'START_SCRAPING') {
-        chrome.storage.local.set({results: [], isScrapingActive: true}, function() {
-            isScrapingActive = true;
-            retryCount = 0;
-            scrapeCurrentPage();
-        });
-    } else if (request.type === 'STOP_SCRAPING') {
-        isScrapingActive = false;
+        updateItemCount(0);
+        updateStatus('Scraping in progress...');
+        setScrapingState(true);
+    } else {
         chrome.storage.local.set({isScrapingActive: false});
+        chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+            chrome.tabs.sendMessage(tabs[0].id, {type: 'STOP_SCRAPING'});
+        });
+        updateStatus('Scraping stopped');
+        setScrapingState(false);
     }
 });
 
-// Start scraping when the page loads if scraping is active
-window.addEventListener('load', function() {
-    chrome.storage.local.get('isScrapingActive', function(data) {
-        isScrapingActive = data.isScrapingActive;
-        if (isScrapingActive) {
-            retryCount = 0;
-            scrapeCurrentPage();
+document.getElementById('downloadButton').addEventListener('click', function() {
+    chrome.storage.local.get(['results'], function(data) {
+        const results = data.results || [];
+        
+        // Create workbook and worksheet
+        const wb = XLSX.utils.book_new();
+        
+        // Convert data to worksheet format
+        const ws_data = [
+            // Headers
+            ['Product Name', 'ASIN', 'Price', 'Rating', 'Review Count']
+        ];
+        
+        // Add data rows
+        results.forEach(item => {
+            ws_data.push([
+                item.name,
+                item.asin,
+                item.price,
+                item.rating,
+                item.reviewCount
+            ]);
+        });
+        
+        // Create worksheet
+        const ws = XLSX.utils.aoa_to_sheet(ws_data);
+        
+        // Set column widths
+        const colWidths = [
+            {wch: 50},  // Product Name
+            {wch: 12},  // ASIN
+            {wch: 10},  // Price
+            {wch: 8},   // Rating
+            {wch: 12}   // Review Count
+        ];
+        ws['!cols'] = colWidths;
+        
+        // Add worksheet to workbook
+        XLSX.utils.book_append_sheet(wb, ws, "Amazon Products");
+        
+        // Style the header row
+        const headerRange = XLSX.utils.decode_range(ws['!ref']);
+        for (let C = headerRange.s.c; C <= headerRange.e.c; ++C) {
+            const address = XLSX.utils.encode_cell({r: 0, c: C});
+            if (!ws[address]) continue;
+            ws[address].s = {
+                font: { bold: true },
+                fill: { fgColor: { rgb: "CCCCCC" } },
+                alignment: { horizontal: "center" }
+            };
         }
+        
+        // Generate Excel file
+        const currentDate = new Date().toISOString().split('T')[0];
+        const fileName = `amazon-products-${currentDate}.xlsx`;
+        XLSX.writeFile(wb, fileName);
     });
+});
+
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+    if (request.type === 'UPDATE_PROGRESS') {
+        updateItemCount(request.itemCount);
+        updateStatus('Scraping in progress...');
+    } else if (request.type === 'SCRAPING_COMPLETE') {
+        updateItemCount(request.itemCount);
+        updateStatus('Scraping complete!');
+        setScrapingState(false);
+    }
 });

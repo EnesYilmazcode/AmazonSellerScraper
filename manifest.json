@@ -3,9 +3,8 @@
     "name": "Amazon Seller Scraper",
     "version": "1.0",
     "permissions": [
-        "activeTab",
-        "tabs",
-        "storage"
+        "storage",
+        "activeTab"
     ],
     "host_permissions": [
         "*://*.amazon.com/*"
@@ -26,7 +25,7 @@
     "content_scripts": [
         {
             "matches": ["*://*.amazon.com/*"],
-            "js": ["contentScript.js"]
+            "js": ["contentscript.js"]
         }
     ]
 }
