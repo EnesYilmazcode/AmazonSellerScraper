@@ -60,3 +60,63 @@ button:hover {
     color: #ff6347; /* Optional: different color for notifications */
     font-size: 14px;
 }
+
+.status {
+    padding: 12px;
+    border-radius: 6px;
+    margin: 10px 0;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.status.info {
+    background: #E8F2FF;
+    color: #276EF1;
+}
+
+.status.error {
+    background: #FFE8E8;
+    color: #E11900;
+}
+
+.status.success {
+    background: #E8F8F2;
+    color: #05944F;
+}
+
+/* Loading spinner */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s ease-in-out infinite;
+    margin-right: 8px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Enhance button styles */
+.download-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #05944F;
+    color: white;
+    transition: all 0.3s ease;
+}
+
+.download-button:disabled {
+    background: #cccccc;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.download-button:not(:disabled):hover {
+    background: #047C42;
+}

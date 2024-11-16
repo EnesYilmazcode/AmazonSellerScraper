@@ -46,16 +46,39 @@ function scrapeCurrentPage() {
         const nameElement = listing.querySelector('h2 a span');
         const asin = listing.dataset.asin;
         const priceElement = listing.querySelector('.a-price .a-offscreen');
-        const ratingElement = listing.querySelector('.a-icon-star-small .a-icon-alt');
-        const reviewCountElement = listing.querySelector('span[aria-label$="stars"]');
-
+        
+        // Updated rating extraction
+        const ratingText = listing.querySelector('.a-icon-alt')?.textContent || '';
+        const rating = ratingText.split(' ')[0] || '0';
+        
+        // Updated review count extraction - multiple attempts
+        let reviewCount = '0';
+        // First attempt: direct number in span
+        const reviewSpan = listing.querySelector('span[aria-label*="ratings"]');
+        if (reviewSpan) {
+            const ariaLabel = reviewSpan.getAttribute('aria-label');
+            if (ariaLabel) {
+                reviewCount = ariaLabel.split(' ')[0];
+            }
+        }
+        // Second attempt: link text
+        if (reviewCount === '0') {
+            const reviewLink = listing.querySelector('a[href*="customerReviews"] span');
+            if (reviewLink) {
+                reviewCount = reviewLink.textContent.trim();
+            }
+        }
+        
+        // Clean the review count (remove commas and ensure it's a number)
+        reviewCount = reviewCount.replace(/[^0-9]/g, '');
+        
         if (nameElement && asin) {
             results.push({
                 name: nameElement.innerText.trim(),
                 asin: asin,
                 price: priceElement ? priceElement.innerText.trim() : 'N/A',
-                rating: ratingElement ? ratingElement.innerText.split(' ')[0] : 'N/A',
-                reviewCount: reviewCountElement ? reviewCountElement.innerText.split(' ')[0] : 'N/A'
+                rating: rating,
+                reviewCount: reviewCount || '0' // Ensure we always have a number
             });
         }
     });
@@ -141,3 +164,47 @@ window.addEventListener('load', function() {
         }
     });
 });
+
+// In your scraping logic
+const getRating = () => {
+    // Try to get rating from the aria-label
+    const ratingElement = document.querySelector('span[aria-label*="out of 5 stars"]');
+    if (ratingElement) {
+        const ariaLabel = ratingElement.getAttribute('aria-label');
+        if (ariaLabel) {
+            return ariaLabel.split(' ')[0];
+        }
+    }
+    
+    // Fallback: try to get from the alt text of star icon
+    const starIcon = document.querySelector('.a-icon-star-small .a-icon-alt');
+    if (starIcon) {
+        const altText = starIcon.textContent;
+        return altText.split(' ')[0];
+    }
+    
+    return '0';
+};
+
+const getReviewCount = () => {
+    // Try to get review count from aria-label
+    const reviewElement = document.querySelector('span[aria-label*="ratings"]');
+    if (reviewElement) {
+        const ariaLabel = reviewElement.getAttribute('aria-label');
+        return ariaLabel.split(' ')[0].replace(/,/g, '');
+    }
+    
+    // Fallback to the text content
+    const reviewLink = document.querySelector('a[href*="customerReviews"] span');
+    if (reviewLink) {
+        return reviewLink.textContent.trim().replace(/,/g, '');
+    }
+    
+    return '0';
+};
+
+const productInfo = {
+    // ... other fields ...
+    rating: getRating(),
+    reviewCount: getReviewCount(),
+};

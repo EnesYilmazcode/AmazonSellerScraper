@@ -4,7 +4,8 @@
     "version": "1.0",
     "permissions": [
         "storage",
-        "activeTab"
+        "activeTab",
+        "downloads"
     ],
     "host_permissions": [
         "*://*.amazon.com/*"
@@ -27,5 +28,11 @@
             "matches": ["*://*.amazon.com/*"],
             "js": ["contentscript.js"]
         }
-    ]
+    ],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self'; object-src 'self'"
+    },
+    "background": {
+        "service_worker": "background.js"
+    }
 }
