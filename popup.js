@@ -56,7 +56,14 @@ document.getElementById('actionButton').addEventListener('click', function() {
 function showNotification(message, type = 'info') {
     const status = document.getElementById('status');
     status.textContent = message;
-    status.className = `status ${type}`; // Will use this for styling
+    
+    // Remove previous status classes
+    status.classList.remove('info', 'error', 'success');
+    
+    // Add new status class
+    if (type) {
+        status.classList.add(type);
+    }
 }
 
 function showLoadingSpinner() {
@@ -70,7 +77,9 @@ function showLoadingSpinner() {
 
 function resetDownloadButton() {
     const downloadButton = document.getElementById('downloadButton');
-    downloadButton.innerHTML = 'Download Results';
+    downloadButton.innerHTML = `
+        <i class="fas fa-download"></i> Download Results
+    `;
     downloadButton.disabled = false;
 }
 
@@ -88,8 +97,14 @@ function getFileName(results) {
 }
 
 document.getElementById('downloadButton').addEventListener('click', async function() {
-    showLoadingSpinner();
-    showNotification('Preparing your Excel file...', 'info');
+    // Ensure the button is not hidden and is clickable
+    if (this.classList.contains('hidden')) return;
+
+    // Show loading state
+    this.innerHTML = `
+        <i class="fas fa-spinner fa-spin"></i> Preparing Download...
+    `;
+    this.disabled = true;
 
     try {
         const data = await chrome.storage.local.get(['results']);
@@ -133,286 +148,28 @@ document.getElementById('downloadButton').addEventListener('click', async functi
 
         // Create main data worksheet
         const ws = XLSX.utils.aoa_to_sheet(ws_data);
-        
-        // Column Widths
-        ws['!cols'] = [
-            {wch: 45}, // Product Name
-            {wch: 12}, // ASIN
-            {wch: 10}, // Price
-            {wch: 8},  // Rating
-            {wch: 12}  // Review Count
-        ];
 
-        // Merged Cells
-        ws['!merges'] = [
-            {s: {r: 0, c: 0}, e: {r: 0, c: 4}}, // Title
-            {s: {r: 2, c: 0}, e: {r: 2, c: 2}}, // Report Details
-            {s: {r: 2, c: 3}, e: {r: 2, c: 4}}, // Summary Statistics
-        ];
-
-        // Styling functions
-        const styles = {
-            title: {
-                font: { bold: true, sz: 16, color: { rgb: "FFFFFF" } },
-                fill: { fgColor: { rgb: "2F75B5" } },
-                alignment: { horizontal: "center", vertical: "center" },
-                border: { top: {style: "medium"}, bottom: {style: "medium"}, left: {style: "medium"}, right: {style: "medium"} }
-            },
-            sectionHeader: {
-                font: { bold: true, sz: 12, color: { rgb: "FFFFFF" } },
-                fill: { fgColor: { rgb: "4472C4" } },
-                alignment: { horizontal: "left", vertical: "center" },
-                border: { top: {style: "thin"}, bottom: {style: "thin"}, left: {style: "thin"}, right: {style: "thin"} }
-            },
-            header: {
-                font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } },
-                fill: { fgColor: { rgb: "2F75B5" } },
-                alignment: { horizontal: "center", vertical: "center" },
-                border: { top: {style: "thin"}, bottom: {style: "thin"}, left: {style: "thin"}, right: {style: "thin"} }
-            },
-            cell: {
-                font: { sz: 10 },
-                alignment: { horizontal: "left", vertical: "center", wrapText: true },
-                border: { top: {style: "thin"}, bottom: {style: "thin"}, left: {style: "thin"}, right: {style: "thin"} }
-            },
-            numeric: {
-                font: { sz: 10 },
-                alignment: { horizontal: "center", vertical: "center" },
-                border: { top: {style: "thin"}, bottom: {style: "thin"}, left: {style: "thin"}, right: {style: "thin"} }
-            }
-        };
-
-        // Apply styles to specific ranges
-        const applyStyle = (ws, range, style) => {
-            for (let R = range.s.r; R <= range.e.r; ++R) {
-                for (let C = range.s.c; C <= range.e.c; ++C) {
-                    const cell_address = XLSX.utils.encode_cell({r: R, c: C});
-                    if (!ws[cell_address]) ws[cell_address] = { v: '' };
-                    ws[cell_address].s = style;
-                }
-            }
-        };
-
-        // Apply styles to different sections
-        applyStyle(ws, {s:{r:0,c:0},e:{r:0,c:4}}, styles.title); // Title
-        applyStyle(ws, {s:{r:2,c:0},e:{r:2,c:4}}, styles.sectionHeader); // Section headers
-        applyStyle(ws, {s:{r:7,c:0},e:{r:7,c:4}}, styles.header); // Column headers
-
-        // Apply alternating row colors and proper alignment to data
-        for (let R = 8; R < ws_data.length; ++R) {
-            for (let C = 0; C <= 4; ++C) {
-                const cell_address = XLSX.utils.encode_cell({r: R, c: C});
-                if (!ws[cell_address]) ws[cell_address] = { v: '' };
-                
-                const baseStyle = C >= 2 && C <= 3 ? styles.numeric : styles.cell;
-                ws[cell_address].s = {
-                    ...baseStyle,
-                    fill: { fgColor: { rgb: R % 2 ? "F2F2F2" : "FFFFFF" } }
-                };
-            }
-        }
-
-        // Add conditional formatting for ratings
-        const ratingCol = 3; // Column D
-        for (let R = 8; R < ws_data.length; ++R) {
-            const cell_address = XLSX.utils.encode_cell({r: R, c: ratingCol});
-            if (ws[cell_address] && ws[cell_address].v) {
-                const rating = parseFloat(ws[cell_address].v);
-                let color = "FFFFFF";
-                if (rating >= 4.5) color = "C6EFCE"; // Green for high ratings
-                else if (rating >= 4.0) color = "FFEB9C"; // Yellow for medium ratings
-                else color = "FFC7CE"; // Red for low ratings
-                
-                ws[cell_address].s = {
-                    ...styles.numeric,
-                    fill: { fgColor: { rgb: color } }
-                };
-            }
-        }
-
-        // Add number formatting for specific columns
-        const applyNumberFormat = (ws, col, startRow, endRow, format) => {
-            for (let row = startRow; row <= endRow; row++) {
-                const cell_address = XLSX.utils.encode_cell({r: row, c: col});
-                if (!ws[cell_address]) continue;
-                ws[cell_address].z = format;
-                if (typeof ws[cell_address].v === 'string') {
-                    ws[cell_address].v = parseInt(ws[cell_address].v) || 0;
-                }
-            }
-        };
-
-        // Apply number formatting to columns
-        const dataStartRow = 8;
-        const dataEndRow = ws_data.length - 1;
-
-        // Price column (2)
-        applyNumberFormat(ws, 2, dataStartRow, dataEndRow, '$0.00');
-        // Rating column (3)
-        applyNumberFormat(ws, 3, dataStartRow, dataEndRow, '0.0');
-        // Review count column (4)
-        applyNumberFormat(ws, 4, dataStartRow, dataEndRow, '#,##0');
-
-        // Apply number formatting to summary statistics
-        const ratingCell = XLSX.utils.encode_cell({r: 4, c: 4}); // Average Rating cell
-        const priceCell = XLSX.utils.encode_cell({r: 5, c: 4}); // Average Price cell
-        ws[ratingCell].z = '0.00';
-        ws[priceCell].z = '$0.00';
-
-        // Calculate averages directly in JavaScript for the summary section
-        const calculateAverage = (arr, key, transform = v => v) => {
-            const validValues = arr
-                .map(item => transform(item[key]))
-                .filter(val => !isNaN(val) && val > 0);
-            
-            if (validValues.length === 0) return 0;
-            
-            const sum = validValues.reduce((a, b) => a + b, 0);
-            return (sum / validValues.length).toFixed(2);
-        };
-
-        // Transform functions for different data types
-        const priceTransform = price => parseFloat(price.replace(/[^0-9.]/g, ''));
-        const ratingTransform = rating => parseFloat(rating);
-
-        // Calculate averages
-        const avgRating = calculateAverage(results, 'rating', ratingTransform);
-        const avgPrice = calculateAverage(results, 'price', priceTransform);
-
-        // Update summary statistics cells with calculated values
-        ws[ratingCell].v = parseFloat(avgRating);
-        ws[priceCell].v = parseFloat(avgPrice);
-
-        // Create Charts Sheet with proper array format
-        const chartData = [
-            ['Price Distribution', ''],
-            ['Price Range', 'Count'],
-            ['$0-$10', 0],  // We'll calculate these values in JavaScript
-            ['$10-$25', 0],
-            ['$25-$50', 0],
-            ['$50+', 0],
-            [],
-            ['Rating Distribution', ''],
-            ['Rating', 'Count'],
-            ['5 Stars', 0],
-            ['4-4.9 Stars', 0],
-            ['3-3.9 Stars', 0],
-            ['Below 3', 0],
-            [],
-            ['Category Analysis', '', '', ''],
-            ['Category', 'Average Price', 'Average Rating', 'Count']
-        ];
-
-        // Calculate price distribution
-        results.forEach(item => {
-            const price = parseFloat(item.price?.replace(/[^0-9.]/g, '') || '0');
-            if (price < 10) chartData[2][1]++;
-            else if (price < 25) chartData[3][1]++;
-            else if (price < 50) chartData[4][1]++;
-            else chartData[5][1]++;
-        });
-
-        // Calculate rating distribution
-        results.forEach(item => {
-            const rating = parseFloat(item.rating || '0');
-            if (rating >= 4.8) chartData[9][1]++;
-            else if (rating >= 4) chartData[10][1]++;
-            else if (rating >= 3) chartData[11][1]++;
-            else chartData[12][1]++;
-        });
-
-        // Calculate category analysis
-        const categories = {};
-        results.forEach(item => {
-            const category = item.category || 'Uncategorized';
-            if (!categories[category]) {
-                categories[category] = {
-                    count: 0,
-                    totalPrice: 0,
-                    totalRating: 0
-                };
-            }
-            
-            const price = parseFloat(item.price?.replace(/[^0-9.]/g, '') || '0');
-            const rating = parseFloat(item.rating || '0');
-            
-            categories[category].count++;
-            categories[category].totalPrice += price;
-            categories[category].totalRating += rating;
-        });
-
-        // Add category data to chartData
-        Object.entries(categories).forEach(([category, data]) => {
-            chartData.push([
-                category,
-                (data.totalPrice / data.count).toFixed(2),
-                (data.totalRating / data.count).toFixed(2),
-                data.count
-            ]);
-        });
-
-        const ws_charts = XLSX.utils.aoa_to_sheet(chartData);
-        
-        // Style the charts sheet
-        ws_charts['!cols'] = [
-            {wch: 30}, // A
-            {wch: 15}, // B
-            {wch: 15}, // C
-            {wch: 15}  // D
-        ];
-
-        // Apply styles to the Analytics sheet
-        const chartStyles = {
-            header: {
-                font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
-                fill: { fgColor: { rgb: "2F75B5" } },
-                alignment: { horizontal: "center" }
-            },
-            subheader: {
-                font: { bold: true, sz: 11 },
-                fill: { fgColor: { rgb: "DCE6F1" } }
-            },
-            data: {
-                font: { sz: 10 },
-                alignment: { horizontal: "right" }
-            }
-        };
-
-        // Apply styles to Analytics sheet
-        [0, 7, 14].forEach(row => {
-            const cell = XLSX.utils.encode_cell({r: row, c: 0});
-            ws_charts[cell].s = chartStyles.header;
-        });
-
-        // Add both sheets to workbook
+        // Add the worksheet to the workbook
         XLSX.utils.book_append_sheet(wb, ws, 'Data');
-        XLSX.utils.book_append_sheet(wb, ws_charts, 'Analytics');
 
-        // Generate and download file
+        // Generate the Excel file
         const wbout = XLSX.write(wb, { 
             bookType: 'xlsx', 
-            type: 'array',
-            bookSST: false,
-            compression: true
+            type: 'base64' 
         });
 
-        const blob = new Blob([wbout], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const fileName = getFileName(results); // Pass the results array instead
+        // Create a download link
+        const fileName = getFileName(results);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${wbout}`;
+        downloadLink.download = fileName;
+        
+        // Append to body, click, and remove
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
 
-        chrome.downloads.download({
-            url: url,
-            filename: fileName,
-            saveAs: true
-        }, (downloadId) => {
-            if (chrome.runtime.lastError) {
-                console.error('Download error:', chrome.runtime.lastError);
-                showNotification('Error downloading file. Please try again.', 'error');
-            } else {
-                showNotification('Download started successfully!', 'success');
-            }
-            URL.revokeObjectURL(url);
-        });
+        showNotification('Download started successfully!', 'success');
 
     } catch (error) {
         console.error('Download error:', error);
