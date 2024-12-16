@@ -42,61 +42,68 @@ function scrapeCurrentPage() {
     const listings = document.querySelectorAll('.s-result-item[data-asin]:not([data-asin=""])');
     let results = [];
     
+    if (listings.length === 0) {
+        console.log('No listings found on this page.');
+        finishScraping(itemCount); // Call finishScraping with the current item count
+        return; // Exit if no listings are found
+    }
+
     listings.forEach(listing => {
-        const nameElement = listing.querySelector('h2 a span');
+        if (!listing) return; // Check if listing is defined
+
+        // Extracting the ASIN
         const asin = listing.dataset.asin;
-        const priceElement = listing.querySelector('.a-price .a-offscreen');
+
+        // Extracting the product title
+        const titleElement = listing.querySelector('.a-size-medium.a-color-base.a-text-normal');
+        const title = titleElement ? titleElement.innerText.trim() : 'N/A';
+
+        // Extracting the price
+        // Extracting the full price
+        const price = listing.querySelector('.a-price-symbol + .a-price-whole, .a-offscreen')?.innerText || 'N/A';
+
+        // Extracting the overall star rating
+        const ratingElement = listing.querySelector('.a-icon-star-small .a-icon-alt');
+        const rating = ratingElement ? 
+            parseFloat(ratingElement.innerText.split(' ')[0]) : 'N/A';
+
+        // Extracting the total number of ratings
+        const reviewCountElement = listing.querySelector('.a-size-base.puis-normal-weight-text.s-underline-text');
+        const reviewCount = reviewCountElement ? 
+            parseInt(reviewCountElement.innerText.replace(/[()]/g, '').trim()) : 0;
+
+        // Extracting the product URL
+        const productLinkElement = listing.querySelector('.a-link-normal.s-no-outline');
+        const productUrl = productLinkElement ? 
+            `https://www.amazon.com${productLinkElement.getAttribute('href')}` : 'N/A';
+
+        const item = {
+            name: title,
+            asin: asin,
+            price: price,
+            rating: rating,
+            reviewCount: reviewCount,
+            url: productUrl
+        };
+
+        results.push(item);
         
-        // Updated rating extraction
-        const ratingText = listing.querySelector('.a-icon-alt')?.textContent || '';
-        const rating = ratingText.split(' ')[0] || '0';
-        
-        // Updated review count extraction - multiple attempts
-        let reviewCount = '0';
-        // First attempt: direct number in span
-        const reviewSpan = listing.querySelector('span[aria-label*="ratings"]');
-        if (reviewSpan) {
-            const ariaLabel = reviewSpan.getAttribute('aria-label');
-            if (ariaLabel) {
-                reviewCount = ariaLabel.split(' ')[0];
-            }
-        }
-        // Second attempt: link text
-        if (reviewCount === '0') {
-            const reviewLink = listing.querySelector('a[href*="customerReviews"] span');
-            if (reviewLink) {
-                reviewCount = reviewLink.textContent.trim();
-            }
-        }
-        
-        // Clean the review count (remove commas and ensure it's a number)
-        reviewCount = reviewCount.replace(/[^0-9]/g, '');
-        
-        if (nameElement && asin) {
-            results.push({
-                name: nameElement.innerText.trim(),
-                asin: asin,
-                price: priceElement ? priceElement.innerText.trim() : 'N/A',
-                rating: rating,
-                reviewCount: reviewCount || '0' // Ensure we always have a number
-            });
-        }
+        // Send live data update to popup
+        chrome.runtime.sendMessage({
+            type: 'UPDATE_PROGRESS',
+            itemCount: results.length,
+            results: results // Send the current results
+        });
     });
 
-    // Get current page numbers (e.g., from "1-16 of 88 results")
-    const currentPageCount = getCurrentPageItemCount();
-    
+    // Debugging log to see collected results
+    console.log('Collected results:', results);
+
     // Update total count from storage and add current page
     chrome.storage.local.get(['currentItemCount'], function(data) {
         const previousCount = data.currentItemCount || 0;
-        const newCount = previousCount + currentPageCount;
+        const newCount = previousCount + results.length; // Update with the number of results collected
         
-        // Send progress update
-        chrome.runtime.sendMessage({
-            type: 'UPDATE_PROGRESS',
-            itemCount: newCount
-        });
-
         // Store results and updated count
         chrome.storage.local.get(['results'], function(data) {
             let allResults = data.results || [];
@@ -114,11 +121,7 @@ function scrapeCurrentPage() {
                         window.location.href = nextUrl;
                     }, 2000);
                 } else {
-                    // Get final total for completion
-                    const resultsText = document.querySelector('.s-desktop-toolbar .a-spacing-small span');
-                    const totalMatch = resultsText.textContent.match(/of\s+(\d+)\s+results/);
-                    const finalTotal = totalMatch ? parseInt(totalMatch[1]) : newCount;
-                    finishScraping(finalTotal);
+                    finishScraping(newCount); // Call finishScraping with the updated count
                 }
             });
         });
@@ -172,7 +175,7 @@ const getRating = () => {
     if (ratingElement) {
         const ariaLabel = ratingElement.getAttribute('aria-label');
         if (ariaLabel) {
-            return ariaLabel.split(' ')[0];
+            return ariaLabel.split(' ')[0]; // Extract the rating
         }
     }
     
@@ -180,27 +183,39 @@ const getRating = () => {
     const starIcon = document.querySelector('.a-icon-star-small .a-icon-alt');
     if (starIcon) {
         const altText = starIcon.textContent;
-        return altText.split(' ')[0];
+        return altText.split(' ')[0]; // Extract the rating
     }
     
-    return '0';
+    // Additional fallback: check for other potential rating elements
+    const alternativeRating = document.querySelector('.a-icon-alt');
+    if (alternativeRating) {
+        return alternativeRating.textContent.split(' ')[0]; // Extract the rating
+    }
+    
+    return '0'; // Default return if no rating found
 };
 
-const getReviewCount = () => {
+const getReviewCount = (listing) => {
     // Try to get review count from aria-label
-    const reviewElement = document.querySelector('span[aria-label*="ratings"]');
+    const reviewElement = listing.querySelector('span[aria-label*="ratings"]');
     if (reviewElement) {
         const ariaLabel = reviewElement.getAttribute('aria-label');
-        return ariaLabel.split(' ')[0].replace(/,/g, '');
+        return ariaLabel.split(' ')[0].replace(/,/g, ''); // Extract and clean the review count
     }
     
     // Fallback to the text content
-    const reviewLink = document.querySelector('a[href*="customerReviews"] span');
+    const reviewLink = listing.querySelector('a[href*="customerReviews"] span');
     if (reviewLink) {
-        return reviewLink.textContent.trim().replace(/,/g, '');
+        return reviewLink.textContent.trim().replace(/,/g, ''); // Extract and clean the review count
     }
     
-    return '0';
+    // Additional fallback: check for other potential review count elements
+    const alternativeReviewCount = listing.querySelector('.a-size-small .a-link-normal');
+    if (alternativeReviewCount) {
+        return alternativeReviewCount.textContent.trim().replace(/,/g, ''); // Extract and clean the review count
+    }
+    
+    return '0'; // Default return if no review count found
 };
 
 const productInfo = {
