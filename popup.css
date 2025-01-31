@@ -1,167 +1,75 @@
-/* Global Design System */
-:root {
-    --bg-primary: #2A343E;
-    --bg-secondary: #1E282F;
-    --text-primary: #FFFEEB;
-    --accent-color: #F4A259;
-    --accent-hover: #F6B37E;
-}
-
-/* Reset and Base Styles */
-* {
-    box-sizing: border-box;
+body {
+    background-color: #2a343e;
+    color: #fcfefd;
+    font-family: Arial, sans-serif;
+    text-align: center;
     margin: 0;
     padding: 0;
-    transition: all 0.3s ease;
 }
 
-body {
-    width: 350px; /* Slightly wider for better readability */
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    background-color: var(--bg-primary);
-    color: var(--text-primary);
-    line-height: 1.6;
-}
-
-/* Card Container */
 .card {
-    background-color: var(--bg-secondary);
-    border-radius: 16px;
-    padding: 24px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-    margin: 12px;
+    width: 300px;
+    padding: 20px;
+    border-radius: 10px;
+    background-color: #2a343e;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 
-/* Heading Styles */
+.logo {
+    width: 64px;
+    margin-bottom: 10px;
+}
+
 h1 {
     font-size: 22px;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: var(--text-primary);
-}
-
-h1 i {
-    color: var(--accent-color);
-}
-
-/* Metric Styles */
-.metric {
-    background-color: var(--bg-primary);
-    border-radius: 12px;
-    padding: 20px;
-    text-align: center;
     margin-bottom: 20px;
-    border: 1px solid rgba(255,255,255,0.1);
+}
+
+.metric {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 15px;
 }
 
 .metric-value {
-    font-size: 40px;
-    font-weight: 700;
-    color: var(--accent-color);
-    margin-bottom: 8px;
+    font-size: 24px;
+    font-weight: bold;
 }
 
 .metric-label {
     font-size: 14px;
-    color: var(--text-primary);
-    opacity: 0.7;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
+    opacity: 0.8;
 }
 
-/* Status Indicator */
 .status {
-    background-color: rgba(244, 162, 89, 0.1);
-    color: var(--accent-color);
-    text-align: center;
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
+    font-size: 14px;
+    margin-bottom: 20px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 5px;
 }
 
-/* Button Styles */
-.btn {
+.primary-button, .download-button {
     width: 100%;
-    padding: 14px;
+    padding: 10px;
     border: none;
-    border-radius: 10px;
-    font-size: 15px;
-    font-weight: 600;
+    border-radius: 5px;
+    font-size: 16px;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    color: var(--bg-primary);
-    background-color: var(--accent-color);
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
-.btn:hover {
-    background-color: var(--accent-hover);
-    transform: translateY(-2px);
+.primary-button {
+    background: #fcfefd;
+    color: #2a343e;
 }
 
-.btn:active {
-    transform: translateY(1px);
+.download-button {
+    background: #fcfefd;
+    color: #2a343e;
 }
 
-.btn-download {
-    background-color: transparent;
-    border: 2px solid var(--accent-color);
-    color: var(--accent-color);
-}
-
-.btn-download:hover {
-    background-color: rgba(244, 162, 89, 0.1);
-}
-
-.btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-}
-
-.btn-download:disabled {
-    background-color: rgba(244, 162, 89, 0.1);
-    color: var(--accent-color);
-}
-
-.fa-spinner {
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-}
-
-/* Utility Classes */
 .hidden {
-    display: none !important;
-}
-
-/* Icons */
-i {
-    color: var(--text-primary);
-}
-
-/* Add this to your existing CSS */
-#dataTable {
-    width: 100%;
-    border-collapse: collapse;
-}
-
-#dataTable th, #dataTable td {
-    border: 1px solid #ccc;
-    padding: 5px;
-    text-align: left;
+    display: none;
 }
