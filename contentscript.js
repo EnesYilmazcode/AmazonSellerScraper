@@ -160,7 +160,6 @@ function finishScraping(finalCount) {
     });
 }
 
-// Reset counter when starting new scrape
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     if (request.type === 'START_SCRAPING') {
         isScrapingActive = true;
@@ -173,8 +172,11 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
         });
     } else if (request.type === 'STOP_SCRAPING') {
         isScrapingActive = false;
-        chrome.storage.local.set({ results: [], currentItemCount: 0 }); // Reset results
-        finishScraping(0); // Call finishScraping with 0
+        // Remove the line that resets results and currentItemCount here
+        chrome.storage.local.get(['currentItemCount'], function(data) {
+            const currentCount = data.currentItemCount || 0;
+            finishScraping(currentCount);
+        });
     }
 });
 
