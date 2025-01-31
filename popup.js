@@ -1,7 +1,9 @@
 let isScrapingActive = false;
+let scrapedItemCount = 0;
 
 function updateItemCount(items) {
-    document.getElementById('itemCount').textContent = items;
+    const itemCountElement = document.getElementById('itemCount');
+    if (itemCountElement) itemCountElement.textContent = items;
 }
 
 function updateStatus(message) {
@@ -21,35 +23,36 @@ function setScrapingState(isActive) {
 // Initialize UI
 chrome.storage.local.get(['isScrapingActive', 'currentItemCount'], function(data) {
     isScrapingActive = data.isScrapingActive || false;
-    updateItemCount(data.currentItemCount || 0);
+    scrapedItemCount = data.currentItemCount || 0;
+    updateItemCount(scrapedItemCount);
     setScrapingState(isScrapingActive);
 });
 
 document.getElementById('actionButton').addEventListener('click', function() {
     if (!isScrapingActive) {
-        // Start scraping
+        // Start new scrape - reset storage
         isScrapingActive = true;
-        this.textContent = 'Stop Scraping';
-        this.classList.add('stop');
-        chrome.storage.local.set({ results: [] }); // Reset results
-        chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            chrome.tabs.sendMessage(tabs[0].id, {type: 'START_SCRAPING'});
+        chrome.storage.local.set({ 
+            results: [], 
+            currentItemCount: 0,
+            isScrapingActive: true 
+        }, () => {
+            chrome.tabs.query({active: true, currentWindow: true}, tabs => {
+                chrome.tabs.sendMessage(tabs[0].id, {type: 'START_SCRAPING'});
+            });
+            updateItemCount(0);
+            updateStatus('Scraping in progress...');
+            setScrapingState(true);
         });
-        updateItemCount(0);
-        updateStatus('Scraping in progress...');
-        setScrapingState(true);
     } else {
-        // Stop scraping
+        // Stop scraping - preserve data
         isScrapingActive = false;
-        this.textContent = 'Start Scraping';
-        this.classList.remove('stop');
-        document.getElementById('downloadButton').classList.remove('hidden');
-        showNotification('Scraping stopped. You can download the results now.', 'info');
-        chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            chrome.tabs.sendMessage(tabs[0].id, {type: 'STOP_SCRAPING'});
+        chrome.storage.local.set({ isScrapingActive: false }, () => {
+            document.getElementById('downloadButton').classList.remove('hidden');
+            showNotification('Scraping stopped. You can download the results now.', 'info');
+            updateStatus('Scraping stopped');
+            setScrapingState(false);
         });
-        updateStatus('Scraping stopped');
-        setScrapingState(false);
     }
 });
 
@@ -96,8 +99,7 @@ document.getElementById('downloadButton').addEventListener('click', async functi
         const results = data.results || [];
         
         if (results.length === 0) {
-            showNotification('No results to download!', 'error');
-            resetDownloadButton();
+            showNotification('No results to download!', 'warning');
             return;
         }
 
@@ -406,24 +408,34 @@ document.getElementById('downloadButton').addEventListener('click', async functi
             saveAs: true
         }, (downloadId) => {
             if (chrome.runtime.lastError) {
-                console.error('Download error:', chrome.runtime.lastError);
                 showNotification('Error downloading file. Please try again.', 'error');
             } else {
                 showNotification('Download started successfully!', 'success');
+                // Reset UI count but preserve data until new scrape
+                chrome.storage.local.set({ currentItemCount: 0 }, () => {
+                    updateItemCount(0);
+                });
             }
             URL.revokeObjectURL(url);
         });
 
     } catch (error) {
-        console.error('Download error:', error);
-        showNotification('Error preparing file. Please try again.', 'error');
+        console.error('Error during download:', error);
+        showNotification('Error preparing download!', 'error');
     } finally {
         resetDownloadButton();
     }
 });
 
+
 function updateLiveData(results) {
     const dataBody = document.getElementById('dataBody');
+    
+    // if (!dataBody) {
+    //     console.error('Element with ID "dataBody" not found.');
+    //     return; // Exit if the element is not found
+    // }
+
     dataBody.innerHTML = ''; // Clear existing data
 
     results.forEach(item => {
@@ -439,15 +451,33 @@ function updateLiveData(results) {
     });
 }
 
-// Update the onMessage listener to include live data updates
+// Update the message listener
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.type === 'UPDATE_PROGRESS') {
-        updateItemCount(request.itemCount);
+        // Update the total number of items scraped
+        scrapedItemCount += request.itemCount; // This should now reflect the total items in the batch
+        updateItemCount(scrapedItemCount);
         updateStatus('Scraping in progress...');
-        updateLiveData(request.results); // Update live data
+        updateLiveData(request.results || []); // Ensure results is an array
     } else if (request.type === 'SCRAPING_COMPLETE') {
-        updateItemCount(request.itemCount);
-        updateStatus('Scraping complete!');
-        setScrapingState(false);
+        // Get the final count from storage to ensure accuracy
+        chrome.storage.local.get(['currentItemCount'], function(data) {
+            updateItemCount(data.currentItemCount || 0);
+            updateStatus('Scraping complete!');
+            setScrapingState(false);
+        });
+    } else if (request.type === 'PAGE_COMPLETE') {
+        // Update the count after each page completes
+        scrapedItemCount += request.itemsScraped;
+        updateItemCount(scrapedItemCount);
     }
+});
+
+document.addEventListener('DOMContentLoaded', function() {
+    chrome.storage.local.get(['results'], function(data) {
+        const itemCount = (data.results && Array.isArray(data.results)) ? data.results.length : 0; // Get the count of scraped items
+        console.log(itemCount); // This will log the total number of items scraped
+    });
+
+    // Other initialization code...
 });
