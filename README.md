@@ -2,6 +2,8 @@
 
 Amazon Seller Scraper is a Chrome extension designed to scrape Amazon seller data, including all items across multiple pages, and export the results to an Excel file.
 
+Published on the Chrome Web Store. Check it out [here](https://chromewebstore.google.com/detail/proscan-amazon-product-sc/bikgignfnljpbmchlemkbbpboigodgap)
+
 ## Features
 
 - Scrapes item details such as name, ASIN, price, rating, and review count.
