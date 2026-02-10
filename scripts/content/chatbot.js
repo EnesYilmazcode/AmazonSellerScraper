@@ -12,10 +12,9 @@
     let sendBtn;
     let badgeEl;
 
-    // SVG icons (inline to avoid external dependencies)
-    const ICON_CHAT = '<svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>';
+    // Icons
+    const LOGO_URL = chrome.runtime.getURL('assets/icons/icon128.png');
     const ICON_SEND = '<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
-    const ICON_BOT = '<svg viewBox="0 0 24 24"><path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1v1a3 3 0 01-3 3H6a3 3 0 01-3-3v-1H2a1 1 0 110-2h1a7 7 0 017-7h1V5.73A2 2 0 0112 2zM9 14a1 1 0 100 2 1 1 0 000-2zm6 0a1 1 0 100 2 1 1 0 000-2z"/></svg>';
 
     // Create the widget
     function init() {
@@ -34,10 +33,10 @@
         // Build HTML
         const wrapper = document.createElement('div');
         wrapper.innerHTML = `
-            <button class="proscan-toggle" title="ProScan AI">${ICON_CHAT}</button>
+            <button class="proscan-toggle" title="ProScan AI"><img src="${LOGO_URL}" alt="ProScan" /></button>
             <div class="proscan-panel">
                 <div class="proscan-header">
-                    <span class="proscan-header-title">${ICON_BOT} ProScan AI</span>
+                    <span class="proscan-header-title"><img src="${LOGO_URL}" alt="" /> ProScan AI</span>
                     <span class="proscan-badge" id="ps-badge">0 products</span>
                     <button class="proscan-close">&times;</button>
                 </div>

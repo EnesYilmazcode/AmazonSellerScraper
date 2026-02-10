@@ -42,7 +42,7 @@
     },
     "web_accessible_resources": [
         {
-            "resources": ["styles/chatbot.css", "libs/*.js"],
+            "resources": ["styles/chatbot.css", "libs/*.js", "assets/icons/*.png"],
             "matches": ["*://*.amazon.com/*"]
         }
     ]
