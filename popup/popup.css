@@ -1,0 +1,295 @@
+body {
+    background-color: #1a1f25;
+    color: #fcfefd;
+    font-family: 'Segoe UI', Arial, sans-serif;
+    text-align: center;
+    margin: 0;
+    padding: 0;
+    min-width: 320px;
+}
+
+.card {
+    width: 320px;
+    padding: 20px;
+    background-color: #1a1f25;
+}
+
+.logo {
+    width: 56px;
+    margin-bottom: 8px;
+}
+
+h1 {
+    font-size: 20px;
+    margin: 0 0 16px 0;
+    font-weight: 600;
+}
+
+/* Dashboard Styles */
+.dashboard {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-around;
+    gap: 8px;
+}
+
+.stat {
+    flex: 1;
+    text-align: center;
+}
+
+.stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #4CAF50;
+}
+
+.stat-label {
+    font-size: 11px;
+    opacity: 0.7;
+    margin-top: 4px;
+}
+
+.stat-label i {
+    margin-right: 3px;
+}
+
+/* Insights Preview */
+.insights-preview {
+    margin-bottom: 12px;
+}
+
+.insight-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.insight-badge i {
+    color: #FFD700;
+}
+
+.insight-badge.opportunity {
+    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+}
+
+/* Status */
+.status {
+    font-size: 13px;
+    margin-bottom: 16px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.status.success {
+    background: rgba(76, 175, 80, 0.2);
+    color: #81C784;
+}
+
+.status.error {
+    background: rgba(244, 67, 54, 0.2);
+    color: #E57373;
+}
+
+.status.warning {
+    background: rgba(255, 193, 7, 0.2);
+    color: #FFD54F;
+}
+
+/* Buttons */
+.primary-button, .download-button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.primary-button {
+    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+    color: white;
+}
+
+.primary-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+.primary-button.stop {
+    background: linear-gradient(135deg, #f44336 0%, #c62828 100%);
+}
+
+.primary-button.stop:hover {
+    box-shadow: 0 4px 12px rgba(244, 67, 54, 0.3);
+}
+
+/* Export Buttons */
+.export-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.download-button {
+    flex: 1;
+    background: #2196F3;
+    color: white;
+    padding: 10px 8px;
+    font-size: 12px;
+}
+
+.download-button:hover {
+    background: #1976D2;
+    transform: translateY(-1px);
+}
+
+.download-button.secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fcfefd;
+}
+
+.download-button.secondary:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.download-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Spinner */
+.spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Settings Section */
+.settings-section {
+    margin-top: 14px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 10px;
+}
+
+.settings-header {
+    font-size: 12px;
+    opacity: 0.6;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.settings-header:hover {
+    opacity: 0.9;
+}
+
+.settings-arrow {
+    font-size: 10px;
+    margin-left: auto;
+    transition: transform 0.2s;
+}
+
+.settings-arrow.open {
+    transform: rotate(180deg);
+}
+
+.settings-body {
+    padding-top: 10px;
+    text-align: left;
+}
+
+.settings-label {
+    font-size: 11px;
+    opacity: 0.7;
+    display: block;
+    margin-bottom: 6px;
+}
+
+.api-key-row {
+    display: flex;
+    gap: 6px;
+}
+
+.api-key-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: #fcfefd;
+    font-size: 12px;
+    outline: none;
+    font-family: monospace;
+}
+
+.api-key-input:focus {
+    border-color: #7C4DFF;
+}
+
+.save-key-btn {
+    background: #4CAF50;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.save-key-btn:hover {
+    background: #388E3C;
+}
+
+.settings-hint {
+    font-size: 10px;
+    opacity: 0.5;
+    margin-top: 8px;
+}
+
+.settings-hint a {
+    color: #7C4DFF;
+    text-decoration: none;
+}
+
+.settings-hint a:hover {
+    text-decoration: underline;
+}
+
+/* Utility */
+.hidden {
+    display: none !important;
+}

@@ -1,37 +1,49 @@
 {
     "manifest_version": 3,
     "name": "ProScan - Amazon Product Scraper",
-    "version": "1.2",
+    "version": "2.0",
+    "description": "Scrape Amazon seller products with analytics and AI-powered product insights",
     "permissions": [
         "storage",
         "downloads"
     ],
     "host_permissions": [
-        "*://*.amazon.com/*"
+        "*://*.amazon.com/*",
+        "https://generativelanguage.googleapis.com/*"
     ],
     "action": {
-        "default_popup": "popup.html",
+        "default_popup": "popup/popup.html",
         "default_icon": {
-            "16": "icon16.png",
-            "48": "icon48.png",
-            "128": "icon128.png"
+            "16": "assets/icons/icon16.png",
+            "48": "assets/icons/icon48.png",
+            "128": "assets/icons/icon128.png"
         }
     },
     "icons": {
-        "16": "icon16.png",
-        "48": "icon48.png",
-        "128": "icon128.png"
+        "16": "assets/icons/icon16.png",
+        "48": "assets/icons/icon48.png",
+        "128": "assets/icons/icon128.png"
     },
     "content_scripts": [
         {
             "matches": ["*://*.amazon.com/*"],
-            "js": ["contentscript.js"]
+            "js": [
+                "scripts/content/scraper.js",
+                "scripts/content/chatbot.js"
+            ],
+            "run_at": "document_idle"
         }
     ],
     "content_security_policy": {
         "extension_pages": "script-src 'self'; object-src 'self'"
     },
     "background": {
-        "service_worker": "background.js"
-    }
+        "service_worker": "scripts/background/service-worker.js"
+    },
+    "web_accessible_resources": [
+        {
+            "resources": ["styles/chatbot.css", "libs/*.js"],
+            "matches": ["*://*.amazon.com/*"]
+        }
+    ]
 }
