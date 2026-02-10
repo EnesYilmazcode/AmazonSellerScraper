@@ -277,52 +277,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-// ===== Settings Section =====
-
-const settingsToggle = document.getElementById('settingsToggle');
-const settingsBody = document.getElementById('settingsBody');
-const settingsArrow = document.getElementById('settingsArrow');
-const apiKeyInput = document.getElementById('apiKeyInput');
-const saveApiKeyBtn = document.getElementById('saveApiKey');
-
-// Toggle settings panel
-settingsToggle.addEventListener('click', () => {
-    settingsBody.classList.toggle('hidden');
-    settingsArrow.classList.toggle('open');
-});
-
-// Load saved API key
-async function loadApiKey() {
-    const data = await chrome.storage.local.get(['geminiApiKey']);
-    if (data.geminiApiKey) {
-        // Show masked key
-        apiKeyInput.value = data.geminiApiKey.slice(0, 8) + '...' + data.geminiApiKey.slice(-4);
-        apiKeyInput.dataset.saved = 'true';
-    }
-}
-
-// Save API key
-saveApiKeyBtn.addEventListener('click', async () => {
-    const key = apiKeyInput.value.trim();
-    if (!key || apiKeyInput.dataset.saved === 'true') {
-        // If showing masked key, clear to let user enter new one
-        if (apiKeyInput.dataset.saved === 'true') {
-            apiKeyInput.value = '';
-            apiKeyInput.dataset.saved = '';
-            apiKeyInput.focus();
-            return;
-        }
-        return;
-    }
-
-    await chrome.storage.local.set({ geminiApiKey: key });
-    apiKeyInput.value = key.slice(0, 8) + '...' + key.slice(-4);
-    apiKeyInput.dataset.saved = 'true';
-    updateStatus('API key saved! AI chatbot is now active on Amazon pages.', 'success');
-});
-
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     initializeUI();
-    loadApiKey();
 });

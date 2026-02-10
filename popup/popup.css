@@ -1,6 +1,6 @@
 body {
-    background-color: #1a1f25;
-    color: #fcfefd;
+    background-color: #2A343E;
+    color: #FDFDFD;
     font-family: 'Segoe UI', Arial, sans-serif;
     text-align: center;
     margin: 0;
@@ -11,7 +11,7 @@ body {
 .card {
     width: 320px;
     padding: 20px;
-    background-color: #1a1f25;
+    background-color: #2A343E;
 }
 
 .logo {
@@ -194,99 +194,6 @@ h1 {
 
 @keyframes spin {
     to { transform: rotate(360deg); }
-}
-
-/* Settings Section */
-.settings-section {
-    margin-top: 14px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    padding-top: 10px;
-}
-
-.settings-header {
-    font-size: 12px;
-    opacity: 0.6;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 0;
-}
-
-.settings-header:hover {
-    opacity: 0.9;
-}
-
-.settings-arrow {
-    font-size: 10px;
-    margin-left: auto;
-    transition: transform 0.2s;
-}
-
-.settings-arrow.open {
-    transform: rotate(180deg);
-}
-
-.settings-body {
-    padding-top: 10px;
-    text-align: left;
-}
-
-.settings-label {
-    font-size: 11px;
-    opacity: 0.7;
-    display: block;
-    margin-bottom: 6px;
-}
-
-.api-key-row {
-    display: flex;
-    gap: 6px;
-}
-
-.api-key-input {
-    flex: 1;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 6px;
-    padding: 8px 10px;
-    color: #fcfefd;
-    font-size: 12px;
-    outline: none;
-    font-family: monospace;
-}
-
-.api-key-input:focus {
-    border-color: #7C4DFF;
-}
-
-.save-key-btn {
-    background: #4CAF50;
-    border: none;
-    border-radius: 6px;
-    color: white;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 12px;
-}
-
-.save-key-btn:hover {
-    background: #388E3C;
-}
-
-.settings-hint {
-    font-size: 10px;
-    opacity: 0.5;
-    margin-top: 8px;
-}
-
-.settings-hint a {
-    color: #7C4DFF;
-    text-decoration: none;
-}
-
-.settings-hint a:hover {
-    text-decoration: underline;
 }
 
 /* Utility */
