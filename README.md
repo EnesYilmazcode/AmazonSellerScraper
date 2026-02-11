@@ -1,45 +1,84 @@
-# Amazon Seller Scraper
+<p align="center">
+  <img src="logo.png" alt="ProScan Logo" width="128">
+</p>
 
-Amazon Seller Scraper is a Chrome extension designed to scrape Amazon seller data, including all items across multiple pages, and export the results to an Excel file.
+<h1 align="center">ProScan - Amazon Product Scraper</h1>
 
-Published on the Chrome Web Store. Check it out [here](https://proscanbot.web.app)
+<p align="center">
+  A Chrome extension that scrapes Amazon product listings, analyzes the data, and includes an AI chatbot for product Q&A. Built for resellers and arbitrage.
+</p>
+
+<p align="center">
+  <a href="https://chromewebstore.google.com/detail/proscan-amazon-product-sc/bikgignfnljpbmchlemkbbpboigodgap">Chrome Web Store</a>
+</p>
 
 ## Features
 
-- Scrapes item details such as name, ASIN, price, rating, and review count.
-- Supports scraping across multiple pages.
-- Exports scraped data to an Excel file.
+- Scrapes product data (name, ASIN, price, rating, reviews, Prime status) across multiple pages automatically
+- AI chatbot powered by Gemini API that answers questions about your scraped products right on the Amazon page
+- Analytics dashboard with opportunity scoring to help find good deals
+- Identifies underpriced and underexposed products
+- Export to Excel, CSV, or JSON
+- Everything runs client-side, no server needed
+
+## Tech Stack
+
+- JavaScript (vanilla, no frameworks)
+- Chrome Extension Manifest V3
+- Google Gemini API (2.0 Flash)
+- ChromaDB + sentence-transformers for RAG
+- Shadow DOM for chatbot isolation
+- XLSX.js for Excel generation
 
 ## Installation
 
-1. Clone the repository or download the ZIP file.
-2. Extract the contents of the ZIP file if downloaded.
-3. Open Chrome and navigate to `chrome://extensions/`.
-4. Enable "Developer mode" in the top right corner.
-5. Click on "Load unpacked" and select the directory where you extracted the extension files.
+1. Clone the repo or download the ZIP
+2. Open Chrome and go to `chrome://extensions/`
+3. Turn on "Developer mode" in the top right
+4. Click "Load unpacked" and select the project folder
+
+## Setting Up the AI Chatbot
+
+1. Get a free Gemini API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+2. Click the ProScan extension icon to open the popup
+3. Go to Settings and paste your API key
+4. The chatbot button will show up in the bottom-right corner on Amazon pages
 
 ## Usage
 
-1. Navigate to any Amazon seller's page.
-2. Click on the Amazon Seller Scraper extension icon.
-3. In the popup, click on the "Scrape Items" button to start scraping.
-4. The extension will automatically scrape all items across multiple pages.
-5. Once scraping is complete, click on the "Download Excel" button to download the scraped data.
+1. Go to any Amazon seller or search results page
+2. Click the ProScan extension icon
+3. Hit "Start Scraping" and let it run through the pages
+4. Check the analytics dashboard for insights and opportunity scores
+5. Use the AI chatbot on the page to ask questions about the products (e.g. "What's the best deal under $30?")
+6. Export your data as Excel, CSV, or JSON
 
-## Files
+## Project Structure
 
-- `manifest.json`: Defines the extension's metadata and permissions.
-- `popup.html`: The HTML file for the extension's popup interface.
-- `popup.css`: The CSS file for styling the popup interface.
-- `popup.js`: The JavaScript file for handling popup interactions.
-- `contentscript.js`: The content script for scraping data from Amazon pages.
-- `xlsx.full.min.js`: Library for generating Excel files.
-
-## Icon Files
-
-- `icon16.png`: 16x16 icon for the extension.
-- `icon48.png`: 48x48 icon for the extension.
-- `icon128.png`: 128x128 icon for the extension.
+```
+AmazonSellerScraper/
+├── manifest.json
+├── popup/
+│   ├── popup.html
+│   ├── popup.css
+│   └── popup.js
+├── scripts/
+│   ├── content/
+│   │   ├── scraper.js          # DOM scraping on Amazon pages
+│   │   └── chatbot.js          # Floating AI chatbot widget
+│   ├── background/
+│   │   └── service-worker.js   # Message routing + Gemini API calls
+│   └── modules/
+│       ├── storage.js          # Chrome storage wrapper
+│       ├── analyzer.js         # Analytics and opportunity scoring
+│       └── exporter.js         # Excel/CSV/JSON export
+├── styles/
+│   └── chatbot.css
+├── libs/
+│   └── xlsx.full.min.js
+└── assets/
+    └── icons/
+```
 
 ## Developer
 
