@@ -1,11 +1,39 @@
-// popup.js - UI Logic for ProScan Extension
-// Uses Storage, Analyzer, and Exporter modules
+/**
+ * @fileoverview Popup UI Controller
+ *
+ * Manages the extension popup interface including the analytics dashboard,
+ * scraping controls, export buttons, and real-time progress updates.
+ * Depends on Storage, Analyzer, and Exporter modules loaded via popup.html.
+ *
+ * State Management:
+ * - isScrapingActive: tracks whether a scrape is in progress
+ * - scrapedItemCount: running total across paginated pages
+ * - currentResults: full array of scraped product objects
+ *
+ * Communication:
+ * - Sends START_SCRAPING / STOP_SCRAPING to content script via chrome.tabs
+ * - Receives UPDATE_PROGRESS, SCRAPING_COMPLETE, PAGE_COMPLETE from content script
+ *
+ * @module PopupUI
+ * @requires Storage
+ * @requires Analyzer
+ * @requires Exporter
+ */
 
+/** @type {boolean} Whether scraping is currently in progress */
 let isScrapingActive = false;
+
+/** @type {number} Running count of scraped items across all pages */
 let scrapedItemCount = 0;
+
+/** @type {Object[]} Full array of scraped product objects */
 let currentResults = [];
 
-// DOM Elements
+/**
+ * Cached references to DOM elements used throughout the popup lifecycle.
+ * Resolved once at module load time for performance.
+ * @const {Object<string, HTMLElement>}
+ */
 const elements = {
     itemCount: document.getElementById('itemCount'),
     avgRating: document.getElementById('avgRating'),
@@ -21,13 +49,18 @@ const elements = {
     insightText: document.getElementById('insightText')
 };
 
-// Update UI with current stats
+/**
+ * Update the dashboard stats display with current results.
+ * Calculates average price and rating using the Analyzer module
+ * and triggers the insights preview update.
+ *
+ * @param {Object[]} results - Array of product objects
+ */
 function updateStats(results) {
     currentResults = results;
     elements.itemCount.textContent = results.length;
 
     if (results.length > 0) {
-        // Calculate averages using Analyzer
         const prices = results.map(r => Analyzer.parsePrice(r.price)).filter(p => p > 0);
         const ratings = results.map(r => Analyzer.parseRating(r.rating)).filter(r => r > 0);
 
@@ -41,12 +74,17 @@ function updateStats(results) {
             elements.avgRating.textContent = avgRating;
         }
 
-        // Show top insight
         updateInsightsPreview(results);
     }
 }
 
-// Update insights preview
+/**
+ * Show the top insight badge in the popup.
+ * Requires at least 5 products for meaningful analysis.
+ * Prioritizes high-priority insights (opportunities) over informational ones.
+ *
+ * @param {Object[]} results - Array of product objects
+ */
 function updateInsightsPreview(results) {
     if (results.length < 5) return;
 
@@ -60,12 +98,23 @@ function updateInsightsPreview(results) {
     }
 }
 
-// Update status message
+/**
+ * Update the status bar message with an icon and styling.
+ *
+ * @param {string} message - Status message text
+ * @param {'info'|'success'|'error'|'warning'} [type='info'] - Status type for styling
+ */
 function updateStatus(message, type = 'info') {
     elements.status.innerHTML = `<i class="fas fa-${getStatusIcon(type)}"></i> ${message}`;
     elements.status.className = 'status ' + type;
 }
 
+/**
+ * Map status type to Font Awesome icon name.
+ *
+ * @param {string} type - Status type
+ * @returns {string} Font Awesome icon identifier
+ */
 function getStatusIcon(type) {
     const icons = {
         info: 'info-circle',
@@ -76,7 +125,12 @@ function getStatusIcon(type) {
     return icons[type] || 'info-circle';
 }
 
-// Set scraping state
+/**
+ * Toggle the UI between scraping and idle states.
+ * Updates the action button text/style and shows/hides export buttons.
+ *
+ * @param {boolean} isActive - Whether scraping is in progress
+ */
 function setScrapingState(isActive) {
     isScrapingActive = isActive;
 
@@ -93,7 +147,12 @@ function setScrapingState(isActive) {
     }
 }
 
-// Show loading state on download button
+/**
+ * Toggle loading spinner on a download button during export generation.
+ *
+ * @param {HTMLButtonElement} button - The download button element
+ * @param {boolean} loading - True to show spinner, false to restore original content
+ */
 function setDownloadLoading(button, loading) {
     if (loading) {
         button.innerHTML = '<span class="spinner"></span> Preparing...';
@@ -114,7 +173,13 @@ function setDownloadLoading(button, loading) {
     }
 }
 
-// Initialize UI from storage
+/**
+ * Initialize the popup UI from persisted storage state.
+ * Called on DOMContentLoaded to restore scraping state, results,
+ * and dashboard stats from the previous session.
+ *
+ * @async
+ */
 async function initializeUI() {
     const state = await Storage.getScrapingState();
 
@@ -130,7 +195,12 @@ async function initializeUI() {
     }
 }
 
-// Start scraping
+/**
+ * Start a new scraping session.
+ * Resets storage and UI state, then sends START_SCRAPING to the active tab.
+ *
+ * @async
+ */
 async function startScraping() {
     isScrapingActive = true;
 
@@ -151,7 +221,12 @@ async function startScraping() {
     setScrapingState(true);
 }
 
-// Stop scraping
+/**
+ * Stop the current scraping session gracefully.
+ * Updates storage and transitions the UI to the idle/download state.
+ *
+ * @async
+ */
 async function stopScraping() {
     isScrapingActive = false;
 
@@ -161,7 +236,9 @@ async function stopScraping() {
     setScrapingState(false);
 }
 
-// Handle action button click
+// --- Event Listeners ---
+
+// Action button: toggle scraping on/off
 elements.actionButton.addEventListener('click', async () => {
     if (!isScrapingActive) {
         await startScraping();
@@ -170,7 +247,7 @@ elements.actionButton.addEventListener('click', async () => {
     }
 });
 
-// Handle Excel download
+// Excel export with full analytics report
 elements.downloadExcel.addEventListener('click', async () => {
     if (currentResults.length === 0) {
         updateStatus('No results to download!', 'warning');
@@ -199,7 +276,7 @@ elements.downloadExcel.addEventListener('click', async () => {
     }
 });
 
-// Handle CSV download
+// CSV export
 elements.downloadCSV.addEventListener('click', async () => {
     if (currentResults.length === 0) {
         updateStatus('No results to download!', 'warning');
@@ -226,7 +303,7 @@ elements.downloadCSV.addEventListener('click', async () => {
     }
 });
 
-// Handle JSON download
+// JSON export with analytics
 elements.downloadJSON.addEventListener('click', async () => {
     if (currentResults.length === 0) {
         updateStatus('No results to download!', 'warning');
@@ -253,7 +330,14 @@ elements.downloadJSON.addEventListener('click', async () => {
     }
 });
 
-// Listen for messages from content script
+/**
+ * Listen for real-time messages from the content script.
+ *
+ * Message types:
+ * - UPDATE_PROGRESS: Incremental results from each page
+ * - SCRAPING_COMPLETE: Final notification when all pages are done
+ * - PAGE_COMPLETE: Per-page item count update
+ */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'UPDATE_PROGRESS') {
         scrapedItemCount += request.itemCount;
