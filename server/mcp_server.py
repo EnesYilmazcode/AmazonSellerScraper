@@ -1,6 +1,20 @@
-"""ProScan MCP Server - exposes product analysis tools to Claude Desktop/Cursor.
+"""ProScan MCP Server -- exposes product analysis tools to Claude Desktop/Cursor.
 
-Run via stdio transport: python -m server.mcp_server
+Provides 7 MCP tools for product analysis via stdio transport.
+Shares business logic with the REST API through product_service,
+ensuring consistent behavior across both interfaces.
+
+Tools:
+    get_product_details   -- Full product info by ASIN
+    compare_products      -- Side-by-side comparison (2-10 products)
+    search_products       -- Keyword search via SQL LIKE
+    smart_search          -- Hybrid keyword + semantic search
+    list_all_products     -- Paginated listing with stats
+    get_database_stats    -- Product count and RAG availability
+    chat_with_product     -- RAG Q&A via Gemini
+
+Run via stdio transport:
+    python -m server.mcp_server
 """
 
 import sys
@@ -13,10 +27,10 @@ from mcp.server.fastmcp import FastMCP
 from server.db.database import init_db
 from server.services import product_service
 
-# Initialize database
+# Initialize database on import
 init_db()
 
-# Create MCP server
+# Create MCP server instance
 mcp = FastMCP(
     "ProScan",
     version="1.0.0",
@@ -80,7 +94,7 @@ def list_all_products(limit: int = 50, offset: int = 0) -> dict:
     """List all scraped products in the database.
 
     Returns products ordered by most recently scraped.
-    Use offset for pagination.
+    Use offset for pagination through large datasets.
 
     Args:
         limit: Number of products to return (default 50, max 100)
@@ -101,7 +115,7 @@ def list_all_products(limit: int = 50, offset: int = 0) -> dict:
 def get_database_stats() -> dict:
     """Get summary statistics about the scraped product database.
 
-    Returns total product count and other database metrics.
+    Returns total product count and RAG availability status.
     Useful for understanding what data is available before querying.
     """
     return product_service.get_stats()
@@ -125,7 +139,7 @@ def chat_with_product(asin: str, question: str) -> dict:
 def smart_search(query: str, limit: int = 20) -> list[dict]:
     """Search products using both keyword matching AND semantic similarity.
 
-    More powerful than search_products - understands meaning, not just keywords.
+    More powerful than search_products -- understands meaning, not just keywords.
     For example, 'cheap noise cancelling' will find budget ANC headphones
     even if those exact words aren't in the product name.
 
