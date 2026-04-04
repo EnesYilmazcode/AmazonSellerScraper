@@ -1,12 +1,46 @@
-// service-worker.js - Background Service Worker for ProScan
-// Handles message routing between popup and content scripts
+/**
+ * @fileoverview Background Service Worker
+ *
+ * Central message router for the ProScan extension. Handles:
+ * - Message routing between popup, content scripts, and external APIs
+ * - Gemini 2.0 Flash API calls for the AI chatbot
+ * - Optional server sync (fire-and-forget POST to local FastAPI backend)
+ * - Extension lifecycle events (install, update, startup)
+ *
+ * Runs as a Manifest V3 service worker -- no persistent background page.
+ * Wakes on message events and API calls, then goes idle.
+ *
+ * @module ServiceWorker
+ */
 
-// Gemini API config
+/** @const {string} Gemini API endpoint for content generation */
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+
+/**
+ * Fallback API key (base64-encoded). Used only when the user hasn't
+ * configured their own key via the popup settings panel.
+ * @const {string}
+ * @private
+ */
 const _t = 'QUl6YVN5RHdfOVhQLXRpQ0tLX3lkQThCd0ZrZUpxNWdTdTAxNUhj';
+
+/**
+ * Decode the fallback API key.
+ * @returns {string} Decoded API key
+ * @private
+ */
 const _dk = () => atob(_t);
 
-// Message routing
+/**
+ * Main message listener -- routes messages between extension components.
+ *
+ * Message types handled:
+ * - STOP_SCRAPING: Forwarded from popup to the active tab's content script
+ * - SCRAPING_COMPLETE: Triggers optional server sync
+ * - CHAT_MESSAGE: Sends question + product context to Gemini API
+ *
+ * Returns true to keep the message channel open for async responses.
+ */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Route STOP_SCRAPING from popup to content script
     if (request.type === 'STOP_SCRAPING' && sender.tab) {
@@ -19,7 +53,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         syncToServer();
     }
 
-    // AI chatbot — call Gemini API with product context
+    // AI chatbot -- call Gemini API with product context
     if (request.type === 'CHAT_MESSAGE') {
         handleChatMessage(request.question, request.products)
             .then(answer => sendResponse({ answer }))
@@ -30,7 +64,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
 });
 
-// Handle chat message via Gemini API
+/**
+ * Handle a chat message by calling the Gemini 2.0 Flash API.
+ *
+ * Builds a prompt with the system role, product context, and user question.
+ * Uses the user's API key from chrome.storage if available, otherwise
+ * falls back to the built-in key.
+ *
+ * @param {string} question - User's natural language question
+ * @param {Object[]} products - Array of product objects for context
+ * @returns {Promise<string>} AI-generated response text
+ * @throws {Error} On invalid API key or Gemini API failure
+ */
 async function handleChatMessage(question, products) {
     const data = await chrome.storage.local.get(['geminiApiKey']);
     const apiKey = data.geminiApiKey || _dk();
@@ -73,7 +118,11 @@ User question: ${question}`;
     return text;
 }
 
-// Handle extension installation/update
+/**
+ * Handle extension installation and update events.
+ * On fresh install, initializes chrome.storage with default values.
+ * On update, logs the new version number.
+ */
 chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
         console.log('[ProScan] Extension installed');
@@ -93,9 +142,16 @@ chrome.runtime.onInstalled.addListener((details) => {
     }
 });
 
-// Sync scraped data to local MCP server (fire-and-forget)
+/** @const {string} Local backend server URL for optional data sync */
 const MCP_SERVER_URL = 'http://127.0.0.1:8000';
 
+/**
+ * Sync scraped products to the local FastAPI backend.
+ * Fire-and-forget -- errors are logged but don't affect extension functionality.
+ * The extension works fully standalone without the server.
+ *
+ * @async
+ */
 async function syncToServer() {
     try {
         const data = await chrome.storage.local.get(['results']);
@@ -120,14 +176,16 @@ async function syncToServer() {
             console.warn('[ProScan] Server sync failed:', response.status);
         }
     } catch (error) {
-        // Server not running - this is fine, extension works standalone
+        // Server not running -- extension works standalone
         console.log('[ProScan] MCP server not available (standalone mode)');
     }
 }
 
-// Clean up on browser startup
+/**
+ * Clean up on browser startup.
+ * Resets the scraping flag in case the browser was closed mid-scrape.
+ */
 chrome.runtime.onStartup.addListener(() => {
-    // Reset scraping state in case browser was closed during scrape
     chrome.storage.local.set({
         isScrapingActive: false
     });
