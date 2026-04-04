@@ -1,26 +1,68 @@
-// analyzer.js - Data Analysis Functions
-// Provides analytics and insights for scraped product data
+/**
+ * @fileoverview Product Analytics Engine
+ *
+ * Provides statistical analysis, opportunity scoring, and actionable
+ * insight generation for scraped Amazon product data. The core of
+ * ProScan's value proposition for resellers and arbitrage traders.
+ *
+ * Key capabilities:
+ * - Descriptive statistics (min, max, avg, median) for price/rating/reviews
+ * - Price and rating distribution bucketing for visualization
+ * - Proprietary opportunity scoring algorithm for arbitrage identification
+ * - Automated insight detection (underpriced, underexposed products)
+ * - Full report generation combining all analytics
+ *
+ * @module Analyzer
+ */
 
 const Analyzer = {
-    // Parse price string to number
+    /**
+     * Parse a price string into a numeric value.
+     * Handles currency symbols, commas, and 'N/A' gracefully.
+     *
+     * @param {string|number} priceStr - Price string (e.g., "$19.99", "N/A", 19.99)
+     * @returns {number} Numeric price, or 0 if unparseable
+     *
+     * @example
+     * Analyzer.parsePrice("$1,299.99") // => 1299.99
+     * Analyzer.parsePrice("N/A")       // => 0
+     */
     parsePrice(priceStr) {
         if (!priceStr || priceStr === 'N/A') return 0;
         return parseFloat(String(priceStr).replace(/[^0-9.]/g, '')) || 0;
     },
 
-    // Parse rating to number
+    /**
+     * Parse a rating value to a float.
+     *
+     * @param {string|number} rating - Rating value (e.g., "4.5", 4.5, "N/A")
+     * @returns {number} Numeric rating, or 0 if unparseable
+     */
     parseRating(rating) {
         if (!rating || rating === 'N/A') return 0;
         return parseFloat(rating) || 0;
     },
 
-    // Parse review count to number
+    /**
+     * Parse a review count string to an integer.
+     * Strips non-numeric characters (commas, parentheses, etc.).
+     *
+     * @param {string|number} count - Review count (e.g., "12,847", 12847)
+     * @returns {number} Integer review count, or 0 if unparseable
+     */
     parseReviewCount(count) {
         if (!count) return 0;
         return parseInt(String(count).replace(/[^0-9]/g, '')) || 0;
     },
 
-    // Calculate basic statistics for a numeric array
+    /**
+     * Calculate descriptive statistics for a numeric array.
+     * Filters out zero/negative values before computation.
+     *
+     * @param {number[]} values - Array of numeric values
+     * @returns {{min: number, max: number, avg: number, median: number, count: number}}
+     *   Statistical summary. All zeros if no valid values exist.
+     */
     calculateStats(values) {
         const filtered = values.filter(v => v > 0);
         if (filtered.length === 0) {
@@ -42,7 +84,12 @@ const Analyzer = {
         };
     },
 
-    // Get price distribution buckets
+    /**
+     * Bucket products into price ranges for distribution analysis.
+     *
+     * @param {Object[]} products - Array of product objects with .price field
+     * @returns {Object<string, number>} Map of price range labels to product counts
+     */
     getPriceDistribution(products) {
         const buckets = {
             '$0-$10': 0,
@@ -65,7 +112,12 @@ const Analyzer = {
         return buckets;
     },
 
-    // Get rating distribution
+    /**
+     * Bucket products into rating ranges for quality distribution analysis.
+     *
+     * @param {Object[]} products - Array of product objects with .rating field
+     * @returns {Object<string, number>} Map of rating range labels to product counts
+     */
     getRatingDistribution(products) {
         const buckets = {
             '5 Stars': 0,
@@ -87,8 +139,22 @@ const Analyzer = {
         return buckets;
     },
 
-    // Calculate opportunity score for arbitrage
-    // Higher score = better opportunity
+    /**
+     * Calculate the opportunity score for a single product.
+     *
+     * Formula: score = (rating * log10(reviews + 1)) / sqrt(price)
+     * Normalized to a 1-10 scale (multiplied by 2, clamped).
+     *
+     * The formula balances three signals:
+     * - Rating: linear weight rewards quality
+     * - Reviews: logarithmic factor prevents mega-sellers from dominating
+     * - Price: inverse square root provides moderate price sensitivity
+     *
+     * Higher score = better arbitrage opportunity.
+     *
+     * @param {Object} product - Product object with price, rating, reviewCount
+     * @returns {number} Opportunity score (1-10), or 0 if data is insufficient
+     */
     calculateOpportunityScore(product) {
         const price = this.parsePrice(product.price);
         const rating = this.parseRating(product.rating);
@@ -96,8 +162,6 @@ const Analyzer = {
 
         if (price <= 0 || rating <= 0) return 0;
 
-        // Formula: (rating * log(reviews+1)) / sqrt(price)
-        // Favors: high rating, many reviews, lower price
         const reviewFactor = Math.log10(reviews + 1);
         const priceFactor = Math.sqrt(price);
 
@@ -107,7 +171,14 @@ const Analyzer = {
         return Math.min(10, Math.max(1, score * 2));
     },
 
-    // Get top opportunities
+    /**
+     * Rank products by opportunity score and return the top N.
+     *
+     * @param {Object[]} products - Array of product objects
+     * @param {number} [limit=10] - Maximum number of results
+     * @returns {Object[]} Products sorted by descending opportunity score,
+     *   each augmented with an .opportunityScore property
+     */
     getTopOpportunities(products, limit = 10) {
         const scored = products.map(p => ({
             ...p,
@@ -120,7 +191,15 @@ const Analyzer = {
             .slice(0, limit);
     },
 
-    // Identify underpriced products (below category average with good rating)
+    /**
+     * Identify underpriced products -- those priced significantly below
+     * the category average while maintaining strong ratings.
+     *
+     * @param {Object[]} products - Array of product objects
+     * @param {number} [threshold=0.7] - Price threshold as fraction of average
+     *   (0.7 = 30% below average)
+     * @returns {Object[]} Products matching the underpriced criteria
+     */
     findUnderpriced(products, threshold = 0.7) {
         const prices = products.map(p => this.parsePrice(p.price)).filter(p => p > 0);
         const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
@@ -132,7 +211,15 @@ const Analyzer = {
         });
     },
 
-    // Find products with high ratings but low reviews (underexposed)
+    /**
+     * Find underexposed products -- high-quality items with low review counts.
+     * These represent opportunities with less established competition.
+     *
+     * @param {Object[]} products - Array of product objects
+     * @param {number} [maxReviews=50] - Maximum review count threshold
+     * @param {number} [minRating=4.0] - Minimum rating threshold
+     * @returns {Object[]} Products matching the underexposed criteria
+     */
     findUnderexposed(products, maxReviews = 50, minRating = 4.0) {
         return products.filter(p => {
             const rating = this.parseRating(p.rating);
@@ -141,15 +228,25 @@ const Analyzer = {
         });
     },
 
-    // Generate actionable insights
+    /**
+     * Generate actionable insights from the product dataset.
+     * Analyzes the full product set and returns prioritized recommendations.
+     *
+     * @param {Object[]} products - Array of product objects
+     * @returns {Object[]} Array of insight objects, each containing:
+     *   - type: 'opportunity' | 'info'
+     *   - priority: 'high' | 'medium' | 'low'
+     *   - title: Human-readable insight headline
+     *   - description: Detailed explanation with data points
+     *   - action: Recommended next step
+     *   - products: (optional) Related product subset
+     */
     generateInsights(products) {
         const insights = [];
 
-        // Get price stats
         const prices = products.map(p => this.parsePrice(p.price)).filter(p => p > 0);
         const priceStats = this.calculateStats(prices);
 
-        // Get rating stats
         const ratings = products.map(p => this.parseRating(p.rating)).filter(r => r > 0);
         const ratingStats = this.calculateStats(ratings);
 
@@ -204,7 +301,19 @@ const Analyzer = {
         return insights;
     },
 
-    // Full analysis report
+    /**
+     * Generate a comprehensive analysis report combining all analytics.
+     * Used by the Excel exporter to populate the Analytics and Insights sheets.
+     *
+     * @param {Object[]} products - Array of product objects
+     * @returns {{
+     *   summary: {totalProducts: number, priceStats: Object, ratingStats: Object, reviewStats: Object},
+     *   distributions: {price: Object, rating: Object},
+     *   topOpportunities: Object[],
+     *   insights: Object[],
+     *   generatedAt: string
+     * }} Full analysis report
+     */
     generateFullReport(products) {
         return {
             summary: {
