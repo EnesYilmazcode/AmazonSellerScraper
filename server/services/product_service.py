@@ -1,13 +1,21 @@
 """Shared business logic for ProScan.
 
 Called by both the MCP server (stdio) and the REST API (HTTP).
-This is the single source of truth for product operations.
+This is the single source of truth for product operations --
+no business logic lives in routers or MCP tool handlers.
+
+Key responsibilities:
+    - Product ingestion: parsing raw JS data, storing in SQLite, embedding in ChromaDB
+    - Product comparison: side-by-side analysis with best-rated/best-value detection
+    - Search: keyword (SQL LIKE) and hybrid (keyword + semantic via ChromaDB)
+    - RAG chat: product Q&A powered by Gemini + ChromaDB context
+    - Database statistics for monitoring
 """
 
 import re
 from server.db import database
 
-# RAG imports - optional, fail gracefully if not installed
+# RAG imports -- optional, fail gracefully if dependencies not installed
 _rag_available = False
 try:
     from server.rag import vectorstore, chain
@@ -17,7 +25,16 @@ except ImportError:
 
 
 def parse_price(price_str):
-    """Parse price string like '$19.99' to float."""
+    """Parse a price string (e.g., '$19.99') to a float.
+
+    Strips all non-numeric characters except the decimal point.
+
+    Args:
+        price_str: Raw price string from scraper (may include $, commas)
+
+    Returns:
+        float: Numeric price, or 0.0 if unparseable
+    """
     if not price_str or price_str == "N/A":
         return 0.0
     cleaned = re.sub(r"[^0-9.]", "", str(price_str))
@@ -28,7 +45,14 @@ def parse_price(price_str):
 
 
 def parse_rating(rating):
-    """Parse rating which might be a number or 'N/A'."""
+    """Parse a rating value which may be a number, string, or 'N/A'.
+
+    Args:
+        rating: Raw rating from scraper
+
+    Returns:
+        float: Numeric rating (0-5), or 0.0 if invalid
+    """
     if rating == "N/A" or rating is None:
         return 0.0
     try:
@@ -38,10 +62,21 @@ def parse_rating(rating):
 
 
 def sync_products(products, seller_name=None, seller_url=None):
-    """Sync products from Chrome extension into SQLite.
+    """Ingest scraped products from the Chrome extension into the backend.
 
-    Parses raw price/rating strings into numeric values.
-    Returns (synced_count, scrape_run_id).
+    Pipeline:
+        1. Parse raw price/rating strings into numeric fields
+        2. Insert a scrape_run record for batch tracking
+        3. Batch insert all products linked to that run
+        4. Embed products into ChromaDB for semantic search (if available)
+
+    Args:
+        products: List of product dicts (camelCase from JS)
+        seller_name: Amazon seller name (optional)
+        seller_url: Seller page URL (optional)
+
+    Returns:
+        tuple[int, int]: (synced_count, scrape_run_id)
     """
     # Parse numeric fields from JS camelCase format
     for p in products:
@@ -56,7 +91,7 @@ def sync_products(products, seller_name=None, seller_url=None):
     )
     database.insert_products(products, scrape_run_id)
 
-    # Embed into ChromaDB if RAG is available
+    # Embed into ChromaDB if RAG is available (fire-and-forget)
     embedded = 0
     if _rag_available:
         try:
@@ -68,12 +103,31 @@ def sync_products(products, seller_name=None, seller_url=None):
 
 
 def get_product_details(asin):
-    """Get full product details by ASIN."""
+    """Get full product details by ASIN.
+
+    Args:
+        asin: Amazon Standard Identification Number
+
+    Returns:
+        dict or None: Most recent product record, or None if not found
+    """
     return database.get_product_by_asin(asin)
 
 
 def compare_products(asins):
-    """Side-by-side comparison of multiple products with analysis."""
+    """Side-by-side comparison of multiple products with analysis.
+
+    Calculates price/rating ranges and identifies:
+        - best_rated: highest rating among compared products
+        - best_value: highest value score using the formula
+          (rating * log10(reviews + 1)) / sqrt(price)
+
+    Args:
+        asins: List of ASIN strings to compare
+
+    Returns:
+        dict: Contains 'products' list and 'analysis' with ranges and picks
+    """
     products = database.get_products_by_asins(asins)
     if not products:
         return {"error": "No products found for the given ASINs"}
@@ -98,7 +152,7 @@ def compare_products(asins):
     }
 
     if products:
-        # Best rated
+        # Best rated -- highest rating_numeric
         by_rating = sorted(products, key=lambda x: x["rating_numeric"], reverse=True)
         analysis["best_rated"] = {
             "asin": by_rating[0]["asin"],
@@ -106,7 +160,7 @@ def compare_products(asins):
             "rating": by_rating[0]["rating_numeric"],
         }
 
-        # Best value = highest (rating * log(reviews+1)) / price
+        # Best value -- highest (rating * log(reviews+1)) / sqrt(price)
         import math
 
         def value_score(p):
@@ -125,17 +179,44 @@ def compare_products(asins):
 
 
 def search_products(query, limit=20):
-    """Search products by name or ASIN."""
+    """Search products by name or ASIN using SQL LIKE matching.
+
+    Args:
+        query: Search keyword or ASIN
+        limit: Maximum results to return
+
+    Returns:
+        list[dict]: Matching products sorted by rating and review count
+    """
     return database.search_products(query, limit)
 
 
 def get_all_products(limit=100, offset=0):
-    """List all products, paginated."""
+    """List all products with pagination.
+
+    Args:
+        limit: Maximum products to return
+        offset: Number of products to skip
+
+    Returns:
+        list[dict]: Products ordered by most recently scraped
+    """
     return database.get_all_products(limit, offset)
 
 
 def chat_about_product(asin, question):
-    """RAG Q&A about a product. Requires Gemini API key."""
+    """RAG-powered Q&A about a specific product.
+
+    Requires RAG dependencies (chromadb, sentence-transformers,
+    google-generativeai) and a configured Gemini API key.
+
+    Args:
+        asin: Product ASIN to query about
+        question: Natural language question
+
+    Returns:
+        dict: Contains 'answer', 'sources', and 'asin'
+    """
     if not _rag_available:
         return {
             "answer": "RAG dependencies not installed. Run: pip install chromadb sentence-transformers google-generativeai",
@@ -146,7 +227,19 @@ def chat_about_product(asin, question):
 
 
 def search_products_semantic(query, limit=20):
-    """Search products using both SQL and semantic search."""
+    """Hybrid search combining SQL keyword matching and ChromaDB semantic similarity.
+
+    First runs a SQL LIKE search, then augments results with semantically
+    similar products from ChromaDB that weren't already in the SQL results.
+    Falls back to SQL-only if RAG is unavailable.
+
+    Args:
+        query: Natural language search query
+        limit: Maximum results per search method
+
+    Returns:
+        list[dict]: Combined results (SQL matches first, then semantic additions)
+    """
     sql_results = database.search_products(query, limit)
 
     if _rag_available:
@@ -167,7 +260,11 @@ def search_products_semantic(query, limit=20):
 
 
 def get_stats():
-    """Get database statistics."""
+    """Get database statistics for monitoring.
+
+    Returns:
+        dict: Contains 'total_products' count and 'rag_available' boolean
+    """
     return {
         "total_products": database.get_product_count(),
         "rag_available": _rag_available,
