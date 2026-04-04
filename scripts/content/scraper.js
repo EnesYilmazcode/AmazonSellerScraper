@@ -1,28 +1,53 @@
-// scraper.js - Amazon Product Scraper Content Script
-// Handles DOM scraping and pagination on Amazon pages
+/**
+ * @fileoverview Amazon Product DOM Scraper
+ *
+ * Content script that extracts product data from Amazon search results
+ * and seller pages. Uses a cascading selector strategy to handle
+ * Amazon's frequently changing DOM structure.
+ *
+ * Selector Strategy:
+ * Each data point (title, price, rating, reviews) has multiple selectors
+ * ordered from most-stable to least-stable. The scraper tries each in
+ * sequence and uses the first successful match. This makes the extension
+ * resilient to Amazon A/B tests and layout changes.
+ *
+ * Pagination:
+ * After scraping a page, the script automatically navigates to the next
+ * page with a 2-second delay to avoid rate limiting. Scraping continues
+ * until no more pages exist or the user stops it.
+ *
+ * @module Scraper
+ */
 
 let isScrapingActive = false;
 let itemCount = 0;
 
-// Selectors for Amazon product elements (updated Feb 2026)
+/**
+ * CSS selectors for Amazon product page elements.
+ * Updated February 2026 to reflect current Amazon DOM structure.
+ * Each field has primary + fallback selectors for resilience.
+ *
+ * @const {Object}
+ */
 const SELECTORS = {
+    /** Product result container -- filtered to exclude empty ASINs (ad placeholders) */
     productItem: '.s-result-item[data-asin]:not([data-asin=""])',
 
-    // Title — structural selector first, class-based fallback
+    /** Title -- structural selector (h2 > span) is more stable than class-based */
     title: 'h2 span',
     titleAlt: '.a-size-base-plus.a-color-base.a-text-normal',
 
-    // Price — data-attribute for main price, generic fallback
+    /** Price -- data-attribute selector targets the primary displayed price */
     price: '.a-price[data-a-size="xl"] .a-offscreen',
     priceAlt: '.a-price .a-offscreen',
 
-    // Rating — data-cy attribute (stable), then current/legacy star classes
+    /** Rating -- cascading from most to least stable */
     rating: '[data-cy="reviews-ratings-slot"] .a-icon-alt',
     ratingAlt: '.a-icon-star-mini .a-icon-alt',
     ratingLegacy: '.a-icon-star-small .a-icon-alt',
     ratingText: '[data-cy="reviews-block"] span.a-size-base.a-color-secondary',
 
-    // Review count — aria-label has full number, then display text fallbacks
+    /** Review count -- aria-label has full number; display text may use K/M abbreviations */
     reviewCount: 'a[aria-label$="ratings"]',
     reviewCountAlt: '.a-size-mini.puis-normal-weight-text.s-underline-text',
     reviewCountLegacy: '.a-size-base.puis-normal-weight-text.s-underline-text',
@@ -34,7 +59,11 @@ const SELECTORS = {
     resultsToolbar: '.s-desktop-toolbar .a-spacing-small span'
 };
 
-// Initialize on page load
+/**
+ * Initialize the scraper on page load.
+ * Checks storage to see if a scraping session is in progress
+ * (e.g., after navigating to a new page) and resumes if so.
+ */
 function initialize() {
     chrome.storage.local.get(['isScrapingActive', 'currentItemCount'], (data) => {
         isScrapingActive = data.isScrapingActive || false;
@@ -46,7 +75,14 @@ function initialize() {
     });
 }
 
-// Extract text content safely
+/**
+ * Safely extract text content from a DOM element using cascading selectors.
+ *
+ * @param {HTMLElement} element - Parent element to search within
+ * @param {string} selector - Primary CSS selector
+ * @param {string|null} [fallbackSelector=null] - Fallback CSS selector
+ * @returns {string|null} Trimmed text content, or null if no match
+ */
 function getText(element, selector, fallbackSelector = null) {
     let el = element.querySelector(selector);
     if (!el && fallbackSelector) {
@@ -55,7 +91,14 @@ function getText(element, selector, fallbackSelector = null) {
     return el ? el.innerText.trim() : null;
 }
 
-// Extract price from element
+/**
+ * Extract the product price from a listing element.
+ * Tries the primary price selector (xl size, usually the main price)
+ * then falls back to any .a-price element.
+ *
+ * @param {HTMLElement} element - Product listing DOM element
+ * @returns {string} Price string (e.g., "$19.99") or "N/A"
+ */
 function extractPrice(element) {
     const priceEl = element.querySelector(SELECTORS.price) ||
                     element.querySelector(SELECTORS.priceAlt);
@@ -67,14 +110,28 @@ function extractPrice(element) {
     return 'N/A';
 }
 
-// Parse rating number from text like "4.7 out of 5 stars" or "4.7"
+/**
+ * Parse a numeric rating from text like "4.7 out of 5 stars" or "4.7".
+ *
+ * @param {string|null} text - Raw rating text from Amazon DOM
+ * @returns {number} Parsed rating (0-5), or 0 if unparseable
+ */
 function parseRatingText(text) {
     if (!text) return 0;
     const match = text.match(/(\d+\.?\d*)/);
     return match ? parseFloat(match[1]) : 0;
 }
 
-// Extract rating from element — tries multiple selectors in order
+/**
+ * Extract the product rating using a four-level cascading selector strategy:
+ * 1. data-cy attribute (most stable across Amazon updates)
+ * 2. Current star class (a-icon-star-mini)
+ * 3. Legacy star class (a-icon-star-small)
+ * 4. Plain text in reviews block
+ *
+ * @param {HTMLElement} element - Product listing DOM element
+ * @returns {number} Rating value (0-5), or 0 if not found
+ */
 function extractRating(element) {
     // 1. data-cy attribute (most stable across Amazon updates)
     const dataCy = element.querySelector(SELECTORS.rating);
@@ -107,7 +164,17 @@ function extractRating(element) {
     return 0;
 }
 
-// Parse abbreviated review counts: "(64)", "(108.3K)", "(77K)", "(1.2M)"
+/**
+ * Parse abbreviated review count text into an integer.
+ * Handles formats like "(64)", "(108.3K)", "(77K)", "(1.2M)".
+ *
+ * @param {string|null} text - Raw review count text
+ * @returns {number} Parsed integer review count, or 0
+ *
+ * @example
+ * parseReviewText("(108.3K)") // => 108300
+ * parseReviewText("(1.2M)")   // => 1200000
+ */
 function parseReviewText(text) {
     if (!text) return 0;
     const cleaned = text.replace(/[()]/g, '').trim();
@@ -121,9 +188,18 @@ function parseReviewText(text) {
     return Math.round(num);
 }
 
-// Extract review count from element — tries aria-label first (has full number)
+/**
+ * Extract the review count from a product listing.
+ * Tries three sources in order of accuracy:
+ * 1. aria-label on ratings link (exact number, e.g., "108,373 ratings")
+ * 2. Current display text (may use K/M abbreviations)
+ * 3. Legacy display text format
+ *
+ * @param {HTMLElement} element - Product listing DOM element
+ * @returns {number} Review count, or 0 if not found
+ */
 function extractReviewCount(element) {
-    // 1. aria-label on the ratings link (e.g. "108,373 ratings") — most accurate
+    // 1. aria-label on the ratings link -- most accurate
     const ariaLink = element.querySelector(SELECTORS.reviewCount);
     if (ariaLink) {
         const label = ariaLink.getAttribute('aria-label');
@@ -134,7 +210,7 @@ function extractReviewCount(element) {
         }
     }
 
-    // 2. Current display text (a-size-mini) — may have K/M suffix
+    // 2. Current display text (a-size-mini) -- may have K/M suffix
     const miniEl = element.querySelector(SELECTORS.reviewCountAlt);
     if (miniEl) {
         const count = parseReviewText(miniEl.textContent);
@@ -151,12 +227,30 @@ function extractReviewCount(element) {
     return 0;
 }
 
-// Check if product has Prime badge
+/**
+ * Check if a product listing has an Amazon Prime badge.
+ *
+ * @param {HTMLElement} element - Product listing DOM element
+ * @returns {boolean} True if Prime-eligible
+ */
 function hasPrimeBadge(element) {
     return element.querySelector(SELECTORS.primeBadge) !== null;
 }
 
-// Scrape a single product listing
+/**
+ * Extract all data from a single product listing element.
+ *
+ * @param {HTMLElement} listing - Product listing DOM element with data-asin attribute
+ * @returns {Object|null} Product object or null if ASIN is missing
+ * @returns {string} return.name - Product title
+ * @returns {string} return.asin - Amazon Standard Identification Number
+ * @returns {string} return.price - Price string (e.g., "$19.99")
+ * @returns {number} return.rating - Rating value (0-5)
+ * @returns {number} return.reviewCount - Total review count
+ * @returns {boolean} return.isPrime - Prime eligibility
+ * @returns {string} return.url - Full Amazon product URL
+ * @returns {string} return.scrapedAt - ISO timestamp of when the product was scraped
+ */
 function scrapeProduct(listing) {
     const asin = listing.dataset.asin;
     if (!asin) return null;
@@ -185,7 +279,11 @@ function scrapeProduct(listing) {
     };
 }
 
-// Get total results count from page
+/**
+ * Extract the total number of search results from the Amazon results page header.
+ *
+ * @returns {number} Total result count, or 0 if not found
+ */
 function getTotalResults() {
     const resultsEl = document.querySelector(SELECTORS.resultsText);
     if (resultsEl) {
@@ -198,7 +296,12 @@ function getTotalResults() {
     return 0;
 }
 
-// Get URL for next page
+/**
+ * Construct the URL for the next page of search results.
+ * Increments the page parameter and updates the ref parameter.
+ *
+ * @returns {string} Full URL for the next results page
+ */
 function getNextPageUrl() {
     const currentUrl = new URL(window.location.href);
     const currentPage = parseInt(currentUrl.searchParams.get('page')) || 1;
@@ -210,12 +313,27 @@ function getNextPageUrl() {
     return currentUrl.toString();
 }
 
-// Check if there's a next page
+/**
+ * Check if there is a next page of results available.
+ * Returns false if the "Next" pagination button is disabled.
+ *
+ * @returns {boolean} True if more pages exist
+ */
 function hasNextPage() {
     return !document.querySelector(SELECTORS.nextPageDisabled);
 }
 
-// Main scraping function
+/**
+ * Main scraping function for the current page.
+ *
+ * Workflow:
+ * 1. Query all product listing elements on the page
+ * 2. Extract data from each listing via scrapeProduct()
+ * 3. Send progress update to popup via chrome.runtime
+ * 4. Append results to chrome.storage.local
+ * 5. If more pages exist, navigate after a 2-second delay
+ * 6. Otherwise, call finishScraping()
+ */
 function scrapeCurrentPage() {
     if (!isScrapingActive) return;
 
@@ -262,7 +380,7 @@ function scrapeCurrentPage() {
                 const nextUrl = getNextPageUrl();
                 console.log(`[ProScan] Navigating to next page: ${nextUrl}`);
 
-                // Delay to avoid rate limiting
+                // 2-second delay to avoid rate limiting
                 setTimeout(() => {
                     window.location.href = nextUrl;
                 }, 2000);
@@ -273,7 +391,12 @@ function scrapeCurrentPage() {
     });
 }
 
-// Finish scraping and notify popup
+/**
+ * Finalize the scraping session.
+ * Updates storage state, logs completion, and notifies the popup.
+ *
+ * @param {number} finalCount - Total number of products scraped across all pages
+ */
 function finishScraping(finalCount) {
     isScrapingActive = false;
 
@@ -290,7 +413,13 @@ function finishScraping(finalCount) {
     });
 }
 
-// Listen for messages from popup
+/**
+ * Message listener for commands from the popup.
+ *
+ * Supported messages:
+ * - START_SCRAPING: Begin a new scraping session (resets state)
+ * - STOP_SCRAPING: Gracefully halt the current session
+ */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.type === 'START_SCRAPING') {
         console.log('[ProScan] Starting scrape...');
@@ -320,6 +449,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; // Keep message channel open for async response
 });
 
-// Initialize on page load
+// Initialize on page load -- both events for reliability
 document.addEventListener('DOMContentLoaded', initialize);
 window.addEventListener('load', initialize);
