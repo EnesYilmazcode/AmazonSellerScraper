@@ -172,6 +172,31 @@ const Analyzer = {
     },
 
     /**
+     * Calculate a combined opportunity score that factors in price spread data.
+     *
+     * Blends the original opportunity score (60%) with the spread-based
+     * arbitrage score (40%) for a more complete signal.
+     *
+     * @param {Object} product - Product object
+     * @param {Object|null} spreadData - Spread data from SpreadAnalyzer, or null
+     * @returns {number} Combined score (1-10)
+     */
+    calculateCombinedScore(product, spreadData) {
+        const baseScore = this.calculateOpportunityScore(product);
+        if (!spreadData || !spreadData.spreadData) return baseScore;
+
+        const arbitrageScore = typeof SpreadAnalyzer !== 'undefined'
+            ? SpreadAnalyzer.calculateArbitrageScore(spreadData.spreadData)
+            : 0;
+
+        if (arbitrageScore === 0) return baseScore;
+
+        // Weighted blend: 60% base score + 40% spread score
+        const combined = (baseScore * 0.6) + (arbitrageScore * 0.4);
+        return parseFloat(Math.min(10, Math.max(1, combined)).toFixed(1));
+    },
+
+    /**
      * Rank products by opportunity score and return the top N.
      *
      * @param {Object[]} products - Array of product objects
@@ -233,6 +258,7 @@ const Analyzer = {
      * Analyzes the full product set and returns prioritized recommendations.
      *
      * @param {Object[]} products - Array of product objects
+     * @param {Object} [spreadResults=null] - Optional map of ASIN → spread data
      * @returns {Object[]} Array of insight objects, each containing:
      *   - type: 'opportunity' | 'info'
      *   - priority: 'high' | 'medium' | 'low'
@@ -241,7 +267,7 @@ const Analyzer = {
      *   - action: Recommended next step
      *   - products: (optional) Related product subset
      */
-    generateInsights(products) {
+    generateInsights(products, spreadResults = null) {
         const insights = [];
 
         const prices = products.map(p => this.parsePrice(p.price)).filter(p => p > 0);
@@ -249,6 +275,22 @@ const Analyzer = {
 
         const ratings = products.map(p => this.parseRating(p.rating)).filter(r => r > 0);
         const ratingStats = this.calculateStats(ratings);
+
+        // Price spread opportunities (if spread data available)
+        if (spreadResults && typeof SpreadAnalyzer !== 'undefined') {
+            const analyzed = SpreadAnalyzer.analyzeAll(spreadResults);
+            const highSpread = analyzed.filter(a => a.spreadData && a.spreadData.coefficientOfVariation >= 30);
+            if (highSpread.length > 0) {
+                const topSpread = highSpread[0];
+                insights.push({
+                    type: 'opportunity',
+                    priority: 'high',
+                    title: `${highSpread.length} products with high price spread`,
+                    description: `These products have sellers pricing at very different levels (CV > 30%). Top: ${topSpread.asin} with ${topSpread.spreadData.coefficientOfVariation}% CV across ${topSpread.spreadData.sellerCount} sellers`,
+                    action: 'High price variability signals strong arbitrage potential'
+                });
+            }
+        }
 
         // Underpriced opportunities
         const underpriced = this.findUnderpriced(products);

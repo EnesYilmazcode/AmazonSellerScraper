@@ -38,12 +38,18 @@ const Exporter = {
     /**
      * Export product data as CSV.
      * Includes proper escaping for fields containing commas or quotes.
+     * If spread data is available, includes spread columns.
      *
      * @param {Object[]} results - Array of product objects
+     * @param {Object} [spreadResults=null] - Optional map of ASIN → spread data
      * @returns {{blob: Blob, filename: string}} CSV blob and suggested filename
      */
-    exportToCSV(results) {
+    exportToCSV(results, spreadResults = null) {
+        const hasSpread = spreadResults && Object.keys(spreadResults).length > 0;
         const headers = ['Product Name', 'ASIN', 'Price', 'Rating', 'Review Count', 'URL'];
+        if (hasSpread) {
+            headers.push('Seller Count', 'Min Offer', 'Max Offer', 'Price Spread', 'CV %', 'Arbitrage Score');
+        }
         const rows = [headers.join(',')];
 
         results.forEach(item => {
@@ -55,6 +61,23 @@ const Exporter = {
                 item.reviewCount || '',
                 `"${item.url || ''}"`
             ];
+
+            if (hasSpread) {
+                const spread = spreadResults[item.asin];
+                if (spread && spread.sellerPrices && typeof SpreadAnalyzer !== 'undefined') {
+                    const metrics = SpreadAnalyzer.calculateSpread(spread.sellerPrices);
+                    if (metrics) {
+                        const score = SpreadAnalyzer.calculateArbitrageScore(metrics);
+                        row.push(metrics.sellerCount, metrics.minPrice, metrics.maxPrice,
+                                 metrics.absoluteSpread, metrics.coefficientOfVariation, score);
+                    } else {
+                        row.push('', '', '', '', '', '');
+                    }
+                } else {
+                    row.push('', '', '', '', '', '');
+                }
+            }
+
             rows.push(row.join(','));
         });
 
