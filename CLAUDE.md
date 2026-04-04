@@ -16,12 +16,14 @@ AmazonSellerScraper/
 ├── scripts/
 │   ├── content/
 │   │   ├── scraper.js        # DOM scraping on Amazon pages
-│   │   └── chatbot.js        # Floating AI chatbot widget (Shadow DOM)
+│   │   ├── chatbot.js        # Floating AI chatbot widget (Shadow DOM)
+│   │   └── offer-fetcher.js  # Seller price fetching for spread analysis
 │   ├── background/
 │   │   └── service-worker.js # Message routing + Gemini API calls
 │   └── modules/
 │       ├── storage.js        # Chrome storage wrapper
 │       ├── analyzer.js       # Data analysis & insights
+│       ├── spread-analyzer.js # Price spread & arbitrage scoring
 │       └── exporter.js       # Excel/CSV/JSON export
 ├── styles/
 │   └── chatbot.css           # Chatbot widget styles (loaded into Shadow DOM)
@@ -60,9 +62,11 @@ AmazonSellerScraper/
 | -------------------- | --------------------------------------------------------- |
 | `scraper.js`         | DOM scraping with cascading fallback selectors            |
 | `chatbot.js`         | Floating AI chatbot widget on Amazon pages (Shadow DOM)   |
+| `offer-fetcher.js`   | Fetches seller offer pages for price spread analysis      |
 | `chatbot.css`        | Widget styles loaded into Shadow DOM                      |
 | `storage.js`         | Async wrapper for chrome.storage.local                    |
 | `analyzer.js`        | Opportunity scoring, insights, statistics                 |
+| `spread-analyzer.js` | Price spread statistics (CV, std dev, arbitrage scoring)  |
 | `exporter.js`        | Multi-format export (Excel, CSV, JSON)                    |
 | `service-worker.js`  | Message routing, Gemini API calls, optional server sync   |
 
@@ -211,8 +215,18 @@ Add `claude_desktop_config.json` contents to Claude Desktop's MCP config.
 Formula: `(rating * log(reviews+1)) / sqrt(price)`
 - Higher score = better arbitrage opportunity
 
+### Price Spread Analysis
+
+For each scraped ASIN, fetches competing seller prices and calculates:
+- Coefficient of Variation (CV) = stdDev / mean * 100
+- Arbitrage Score = (CV/15) * log10(sellers+1) * min(1, spread/$20)
+- Combined score blends base opportunity (60%) with spread arbitrage (40%)
+
+See `docs/PRICE_SPREAD_ANALYSIS.md` for the full specification.
+
 ### Insights
 
+- High price spread products (CV > 30% across sellers)
 - Underpriced products (30%+ below avg with 4+ stars)
 - Underexposed products (good ratings, <50 reviews)
 - Price/rating distributions
@@ -223,6 +237,7 @@ Formula: `(rating * log(reviews+1)) / sqrt(price)`
 - [x] Multi-format export (Excel, CSV, JSON)
 - [x] In-popup analytics dashboard
 - [x] Opportunity scoring
+- [x] Price spread analysis (seller price variability detection)
 - [x] MCP server with 7 tools
 - [x] FastAPI REST backend
 - [x] RAG pipeline (ChromaDB + sentence-transformers + Gemini)
@@ -234,5 +249,6 @@ Formula: `(rating * log(reviews+1)) / sqrt(price)`
 ## Future
 
 - [ ] Historical data tracking
+- [ ] Historical spread tracking (CV over time)
 - [ ] BSR (Best Seller Rank) extraction
 - [ ] Category detection

@@ -29,6 +29,7 @@ An optional Python backend adds persistent storage (SQLite), semantic search (Ch
 
 - **Multi-page scraping** -- Automatically navigates and extracts product data (name, ASIN, price, rating, reviews, Prime status) across paginated Amazon results
 - **Opportunity scoring** -- Proprietary formula identifies high-value arbitrage opportunities based on rating, review velocity, and price positioning
+- **Price spread analysis** -- Fetches competing seller prices for each product and calculates variability (Coefficient of Variation) to identify pricing disagreement -- a strong arbitrage signal
 - **AI chatbot** -- Floating widget on Amazon pages answers questions about scraped products using Gemini 2.0 Flash (e.g., "What's the best deal under $30?")
 - **Analytics dashboard** -- Real-time stats, underpriced product detection, and quality distribution analysis
 - **Multi-format export** -- Excel (with styled sheets and charts), CSV, and JSON with full analytics
@@ -128,10 +129,34 @@ Normalized to a 1-10 scale. Higher score = better arbitrage opportunity. The for
 
 | Insight | Criteria | Priority |
 |---------|----------|----------|
+| High price spread | CV > 30% across sellers for the same ASIN | High |
 | Underpriced | 30%+ below average price with 4+ star rating | High |
 | Underexposed | 4+ stars but fewer than 50 reviews | Medium |
 | Price distribution | Min/max/average/median analysis | Low |
 | Quality distribution | Percentage of products above 4.5 stars | Low |
+
+### Price Spread Analysis
+
+After scraping, click **Analyze Price Spreads** to fetch competing seller prices for each product. The system:
+
+1. Fetches the offer listing page for each ASIN (2-second delay between requests)
+2. Extracts all seller prices using cascading DOM selectors
+3. Calculates the **Coefficient of Variation** (stdDev / mean * 100)
+4. Scores arbitrage opportunity based on CV, seller count, and absolute dollar spread
+
+```
+Arbitrage Score = (CV / 15) * log10(sellers + 1) * min(1, spread / $20)
+```
+
+| CV Range | Signal | Meaning |
+|----------|--------|---------|
+| 0-5% | Very Low | Commodity pricing, tight consensus |
+| 5-15% | Low | Normal variance |
+| 15-30% | Moderate | Some pricing disagreement |
+| 30-50% | High | Strong arbitrage signal |
+| 50%+ | Very High | Major pricing disagreement |
+
+See [docs/PRICE_SPREAD_ANALYSIS.md](docs/PRICE_SPREAD_ANALYSIS.md) for the full feature specification.
 
 ## Installation
 
@@ -253,12 +278,14 @@ AmazonSellerScraper/
 ├── scripts/
 │   ├── content/
 │   │   ├── scraper.js            # DOM scraping with cascading selectors
-│   │   └── chatbot.js            # Floating AI chatbot (Shadow DOM)
+│   │   ├── chatbot.js            # Floating AI chatbot (Shadow DOM)
+│   │   └── offer-fetcher.js      # Seller offer page fetching for spread analysis
 │   ├── background/
 │   │   └── service-worker.js     # Message routing + Gemini API
 │   └── modules/
 │       ├── storage.js            # Chrome storage abstraction layer
 │       ├── analyzer.js           # Analytics engine + opportunity scoring
+│       ├── spread-analyzer.js    # Price spread statistics (CV, arbitrage score)
 │       └── exporter.js           # Multi-format export (Excel/CSV/JSON)
 ├── styles/
 │   └── chatbot.css               # Chatbot widget styles (Shadow DOM)
