@@ -1,4 +1,64 @@
-/* ProScan Chatbot Widget — injected via Shadow DOM */
+/*
+ * ProScan Chatbot Widget Styles
+ *
+ * Injected into a closed Shadow DOM to prevent conflicts
+ * with Amazon's page styles. Uses CSS custom properties
+ * for consistent theming across the widget.
+ */
+
+:host {
+    /* Core palette */
+    --cb-bg-primary: #2A343E;
+    --cb-bg-surface: rgba(253, 253, 253, 0.08);
+    --cb-bg-border: rgba(253, 253, 253, 0.08);
+    --cb-text-primary: #FDFDFD;
+    --cb-text-muted: rgba(253, 253, 253, 0.5);
+    --cb-text-placeholder: rgba(253, 253, 253, 0.3);
+
+    /* Accent colors */
+    --cb-accent-green: #4CAF50;
+    --cb-accent-green-dark: #388E3C;
+    --cb-accent-green-muted: rgba(76, 175, 80, 0.1);
+
+    /* Message bubble colors */
+    --cb-bubble-ai-bg: rgba(76, 175, 80, 0.12);
+    --cb-bubble-ai-text: #C8E6C9;
+    --cb-bubble-user-bg: rgba(33, 150, 243, 0.18);
+    --cb-bubble-user-text: #B3D9FF;
+    --cb-bubble-error-bg: rgba(244, 67, 54, 0.15);
+    --cb-bubble-error-text: #EF9A9A;
+
+    /* Badge */
+    --cb-badge-bg: rgba(76, 175, 80, 0.2);
+    --cb-badge-text: #81C784;
+
+    /* Layout */
+    --cb-panel-width: 360px;
+    --cb-panel-height: 460px;
+    --cb-toggle-size: 52px;
+    --cb-toggle-icon-size: 34px;
+
+    /* Typography */
+    --cb-font-family: 'Segoe UI', Arial, sans-serif;
+    --cb-font-size-sm: 11px;
+    --cb-font-size-base: 13px;
+    --cb-font-size-md: 14px;
+
+    /* Spacing */
+    --cb-spacing-sm: 8px;
+    --cb-spacing-md: 12px;
+    --cb-spacing-lg: 14px;
+    --cb-spacing-xl: 16px;
+
+    /* Borders */
+    --cb-radius-sm: 4px;
+    --cb-radius-md: 8px;
+    --cb-radius-lg: 12px;
+    --cb-radius-bubble: 14px;
+
+    /* Transitions */
+    --cb-transition: 0.2s ease;
+}
 
 * {
     box-sizing: border-box;
@@ -6,15 +66,15 @@
     padding: 0;
 }
 
-/* Toggle button — always visible */
+/* Toggle button -- always visible, fixed bottom-right */
 .proscan-toggle {
     position: fixed;
     bottom: 24px;
     right: 24px;
-    width: 52px;
-    height: 52px;
+    width: var(--cb-toggle-size);
+    height: var(--cb-toggle-size);
     border-radius: 50%;
-    background: #2A343E;
+    background: var(--cb-bg-primary);
     border: none;
     cursor: pointer;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
@@ -22,7 +82,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: transform var(--cb-transition), box-shadow var(--cb-transition);
     padding: 0;
     overflow: hidden;
 }
@@ -33,27 +93,27 @@
 }
 
 .proscan-toggle img {
-    width: 34px;
-    height: 34px;
+    width: var(--cb-toggle-icon-size);
+    height: var(--cb-toggle-icon-size);
     border-radius: 50%;
 }
 
-/* Chat panel — shown when open */
+/* Chat panel -- hidden by default, shown with .open class */
 .proscan-panel {
     position: fixed;
     bottom: 88px;
     right: 24px;
-    width: 360px;
-    height: 460px;
-    background: #2A343E;
-    border-radius: 12px;
+    width: var(--cb-panel-width);
+    height: var(--cb-panel-height);
+    background: var(--cb-bg-primary);
+    border-radius: var(--cb-radius-lg);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     z-index: 2147483646;
     display: none;
     flex-direction: column;
     overflow: hidden;
-    font-family: 'Segoe UI', Arial, sans-serif;
-    color: #FDFDFD;
+    font-family: var(--cb-font-family);
+    color: var(--cb-text-primary);
 }
 
 .proscan-panel.open {
@@ -62,21 +122,21 @@
 
 /* Header */
 .proscan-header {
-    padding: 14px 16px;
-    background: rgba(76, 175, 80, 0.1);
-    border-bottom: 1px solid rgba(253, 253, 253, 0.08);
+    padding: var(--cb-spacing-lg) var(--cb-spacing-xl);
+    background: var(--cb-accent-green-muted);
+    border-bottom: 1px solid var(--cb-bg-border);
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
 
 .proscan-header-title {
-    font-size: 14px;
+    font-size: var(--cb-font-size-md);
     font-weight: 600;
     display: flex;
     align-items: center;
-    gap: 8px;
-    color: #FDFDFD;
+    gap: var(--cb-spacing-sm);
+    color: var(--cb-text-primary);
 }
 
 .proscan-header-title img {
@@ -87,7 +147,7 @@
 .proscan-close {
     background: none;
     border: none;
-    color: rgba(253, 253, 253, 0.5);
+    color: var(--cb-text-muted);
     font-size: 18px;
     cursor: pointer;
     padding: 4px;
@@ -95,41 +155,41 @@
 }
 
 .proscan-close:hover {
-    color: #FDFDFD;
+    color: var(--cb-text-primary);
 }
 
 /* Messages area */
 .proscan-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 12px 14px;
+    padding: var(--cb-spacing-md) var(--cb-spacing-lg);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--cb-spacing-sm);
 }
 
 /* Chat bubbles */
 .proscan-bubble {
-    padding: 10px 14px;
-    border-radius: 14px;
-    font-size: 13px;
+    padding: 10px var(--cb-spacing-lg);
+    border-radius: var(--cb-radius-bubble);
+    font-size: var(--cb-font-size-base);
     line-height: 1.5;
     max-width: 85%;
     word-wrap: break-word;
 }
 
 .proscan-bubble.ai {
-    background: rgba(76, 175, 80, 0.12);
-    color: #C8E6C9;
+    background: var(--cb-bubble-ai-bg);
+    color: var(--cb-bubble-ai-text);
     align-self: flex-start;
-    border-bottom-left-radius: 4px;
+    border-bottom-left-radius: var(--cb-radius-sm);
 }
 
 .proscan-bubble.user {
-    background: rgba(33, 150, 243, 0.18);
-    color: #B3D9FF;
+    background: var(--cb-bubble-user-bg);
+    color: var(--cb-bubble-user-text);
     align-self: flex-end;
-    border-bottom-right-radius: 4px;
+    border-bottom-right-radius: var(--cb-radius-sm);
 }
 
 .proscan-bubble.loading {
@@ -138,48 +198,48 @@
 }
 
 .proscan-bubble.error {
-    background: rgba(244, 67, 54, 0.15);
-    color: #EF9A9A;
+    background: var(--cb-bubble-error-bg);
+    color: var(--cb-bubble-error-text);
 }
 
 /* Input area */
 .proscan-input-row {
-    padding: 12px 14px;
-    border-top: 1px solid rgba(253, 253, 253, 0.08);
+    padding: var(--cb-spacing-md) var(--cb-spacing-lg);
+    border-top: 1px solid var(--cb-bg-border);
     display: flex;
-    gap: 8px;
+    gap: var(--cb-spacing-sm);
 }
 
 .proscan-input {
     flex: 1;
-    background: rgba(253, 253, 253, 0.08);
+    background: var(--cb-bg-surface);
     border: 1px solid rgba(253, 253, 253, 0.12);
-    border-radius: 8px;
-    padding: 10px 12px;
-    color: #FDFDFD;
-    font-size: 13px;
+    border-radius: var(--cb-radius-md);
+    padding: 10px var(--cb-spacing-md);
+    color: var(--cb-text-primary);
+    font-size: var(--cb-font-size-base);
     outline: none;
     font-family: inherit;
-    transition: border-color 0.2s;
+    transition: border-color var(--cb-transition);
 }
 
 .proscan-input:focus {
-    border-color: #4CAF50;
+    border-color: var(--cb-accent-green);
 }
 
 .proscan-input::placeholder {
-    color: rgba(253, 253, 253, 0.3);
+    color: var(--cb-text-placeholder);
 }
 
 .proscan-send {
-    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+    background: linear-gradient(135deg, var(--cb-accent-green) 0%, var(--cb-accent-green-dark) 100%);
     border: none;
-    border-radius: 8px;
+    border-radius: var(--cb-radius-md);
     color: white;
-    padding: 10px 14px;
+    padding: 10px var(--cb-spacing-lg);
     cursor: pointer;
-    font-size: 14px;
-    transition: opacity 0.2s;
+    font-size: var(--cb-font-size-md);
+    transition: opacity var(--cb-transition);
     display: flex;
     align-items: center;
 }
@@ -201,24 +261,24 @@
 
 /* No API key notice */
 .proscan-notice {
-    padding: 10px 14px;
+    padding: 10px var(--cb-spacing-lg);
     font-size: 12px;
     color: #FFD54F;
     text-align: center;
-    border-top: 1px solid rgba(253, 253, 253, 0.08);
+    border-top: 1px solid var(--cb-bg-border);
 }
 
-/* Product count badge on header */
+/* Product count badge */
 .proscan-badge {
-    background: rgba(76, 175, 80, 0.2);
-    color: #81C784;
-    font-size: 11px;
-    padding: 2px 8px;
+    background: var(--cb-badge-bg);
+    color: var(--cb-badge-text);
+    font-size: var(--cb-font-size-sm);
+    padding: 2px var(--cb-spacing-sm);
     border-radius: 10px;
     font-weight: 500;
 }
 
-/* Scrollbar */
+/* Custom scrollbar */
 .proscan-messages::-webkit-scrollbar {
     width: 5px;
 }
