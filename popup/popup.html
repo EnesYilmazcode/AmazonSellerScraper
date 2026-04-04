@@ -6,6 +6,7 @@
     <script src="../libs/xlsx.full.min.js"></script>
     <script src="../scripts/modules/storage.js"></script>
     <script src="../scripts/modules/analyzer.js"></script>
+    <script src="../scripts/modules/spread-analyzer.js"></script>
     <script src="../scripts/modules/exporter.js"></script>
 </head>
 <body>
@@ -46,6 +47,31 @@
         <button id="actionButton" class="primary-button">
             <i class="fas fa-play"></i> Start Scraping
         </button>
+
+        <!-- Spread Analysis -->
+        <button id="spreadButton" class="spread-button hidden">
+            <i class="fas fa-chart-bar"></i> Analyze Price Spreads
+        </button>
+
+        <div id="spreadProgress" class="spread-progress hidden">
+            <div class="spread-progress-bar">
+                <div class="spread-progress-fill" id="spreadProgressFill"></div>
+            </div>
+            <span class="spread-progress-text" id="spreadProgressText">0/0</span>
+        </div>
+
+        <div id="spreadResults" class="spread-results hidden">
+            <div class="spread-stats">
+                <div class="spread-stat">
+                    <span class="spread-stat-value" id="spreadHighCount">0</span>
+                    <span class="spread-stat-label">High Spread</span>
+                </div>
+                <div class="spread-stat">
+                    <span class="spread-stat-value" id="spreadAvgCV">0%</span>
+                    <span class="spread-stat-label">Avg CV</span>
+                </div>
+            </div>
+        </div>
 
         <!-- Export Options -->
         <div class="export-buttons hidden" id="exportButtons">

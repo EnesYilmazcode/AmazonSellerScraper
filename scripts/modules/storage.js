@@ -25,7 +25,11 @@ const Storage = {
         /** @type {string} Boolean flag -- true while scraping is in progress */
         IS_SCRAPING: 'isScrapingActive',
         /** @type {string} User preferences (page delay, max pages, API key) */
-        SETTINGS: 'settings'
+        SETTINGS: 'settings',
+        /** @type {string} Map of ASIN → spread data from offer fetcher */
+        SPREAD_RESULTS: 'spreadResults',
+        /** @type {string} Boolean flag -- true while spread analysis is running */
+        IS_SPREAD_ANALYZING: 'isSpreadAnalyzing'
     },
 
     /**

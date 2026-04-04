@@ -236,6 +236,102 @@ h1 {
     transform: none;
 }
 
+/* Spread Analysis */
+.spread-button {
+    width: 100%;
+    padding: 10px var(--spacing-md);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-base);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    background: rgba(255, 193, 7, 0.1);
+    color: var(--color-status-warning-text);
+    margin-top: 10px;
+}
+
+.spread-button:hover {
+    background: rgba(255, 193, 7, 0.2);
+    transform: translateY(-1px);
+}
+
+.spread-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.spread-button.stop {
+    background: rgba(244, 67, 54, 0.15);
+    border-color: rgba(244, 67, 54, 0.3);
+    color: var(--color-status-error-text);
+}
+
+.spread-progress {
+    margin-top: var(--spacing-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.spread-progress-bar {
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.spread-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-accent-green), #8BC34A);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.spread-progress-text {
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+    min-width: 40px;
+    text-align: right;
+}
+
+.spread-results {
+    margin-top: var(--spacing-sm);
+    background: var(--color-bg-surface);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+}
+
+.spread-stats {
+    display: flex;
+    justify-content: space-around;
+    gap: var(--spacing-sm);
+}
+
+.spread-stat {
+    text-align: center;
+}
+
+.spread-stat-value {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    color: #FFC107;
+}
+
+.spread-stat-label {
+    font-size: var(--font-size-sm);
+    opacity: 0.7;
+    margin-top: 2px;
+}
+
 /* Spinner */
 .spinner {
     width: 16px;

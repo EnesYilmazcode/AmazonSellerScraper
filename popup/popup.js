@@ -29,6 +29,9 @@ let scrapedItemCount = 0;
 /** @type {Object[]} Full array of scraped product objects */
 let currentResults = [];
 
+/** @type {boolean} Whether spread analysis is currently running */
+let isSpreadAnalyzing = false;
+
 /**
  * Cached references to DOM elements used throughout the popup lifecycle.
  * Resolved once at module load time for performance.
@@ -46,7 +49,14 @@ const elements = {
     downloadJSON: document.getElementById('downloadJSON'),
     insightsPreview: document.getElementById('insightsPreview'),
     insightBadge: document.getElementById('insightBadge'),
-    insightText: document.getElementById('insightText')
+    insightText: document.getElementById('insightText'),
+    spreadButton: document.getElementById('spreadButton'),
+    spreadProgress: document.getElementById('spreadProgress'),
+    spreadProgressFill: document.getElementById('spreadProgressFill'),
+    spreadProgressText: document.getElementById('spreadProgressText'),
+    spreadResults: document.getElementById('spreadResults'),
+    spreadHighCount: document.getElementById('spreadHighCount'),
+    spreadAvgCV: document.getElementById('spreadAvgCV')
 };
 
 /**
@@ -192,6 +202,15 @@ async function initializeUI() {
 
     if (!isScrapingActive && currentResults.length > 0) {
         updateStatus('Ready to download ' + currentResults.length + ' products', 'success');
+        elements.spreadButton.classList.remove('hidden');
+
+        // Check if spread results already exist
+        const spreadData = await new Promise(resolve => {
+            chrome.storage.local.get(['spreadResults'], resolve);
+        });
+        if (spreadData.spreadResults && Object.keys(spreadData.spreadResults).length > 0) {
+            displaySpreadResults();
+        }
     }
 }
 
@@ -236,7 +255,89 @@ async function stopScraping() {
     setScrapingState(false);
 }
 
+// --- Spread Analysis ---
+
+/**
+ * Start the price spread analysis.
+ * Sends a message to the offer-fetcher content script to begin
+ * fetching offer pages for all scraped products.
+ */
+async function startSpreadAnalysis() {
+    if (currentResults.length === 0) {
+        updateStatus('No products to analyze!', 'warning');
+        return;
+    }
+
+    isSpreadAnalyzing = true;
+    elements.spreadButton.innerHTML = '<i class="fas fa-stop"></i> Stop Analysis';
+    elements.spreadButton.classList.add('stop');
+    elements.spreadProgress.classList.remove('hidden');
+    elements.spreadResults.classList.add('hidden');
+    elements.spreadProgressFill.style.width = '0%';
+    elements.spreadProgressText.textContent = `0/${currentResults.length}`;
+    updateStatus('Analyzing price spreads...', 'info');
+
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SPREAD_ANALYSIS' });
+    });
+}
+
+/**
+ * Stop the running spread analysis.
+ */
+function stopSpreadAnalysis() {
+    isSpreadAnalyzing = false;
+    elements.spreadButton.innerHTML = '<i class="fas fa-chart-bar"></i> Analyze Price Spreads';
+    elements.spreadButton.classList.remove('stop');
+    updateStatus('Spread analysis stopped.', 'warning');
+
+    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'STOP_SPREAD_ANALYSIS' });
+    });
+}
+
+/**
+ * Display the spread analysis results in the popup.
+ * Reads spread data from storage and runs it through SpreadAnalyzer.
+ */
+async function displaySpreadResults() {
+    const data = await new Promise(resolve => {
+        chrome.storage.local.get(['spreadResults'], resolve);
+    });
+
+    const spreadResults = data.spreadResults || {};
+    const analyzed = SpreadAnalyzer.analyzeAll(spreadResults);
+    const summary = SpreadAnalyzer.generateSummary(analyzed);
+
+    elements.spreadHighCount.textContent = summary.highSpreadCount;
+    elements.spreadAvgCV.textContent = summary.avgCV + '%';
+    elements.spreadResults.classList.remove('hidden');
+    elements.spreadProgress.classList.add('hidden');
+
+    // Show insight if there are high-spread products
+    if (summary.highSpreadCount > 0) {
+        updateStatus(
+            `Found ${summary.highSpreadCount} products with high price spread!`,
+            'success'
+        );
+    } else if (summary.withSpreadData > 0) {
+        updateStatus(
+            `Analyzed ${summary.withSpreadData} products. No high spreads found.`,
+            'info'
+        );
+    }
+}
+
 // --- Event Listeners ---
+
+// Spread analysis button: toggle start/stop
+elements.spreadButton.addEventListener('click', () => {
+    if (!isSpreadAnalyzing) {
+        startSpreadAnalysis();
+    } else {
+        stopSpreadAnalysis();
+    }
+});
 
 // Action button: toggle scraping on/off
 elements.actionButton.addEventListener('click', async () => {
@@ -354,10 +455,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             updateStats(currentResults);
             updateStatus('Scraping complete! ' + results.length + ' products found.', 'success');
             setScrapingState(false);
+            // Show spread analysis button
+            if (results.length > 0) {
+                elements.spreadButton.classList.remove('hidden');
+            }
         });
     } else if (request.type === 'PAGE_COMPLETE') {
         scrapedItemCount += request.itemsScraped;
         elements.itemCount.textContent = scrapedItemCount;
+    } else if (request.type === 'SPREAD_PROGRESS') {
+        // Update spread analysis progress bar
+        const percent = Math.round((request.current / request.total) * 100);
+        elements.spreadProgressFill.style.width = percent + '%';
+        elements.spreadProgressText.textContent = `${request.current}/${request.total}`;
+    } else if (request.type === 'SPREAD_ANALYSIS_COMPLETE') {
+        isSpreadAnalyzing = false;
+        elements.spreadButton.innerHTML = '<i class="fas fa-chart-bar"></i> Analyze Price Spreads';
+        elements.spreadButton.classList.remove('stop');
+        displaySpreadResults();
     }
 });
 
