@@ -1,7 +1,62 @@
+/*
+ * ProScan Popup Styles
+ *
+ * Design system built on CSS custom properties for consistent
+ * theming across the extension popup interface.
+ */
+
+:root {
+    /* Core palette */
+    --color-bg-primary: #2A343E;
+    --color-bg-surface: rgba(255, 255, 255, 0.05);
+    --color-bg-status: rgba(255, 255, 255, 0.08);
+    --color-text-primary: #FDFDFD;
+    --color-text-muted: rgba(255, 255, 255, 0.7);
+
+    /* Accent colors */
+    --color-accent-green: #4CAF50;
+    --color-accent-green-dark: #388E3C;
+    --color-accent-blue: #2196F3;
+    --color-accent-blue-dark: #1976D2;
+    --color-accent-red: #f44336;
+    --color-accent-red-dark: #c62828;
+    --color-accent-gold: #FFD700;
+
+    /* Status colors */
+    --color-status-success-bg: rgba(76, 175, 80, 0.2);
+    --color-status-success-text: #81C784;
+    --color-status-error-bg: rgba(244, 67, 54, 0.2);
+    --color-status-error-text: #E57373;
+    --color-status-warning-bg: rgba(255, 193, 7, 0.2);
+    --color-status-warning-text: #FFD54F;
+
+    /* Typography */
+    --font-family: 'Segoe UI', Arial, sans-serif;
+    --font-size-sm: 11px;
+    --font-size-base: 13px;
+    --font-size-md: 14px;
+    --font-size-lg: 20px;
+
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 20px;
+
+    /* Borders */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-pill: 20px;
+
+    /* Transitions */
+    --transition-fast: 0.2s ease;
+}
+
 body {
-    background-color: #2A343E;
-    color: #FDFDFD;
-    font-family: 'Segoe UI', Arial, sans-serif;
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
+    font-family: var(--font-family);
     text-align: center;
     margin: 0;
     padding: 0;
@@ -10,33 +65,33 @@ body {
 
 .card {
     width: 320px;
-    padding: 20px;
-    background-color: #2A343E;
+    padding: var(--spacing-xl);
+    background-color: var(--color-bg-primary);
 }
 
 .logo {
     width: 56px;
-    margin-bottom: 8px;
+    margin-bottom: var(--spacing-sm);
 }
 
 h1 {
-    font-size: 20px;
-    margin: 0 0 16px 0;
+    font-size: var(--font-size-lg);
+    margin: 0 0 var(--spacing-lg) 0;
     font-weight: 600;
 }
 
 /* Dashboard Styles */
 .dashboard {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 12px;
+    background: var(--color-bg-surface);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
 }
 
 .stat-row {
     display: flex;
     justify-content: space-around;
-    gap: 8px;
+    gap: var(--spacing-sm);
 }
 
 .stat {
@@ -45,15 +100,15 @@ h1 {
 }
 
 .stat-value {
-    font-size: 20px;
+    font-size: var(--font-size-lg);
     font-weight: 700;
-    color: #4CAF50;
+    color: var(--color-accent-green);
 }
 
 .stat-label {
-    font-size: 11px;
+    font-size: var(--font-size-sm);
     opacity: 0.7;
-    margin-top: 4px;
+    margin-top: var(--spacing-xs);
 }
 
 .stat-label i {
@@ -62,74 +117,74 @@ h1 {
 
 /* Insights Preview */
 .insights-preview {
-    margin-bottom: 12px;
+    margin-bottom: var(--spacing-md);
 }
 
 .insight-badge {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
-    padding: 8px 14px;
-    border-radius: 20px;
+    gap: var(--spacing-sm);
+    background: linear-gradient(135deg, var(--color-accent-blue) 0%, var(--color-accent-blue-dark) 100%);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-radius: var(--radius-pill);
     font-size: 12px;
     font-weight: 500;
 }
 
 .insight-badge i {
-    color: #FFD700;
+    color: var(--color-accent-gold);
 }
 
 .insight-badge.opportunity {
-    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+    background: linear-gradient(135deg, var(--color-accent-green) 0%, var(--color-accent-green-dark) 100%);
 }
 
 /* Status */
 .status {
-    font-size: 13px;
-    margin-bottom: 16px;
+    font-size: var(--font-size-base);
+    margin-bottom: var(--spacing-lg);
     padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 6px;
+    background: var(--color-bg-status);
+    border-radius: var(--radius-sm);
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--spacing-sm);
 }
 
 .status.success {
-    background: rgba(76, 175, 80, 0.2);
-    color: #81C784;
+    background: var(--color-status-success-bg);
+    color: var(--color-status-success-text);
 }
 
 .status.error {
-    background: rgba(244, 67, 54, 0.2);
-    color: #E57373;
+    background: var(--color-status-error-bg);
+    color: var(--color-status-error-text);
 }
 
 .status.warning {
-    background: rgba(255, 193, 7, 0.2);
-    color: #FFD54F;
+    background: var(--color-status-warning-bg);
+    color: var(--color-status-warning-text);
 }
 
 /* Buttons */
 .primary-button, .download-button {
     width: 100%;
-    padding: 12px;
+    padding: var(--spacing-md);
     border: none;
-    border-radius: 6px;
-    font-size: 14px;
+    border-radius: var(--radius-sm);
+    font-size: var(--font-size-md);
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all var(--transition-fast);
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--spacing-sm);
 }
 
 .primary-button {
-    background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%);
+    background: linear-gradient(135deg, var(--color-accent-green) 0%, var(--color-accent-green-dark) 100%);
     color: white;
 }
 
@@ -139,7 +194,7 @@ h1 {
 }
 
 .primary-button.stop {
-    background: linear-gradient(135deg, #f44336 0%, #c62828 100%);
+    background: linear-gradient(135deg, var(--color-accent-red) 0%, var(--color-accent-red-dark) 100%);
 }
 
 .primary-button.stop:hover {
@@ -149,20 +204,20 @@ h1 {
 /* Export Buttons */
 .export-buttons {
     display: flex;
-    gap: 8px;
+    gap: var(--spacing-sm);
     margin-top: 10px;
 }
 
 .download-button {
     flex: 1;
-    background: #2196F3;
+    background: var(--color-accent-blue);
     color: white;
-    padding: 10px 8px;
+    padding: 10px var(--spacing-sm);
     font-size: 12px;
 }
 
 .download-button:hover {
-    background: #1976D2;
+    background: var(--color-accent-blue-dark);
     transform: translateY(-1px);
 }
 
