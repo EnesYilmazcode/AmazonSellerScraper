@@ -1,7 +1,22 @@
 """RAG chain for product Q&A using Gemini.
 
-Retrieves product context from ChromaDB and generates
-answers using Google Gemini API.
+Implements a Retrieval-Augmented Generation pipeline that:
+1. Fetches structured product data from SQLite
+2. Retrieves semantically similar products from ChromaDB
+3. Builds a context-rich prompt combining both data sources
+4. Generates an answer via Google Gemini API
+
+The chain is designed to give factual, data-backed answers
+about specific products while leveraging context from the
+broader product database for comparative insights.
+
+Pipeline:
+    User Question + ASIN
+      → SQLite lookup (structured product data)
+      → ChromaDB semantic search (similar products for context)
+      → Prompt construction (product info + context + question)
+      → Gemini API (generation)
+      → Answer + sources
 """
 
 import google.generativeai as genai
@@ -11,7 +26,11 @@ from server.db.database import get_product_by_asin
 
 
 def _configure_gemini():
-    """Configure the Gemini API client."""
+    """Configure and return the Gemini generative model client.
+
+    Returns:
+        GenerativeModel or None: Configured model, or None if API key is missing
+    """
     if not GEMINI_API_KEY:
         return None
     genai.configure(api_key=GEMINI_API_KEY)
@@ -21,12 +40,24 @@ def _configure_gemini():
 def chat_with_product(asin, question):
     """RAG-powered Q&A about a specific product.
 
-    1. Retrieve product from SQLite for structured data
-    2. Search ChromaDB for semantically relevant context
-    3. Build prompt with context + question
-    4. Call Gemini API for generation
+    Steps:
+        1. Validate Gemini API key is configured
+        2. Fetch product details from SQLite by ASIN
+        3. Run semantic search in ChromaDB for related products
+        4. Build prompt with structured data + semantic context
+        5. Call Gemini API for generation
+        6. Return answer with source attribution
 
-    Returns dict with answer, sources, and asin.
+    Args:
+        asin: Amazon ASIN of the target product
+        question: Natural language question about the product
+
+    Returns:
+        dict: {
+            'answer': str -- generated response text,
+            'sources': list[dict] -- ChromaDB documents used as context,
+            'asin': str -- the queried ASIN
+        }
     """
     # Check if Gemini is configured
     model = _configure_gemini()
@@ -48,7 +79,7 @@ def chat_with_product(asin, question):
             "asin": asin,
         }
 
-    # Semantic search for relevant context
+    # Semantic search for relevant context from similar products
     search_results = search_similar(
         query=f"{product['name']} {question}",
         n_results=RAG_TOP_K,
@@ -70,7 +101,7 @@ def chat_with_product(asin, question):
 
     context = "\n---\n".join(context_parts) if context_parts else "No additional context available."
 
-    # Build prompt
+    # Build generation prompt with product data and context
     prompt = f"""You are a helpful product analysis assistant for Amazon products.
 Use the provided product data and context to answer the question.
 Be specific, cite data points, and be honest if information is limited.
@@ -91,7 +122,7 @@ Be specific, cite data points, and be honest if information is limited.
 
 Provide a concise, helpful answer:"""
 
-    # Call Gemini
+    # Call Gemini API for generation
     try:
         response = model.generate_content(prompt)
         answer = response.text
