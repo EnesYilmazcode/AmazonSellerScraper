@@ -1,22 +1,55 @@
-// chatbot.js — ProScan floating AI chatbot on Amazon pages
-// Uses Shadow DOM to isolate styles from Amazon's CSS
+/**
+ * @fileoverview Floating AI Chatbot Widget (Shadow DOM)
+ *
+ * Injects a floating chat widget on Amazon product pages that lets users
+ * ask natural-language questions about scraped products. Uses Shadow DOM
+ * to fully isolate widget styles from Amazon's CSS, preventing conflicts.
+ *
+ * Architecture:
+ * - IIFE wraps the entire module for scope isolation
+ * - Shadow DOM (closed mode) prevents Amazon CSS interference
+ * - Communicates with service-worker.js via chrome.runtime.sendMessage
+ * - Reads product data from chrome.storage.local (populated by scraper.js)
+ *
+ * Widget Components:
+ * - Toggle button: circular icon (bottom-right corner, max z-index)
+ * - Chat panel: header with product badge, scrollable messages, text input
+ * - Message bubbles: AI (green), User (blue), Error (red), Loading (italic)
+ *
+ * @module Chatbot
+ */
 
 (function () {
-    // Only run on pages with product listings
+    // Only activate on pages with product listings
     if (!document.querySelector('.s-result-item[data-asin]')) return;
 
+    /** @type {boolean} Whether the chat panel is currently open */
     let isOpen = false;
+
+    /** @type {ShadowRoot} Closed shadow root for style isolation */
     let shadow;
+
+    /** @type {HTMLElement} Messages container element */
     let messagesEl;
+
+    /** @type {HTMLInputElement} Text input element */
     let inputEl;
+
+    /** @type {HTMLButtonElement} Send button element */
     let sendBtn;
+
+    /** @type {HTMLElement} Product count badge element */
     let badgeEl;
 
-    // Icons
+    // Asset URLs resolved via chrome.runtime for extension context
     const LOGO_URL = chrome.runtime.getURL('assets/icons/icon128.png');
     const ICON_SEND = '<svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
 
-    // Create the widget
+    /**
+     * Initialize the chatbot widget.
+     * Creates the Shadow DOM host, loads styles, builds the HTML structure,
+     * and attaches event listeners for toggle, close, send, and keyboard input.
+     */
     function init() {
         const host = document.createElement('div');
         host.id = 'proscan-chatbot-host';
@@ -24,13 +57,13 @@
 
         shadow = host.attachShadow({ mode: 'closed' });
 
-        // Load stylesheet
+        // Load stylesheet into Shadow DOM
         const link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = chrome.runtime.getURL('styles/chatbot.css');
         shadow.appendChild(link);
 
-        // Build HTML
+        // Build widget HTML structure
         const wrapper = document.createElement('div');
         wrapper.innerHTML = `
             <button class="proscan-toggle" title="ProScan AI"><img src="${LOGO_URL}" alt="ProScan" /></button>
@@ -51,7 +84,7 @@
         `;
         shadow.appendChild(wrapper);
 
-        // Cache elements
+        // Cache DOM references within Shadow DOM
         const panel = shadow.querySelector('.proscan-panel');
         const toggle = shadow.querySelector('.proscan-toggle');
         const closeBtn = shadow.querySelector('.proscan-close');
@@ -60,7 +93,7 @@
         sendBtn = shadow.getElementById('ps-send');
         badgeEl = shadow.getElementById('ps-badge');
 
-        // Toggle open/close
+        // Toggle panel open/close
         toggle.addEventListener('click', () => {
             isOpen = !isOpen;
             panel.classList.toggle('open', isOpen);
@@ -75,17 +108,19 @@
             panel.classList.remove('open');
         });
 
-        // Send on click or Enter
+        // Send message on button click or Enter key
         sendBtn.addEventListener('click', sendMessage);
         inputEl.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
 
-        // Update badge with product count
         updateProductBadge();
     }
 
-    // Update the product count badge
+    /**
+     * Update the product count badge in the chat header.
+     * Reads the current result count from chrome.storage.local.
+     */
     function updateProductBadge() {
         chrome.storage.local.get(['results'], (data) => {
             const count = (data.results || []).length;
@@ -93,7 +128,13 @@
         });
     }
 
-    // Add a message bubble
+    /**
+     * Append a message bubble to the chat messages area.
+     *
+     * @param {string} text - Message text content
+     * @param {string} type - CSS class(es) for bubble styling ('user', 'ai', 'ai loading', 'ai error')
+     * @returns {HTMLElement} The created bubble element (useful for updating loading messages)
+     */
     function addBubble(text, type) {
         const bubble = document.createElement('div');
         bubble.className = 'proscan-bubble ' + type;
@@ -103,7 +144,19 @@
         return bubble;
     }
 
-    // Send a chat message
+    /**
+     * Send the user's question to the Gemini API via the service worker.
+     *
+     * Flow:
+     * 1. Read user input and display as user bubble
+     * 2. Show "Thinking..." loading bubble
+     * 3. Read scraped products from chrome.storage.local
+     * 4. Send CHAT_MESSAGE to service worker with question + product context
+     * 5. Update loading bubble with AI response (or error)
+     * 6. Re-enable input for next question
+     *
+     * @async
+     */
     async function sendMessage() {
         const question = inputEl.value.trim();
         if (!question) return;
@@ -115,7 +168,7 @@
         const loadingBubble = addBubble('Thinking...', 'ai loading');
 
         try {
-            // Get products from storage
+            // Read products from storage for context
             const data = await chrome.storage.local.get(['results']);
             const products = (data.results || []).map(p => ({
                 name: p.name,
@@ -152,7 +205,7 @@
         inputEl.focus();
     }
 
-    // Wait for DOM then initialize
+    // Initialize when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
