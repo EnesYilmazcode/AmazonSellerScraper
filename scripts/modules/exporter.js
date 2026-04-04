@@ -1,8 +1,28 @@
-// exporter.js - Export functionality for scraped data
-// Supports Excel, CSV, and JSON exports
+/**
+ * @fileoverview Multi-Format Export Pipeline
+ *
+ * Handles exporting scraped product data in three formats:
+ * - **Excel** (.xlsx): Multi-sheet workbook with styled headers, analytics,
+ *   price/rating distributions, top opportunities, and actionable insights
+ * - **CSV**: Lightweight comma-separated export for spreadsheet tools
+ * - **JSON**: Full data dump with optional analytics for programmatic use
+ *
+ * Uses XLSX.js (SheetJS) for Excel generation and the Chrome Downloads API
+ * for triggering save-as dialogs.
+ *
+ * @module Exporter
+ * @requires XLSX - SheetJS library (loaded from libs/xlsx.full.min.js)
+ * @requires Analyzer - For analytics data in JSON and Excel exports
+ */
 
 const Exporter = {
-    // Generate filename based on results and date
+    /**
+     * Generate a sanitized filename based on the seller name and current date.
+     *
+     * @param {Object[]} results - Scraped product results (uses first item's sellerName)
+     * @param {string} [format='xlsx'] - File extension
+     * @returns {string} Filename like "amazon_store_scraped_data_2026-04-03.xlsx"
+     */
     getFileName(results, format = 'xlsx') {
         const date = new Date().toISOString().split('T')[0];
         let storeName = 'amazon_store';
@@ -15,7 +35,13 @@ const Exporter = {
         return `${sanitizedName}_scraped_data_${date}.${format}`;
     },
 
-    // Export to CSV
+    /**
+     * Export product data as CSV.
+     * Includes proper escaping for fields containing commas or quotes.
+     *
+     * @param {Object[]} results - Array of product objects
+     * @returns {{blob: Blob, filename: string}} CSV blob and suggested filename
+     */
     exportToCSV(results) {
         const headers = ['Product Name', 'ASIN', 'Price', 'Rating', 'Review Count', 'URL'];
         const rows = [headers.join(',')];
@@ -40,7 +66,14 @@ const Exporter = {
         };
     },
 
-    // Export to JSON
+    /**
+     * Export product data as JSON with optional analytics.
+     * If the Analyzer module is available, includes a full analysis report.
+     *
+     * @param {Object[]} results - Array of product objects
+     * @param {boolean} [includeAnalytics=true] - Whether to include analytics data
+     * @returns {{blob: Blob, filename: string}} JSON blob and suggested filename
+     */
     exportToJSON(results, includeAnalytics = true) {
         let exportData = { products: results };
 
@@ -59,19 +92,27 @@ const Exporter = {
         };
     },
 
-    // Create Excel workbook with styling
+    /**
+     * Create a multi-sheet Excel workbook with full analytics.
+     *
+     * Sheets generated:
+     * 1. **Data** - Product listing with header, summary stats, and styled table
+     * 2. **Analytics** - Price/rating distributions and top 10 opportunities
+     * 3. **Insights** (conditional) - Prioritized actionable insights
+     *
+     * @param {Object[]} results - Array of product objects
+     * @param {Object|null} [analysisReport=null] - Output from Analyzer.generateFullReport()
+     * @returns {Object} XLSX.js workbook object
+     */
     createExcelWorkbook(results, analysisReport = null) {
         const wb = XLSX.utils.book_new();
 
-        // Create Data Sheet
         const dataSheet = this.createDataSheet(results);
         XLSX.utils.book_append_sheet(wb, dataSheet, 'Data');
 
-        // Create Analytics Sheet
         const analyticsSheet = this.createAnalyticsSheet(results, analysisReport);
         XLSX.utils.book_append_sheet(wb, analyticsSheet, 'Analytics');
 
-        // Create Insights Sheet if we have analysis
         if (analysisReport && analysisReport.insights) {
             const insightsSheet = this.createInsightsSheet(analysisReport);
             XLSX.utils.book_append_sheet(wb, insightsSheet, 'Insights');
@@ -80,7 +121,19 @@ const Exporter = {
         return wb;
     },
 
-    // Create main data sheet
+    /**
+     * Create the main Data sheet with report header, summary statistics,
+     * and the full product table.
+     *
+     * Layout:
+     * - Row 1: Report title (merged across all columns)
+     * - Rows 3-6: Report details (left) and summary stats (right)
+     * - Row 8: Column headers (Product Name, ASIN, Price, Rating, Review Count)
+     * - Rows 9+: Product data rows
+     *
+     * @param {Object[]} results - Array of product objects
+     * @returns {Object} XLSX.js worksheet object
+     */
     createDataSheet(results) {
         // Calculate averages
         const validPrices = results
@@ -135,7 +188,7 @@ const Exporter = {
             { wch: 12 }  // Review Count
         ];
 
-        // Set merged cells
+        // Set merged cells for title and section headers
         ws['!merges'] = [
             { s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }, // Title
             { s: { r: 2, c: 0 }, e: { r: 2, c: 2 } }, // Report Details
@@ -148,9 +201,19 @@ const Exporter = {
         return ws;
     },
 
-    // Create analytics sheet
+    /**
+     * Create the Analytics sheet with distribution tables and top opportunities.
+     *
+     * Sections:
+     * - Price distribution (5 buckets)
+     * - Rating distribution (4 buckets)
+     * - Top 10 opportunities with opportunity scores
+     *
+     * @param {Object[]} results - Array of product objects
+     * @param {Object|null} analysisReport - Output from Analyzer.generateFullReport()
+     * @returns {Object} XLSX.js worksheet object
+     */
     createAnalyticsSheet(results, analysisReport) {
-        // Calculate distributions
         const priceDistribution = { '$0-$10': 0, '$10-$25': 0, '$25-$50': 0, '$50+': 0 };
         const ratingDistribution = { '5 Stars': 0, '4-4.9 Stars': 0, '3-3.9 Stars': 0, 'Below 3': 0 };
 
@@ -205,7 +268,12 @@ const Exporter = {
         return ws;
     },
 
-    // Create insights sheet
+    /**
+     * Create the Insights sheet with prioritized actionable recommendations.
+     *
+     * @param {Object} analysisReport - Output from Analyzer.generateFullReport()
+     * @returns {Object} XLSX.js worksheet object
+     */
     createInsightsSheet(analysisReport) {
         const insightsData = [
             ['Actionable Insights', ''],
@@ -236,7 +304,14 @@ const Exporter = {
         return ws;
     },
 
-    // Apply styles to data sheet
+    /**
+     * Apply visual styles to the Data sheet.
+     * Styles include: blue title bar, white-on-blue column headers,
+     * currency formatting for prices, and number formatting for reviews.
+     *
+     * @param {Object} ws - XLSX.js worksheet object
+     * @param {number} rowCount - Total number of rows in the worksheet
+     */
     applyDataSheetStyles(ws, rowCount) {
         const styles = {
             title: {
@@ -265,23 +340,29 @@ const Exporter = {
             if (ws[cellAddr]) ws[cellAddr].s = styles.header;
         }
 
-        // Apply number formatting
+        // Apply number formatting to data rows
         for (let r = 8; r < rowCount; r++) {
-            // Price column
+            // Price column -- currency format
             const priceCell = XLSX.utils.encode_cell({ r, c: 2 });
             if (ws[priceCell]) ws[priceCell].z = '$0.00';
 
-            // Rating column
+            // Rating column -- one decimal place
             const ratingCell = XLSX.utils.encode_cell({ r, c: 3 });
             if (ws[ratingCell]) ws[ratingCell].z = '0.0';
 
-            // Review count column
+            // Review count column -- thousands separator
             const reviewCell = XLSX.utils.encode_cell({ r, c: 4 });
             if (ws[reviewCell]) ws[reviewCell].z = '#,##0';
         }
     },
 
-    // Export to Excel
+    /**
+     * Generate and package an Excel workbook as a downloadable blob.
+     *
+     * @param {Object[]} results - Array of product objects
+     * @param {Object|null} [analysisReport=null] - Output from Analyzer.generateFullReport()
+     * @returns {{blob: Blob, filename: string}} Excel blob and suggested filename
+     */
     exportToExcel(results, analysisReport = null) {
         const wb = this.createExcelWorkbook(results, analysisReport);
 
@@ -299,7 +380,14 @@ const Exporter = {
         };
     },
 
-    // Trigger download using Chrome Downloads API
+    /**
+     * Trigger a file download using the Chrome Downloads API.
+     * Opens a save-as dialog and cleans up the object URL after download.
+     *
+     * @param {Blob} blob - File content as a Blob
+     * @param {string} filename - Suggested filename for the download
+     * @param {Function} [callback] - Called with downloadId on success, null on failure
+     */
     triggerDownload(blob, filename, callback) {
         const url = URL.createObjectURL(blob);
 
