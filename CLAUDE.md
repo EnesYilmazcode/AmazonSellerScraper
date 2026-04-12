@@ -46,6 +46,19 @@ AmazonSellerScraper/
 │       ├── embeddings.py     # sentence-transformers embeddings
 │       ├── vectorstore.py    # ChromaDB vector store
 │       └── chain.py          # Gemini RAG chain
+├── tests/                     # Test suite (Jest + pytest)
+│   ├── setup/
+│   │   ├── chrome-mock.js    # In-memory Chrome API mock
+│   │   └── dom-helpers.js    # vm-based content script loader + JSDOM
+│   ├── fixtures/
+│   │   ├── amazon-search-results.html  # Scraper HTML fixture (4 products)
+│   │   ├── amazon-search-lastpage.html # Last page pagination fixture
+│   │   ├── amazon-offer-aod.html       # AOD offer listing fixture
+│   │   ├── amazon-offer-classic.html   # Classic offer listing fixture
+│   │   └── sample-products.js          # Reusable product/spread data
+│   ├── unit/                 # Unit tests per module
+│   ├── integration/          # Cross-module pipeline tests
+│   └── server/               # Python server tests (pytest)
 ├── libs/
 │   └── xlsx.full.min.js      # Excel generation library
 ├── assets/
@@ -173,6 +186,33 @@ python -m server.seed_data
 
 Add `claude_desktop_config.json` contents to Claude Desktop's MCP config.
 
+## Testing
+
+### JavaScript (Jest + JSDOM) — 214 tests
+
+```bash
+npm test              # Run all JS tests
+npm run test:unit     # Unit tests only
+npm run test:integration  # Integration tests only
+npm run test:coverage # With coverage report
+```
+
+**Test architecture:**
+- Pure logic modules (`analyzer.js`, `spread-analyzer.js`) are tested via `require()` directly
+- Content scripts (`scraper.js`, `offer-fetcher.js`) have no `module.exports` — loaded via `vm.runInContext` into a JSDOM context with Chrome API mocks and an `innerText` polyfill
+- HTML fixtures in `tests/fixtures/` match the exact CSS selectors the code uses
+- Chrome APIs (`storage`, `runtime`, `tabs`, `downloads`) are mocked in `tests/setup/chrome-mock.js`
+- XLSX is mocked with jest.fn() stubs for workbook creation
+
+### Python (pytest) — 35 tests
+
+```bash
+pip install -r server/requirements-dev.txt
+python -m pytest tests/server/ -v
+```
+
+Each test gets an isolated temp SQLite database via the `temp_db` fixture (patches `server.config.DB_PATH`). API tests use Starlette's `TestClient`.
+
 ## Chrome APIs Used
 
 - `chrome.storage.local` — state persistence
@@ -245,6 +285,7 @@ See `docs/PRICE_SPREAD_ANALYSIS.md` for the full specification.
 - [x] Shadow DOM isolation for chatbot widget
 - [x] API key management in popup settings
 - [x] Server sync from extension (optional)
+- [x] Comprehensive test suite (249 tests: 214 JS + 35 Python)
 
 ## Future
 
