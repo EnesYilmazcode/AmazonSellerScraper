@@ -1,0 +1,15 @@
+{
+  "name": "proscan-tests",
+  "private": true,
+  "scripts": {
+    "test": "jest --verbose",
+    "test:unit": "jest tests/unit --verbose",
+    "test:integration": "jest tests/integration --verbose",
+    "test:coverage": "jest --coverage",
+    "test:server": "cd server && python -m pytest ../tests/server -v"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}

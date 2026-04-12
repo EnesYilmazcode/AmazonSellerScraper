@@ -18,3 +18,10 @@ build/
 # Test artifacts
 server/test_phase1.py
 server/test_rag.py
+
+# Node.js
+node_modules/
+coverage/
+
+# Pytest
+.pytest_cache/
