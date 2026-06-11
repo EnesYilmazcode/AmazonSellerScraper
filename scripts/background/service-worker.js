@@ -4,7 +4,6 @@
  * Central message router for the ProScan extension. Handles:
  * - Message routing between popup, content scripts, and external APIs
  * - Gemini 2.0 Flash API calls for the AI chatbot
- * - Optional server sync (fire-and-forget POST to local FastAPI backend)
  * - Extension lifecycle events (install, update, startup)
  *
  * Runs as a Manifest V3 service worker -- no persistent background page.
@@ -36,7 +35,7 @@ const _dk = () => atob(_t);
  *
  * Message types handled:
  * - STOP_SCRAPING: Forwarded from popup to the active tab's content script
- * - SCRAPING_COMPLETE: Triggers optional server sync
+ * - SCRAPING_COMPLETE: Logs scrape completion
  * - CHAT_MESSAGE: Sends question + product context to Gemini API
  *
  * Returns true to keep the message channel open for async responses.
@@ -47,10 +46,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         chrome.tabs.sendMessage(sender.tab.id, { type: 'STOP_SCRAPING' });
     }
 
-    // When scraping completes, auto-sync to local server (optional)
+    // Log scrape completion
     if (request.type === 'SCRAPING_COMPLETE') {
         console.log('[ProScan] Scraping completed:', request.itemCount, 'items');
-        syncToServer();
     }
 
     // AI chatbot -- call Gemini API with product context
@@ -141,45 +139,6 @@ chrome.runtime.onInstalled.addListener((details) => {
         console.log('[ProScan] Extension updated to version', chrome.runtime.getManifest().version);
     }
 });
-
-/** @const {string} Local backend server URL for optional data sync */
-const MCP_SERVER_URL = 'http://127.0.0.1:8000';
-
-/**
- * Sync scraped products to the local FastAPI backend.
- * Fire-and-forget -- errors are logged but don't affect extension functionality.
- * The extension works fully standalone without the server.
- *
- * @async
- */
-async function syncToServer() {
-    try {
-        const data = await chrome.storage.local.get(['results']);
-        const results = data.results || [];
-
-        if (results.length === 0) return;
-
-        const response = await fetch(`${MCP_SERVER_URL}/api/products/sync`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                products: results,
-                seller_name: null,
-                seller_url: null
-            })
-        });
-
-        if (response.ok) {
-            const result = await response.json();
-            console.log(`[ProScan] Synced ${result.synced} products to MCP server`);
-        } else {
-            console.warn('[ProScan] Server sync failed:', response.status);
-        }
-    } catch (error) {
-        // Server not running -- extension works standalone
-        console.log('[ProScan] MCP server not available (standalone mode)');
-    }
-}
 
 /**
  * Clean up on browser startup.

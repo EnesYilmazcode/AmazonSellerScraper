@@ -1,27 +1,11 @@
 # Environment variables (contains API keys)
 .env
 
-# Server database (generated at runtime)
-server/db/proscan.db
-
-# ChromaDB vector storage (generated at runtime)
-server/chroma_data/
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
-
-# Test artifacts
-server/test_phase1.py
-server/test_rag.py
-
 # Node.js
 node_modules/
 coverage/
 
-# Pytest
-.pytest_cache/
+# Build output
+dist/
+build/
+*.zip

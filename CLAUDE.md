@@ -27,26 +27,7 @@ AmazonSellerScraper/
 │       └── exporter.js       # Excel/CSV/JSON export
 ├── styles/
 │   └── chatbot.css           # Chatbot widget styles (loaded into Shadow DOM)
-├── server/                    # Python backend (optional, not required)
-│   ├── main.py               # FastAPI entry point (REST API)
-│   ├── mcp_server.py         # MCP entry point (Claude Desktop)
-│   ├── config.py             # Settings (DB path, API keys, etc.)
-│   ├── seed_data.py          # Sample data for testing
-│   ├── requirements.txt      # Python dependencies
-│   ├── db/
-│   │   └── database.py       # SQLite operations
-│   ├── models/
-│   │   └── product.py        # Pydantic models
-│   ├── services/
-│   │   └── product_service.py # Shared business logic
-│   ├── routers/
-│   │   ├── products.py       # Product REST endpoints
-│   │   └── chat.py           # Chat REST endpoint
-│   └── rag/
-│       ├── embeddings.py     # sentence-transformers embeddings
-│       ├── vectorstore.py    # ChromaDB vector store
-│       └── chain.py          # Gemini RAG chain
-├── tests/                     # Test suite (Jest + pytest)
+├── tests/                     # Test suite (Jest)
 │   ├── setup/
 │   │   ├── chrome-mock.js    # In-memory Chrome API mock
 │   │   └── dom-helpers.js    # vm-based content script loader + JSDOM
@@ -57,19 +38,17 @@ AmazonSellerScraper/
 │   │   ├── amazon-offer-classic.html   # Classic offer listing fixture
 │   │   └── sample-products.js          # Reusable product/spread data
 │   ├── unit/                 # Unit tests per module
-│   ├── integration/          # Cross-module pipeline tests
-│   └── server/               # Python server tests (pytest)
+│   └── integration/          # Cross-module pipeline tests
 ├── libs/
 │   └── xlsx.full.min.js      # Excel generation library
 ├── assets/
+│   ├── logo.png              # Project logo
 │   └── icons/                # Extension icons (16, 48, 128)
 ├── .gitignore
 └── CLAUDE.md                  # This file
 ```
 
 ## Key Modules
-
-### Extension (JavaScript)
 
 | Module               | Purpose                                                   |
 | -------------------- | --------------------------------------------------------- |
@@ -81,17 +60,7 @@ AmazonSellerScraper/
 | `analyzer.js`        | Opportunity scoring, insights, statistics                 |
 | `spread-analyzer.js` | Price spread statistics (CV, std dev, arbitrage scoring)  |
 | `exporter.js`        | Multi-format export (Excel, CSV, JSON)                    |
-| `service-worker.js`  | Message routing, Gemini API calls, optional server sync   |
-
-### Server (Python)
-
-| Module               | Purpose                                                        |
-| -------------------- | -------------------------------------------------------------- |
-| `product_service.py` | Business logic shared by MCP + REST                            |
-| `database.py`        | SQLite with WAL mode, CRUD operations                          |
-| `chain.py`           | RAG Q&A: retrieves context from ChromaDB, generates via Gemini |
-| `vectorstore.py`     | ChromaDB embed/search operations                               |
-| `embeddings.py`      | sentence-transformers (all-MiniLM-L6-v2)                       |
+| `service-worker.js`  | Message routing, Gemini API calls                         |
 
 ## Data Flow
 
@@ -115,76 +84,12 @@ AmazonSellerScraper/
 6. Service worker calls Gemini API (`gemini-2.0-flash`, free tier) with product context
 7. Response displayed in chat bubble
 
-### Server Sync (optional)
-
-1. On `SCRAPING_COMPLETE`, `service-worker.js` POSTs products to `localhost:8000/api/products/sync`
-2. Server stores in SQLite + embeds in ChromaDB (fire-and-forget, extension works without server)
-
-## Server
-
-### Dual Entry Points
-
-- **REST API** (`python -m server.main`): FastAPI on port 8000, used by Chrome extension
-- **MCP Server** (`python -m server.mcp_server`): stdio transport, used by Claude Desktop/Cursor
-
-Both share `product_service.py` — same business logic, two interfaces.
-
-### MCP Tools
-
-- `get_product_details(asin)` — full product info
-- `compare_products(asins)` — side-by-side with best-rated/best-value analysis
-- `search_products(query)` — keyword search
-- `smart_search(query)` — hybrid keyword + semantic search
-- `list_all_products()` — paginated listing
-- `get_database_stats()` — product count + RAG status
-- `chat_with_product(asin, question)` — RAG Q&A via Gemini
-
-### REST Endpoints
-
-- `POST /api/products/sync` — receive scraped products from extension
-- `GET /api/products/{asin}` — product details
-- `POST /api/products/compare` — compare products
-- `GET /api/products/?query=` — search
-- `POST /api/chat` — RAG chat
-- `GET /health` — server status
-
 ## Setup
-
-### Extension (with AI chatbot)
 
 1. Load unpacked extension in `chrome://extensions`
 2. Click the ProScan popup → open Settings → paste your Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
 3. Navigate to Amazon seller/search page → scrape → export
 4. The AI chatbot button appears in the bottom-right corner on Amazon pages with product listings
-
-### With AI Server (optional)
-
-```bash
-cd server
-pip install -r requirements.txt
-```
-
-Create `.env` in project root (see `.env.example`):
-
-```text
-PROSCAN_GEMINI_API_KEY=your-key-here
-```
-
-Run the server:
-
-```bash
-python -m server.main
-```
-
-Seed test data (optional):
-
-```bash
-python -m server.seed_data
-```
-
-### With Claude Desktop (MCP)
-
-Add `claude_desktop_config.json` contents to Claude Desktop's MCP config.
 
 ## Testing
 
@@ -203,15 +108,6 @@ npm run test:coverage # With coverage report
 - HTML fixtures in `tests/fixtures/` match the exact CSS selectors the code uses
 - Chrome APIs (`storage`, `runtime`, `tabs`, `downloads`) are mocked in `tests/setup/chrome-mock.js`
 - XLSX is mocked with jest.fn() stubs for workbook creation
-
-### Python (pytest) — 35 tests
-
-```bash
-pip install -r server/requirements-dev.txt
-python -m pytest tests/server/ -v
-```
-
-Each test gets an isolated temp SQLite database via the `temp_db` fixture (patches `server.config.DB_PATH`). API tests use Starlette's `TestClient`.
 
 ## Chrome APIs Used
 
@@ -278,14 +174,10 @@ See `docs/PRICE_SPREAD_ANALYSIS.md` for the full specification.
 - [x] In-popup analytics dashboard
 - [x] Opportunity scoring
 - [x] Price spread analysis (seller price variability detection)
-- [x] MCP server with 7 tools
-- [x] FastAPI REST backend
-- [x] RAG pipeline (ChromaDB + sentence-transformers + Gemini)
 - [x] Floating AI chatbot on Amazon pages (Gemini API, no server needed)
 - [x] Shadow DOM isolation for chatbot widget
 - [x] API key management in popup settings
-- [x] Server sync from extension (optional)
-- [x] Comprehensive test suite (249 tests: 214 JS + 35 Python)
+- [x] Comprehensive test suite (214 Jest tests)
 
 ## Future
 
