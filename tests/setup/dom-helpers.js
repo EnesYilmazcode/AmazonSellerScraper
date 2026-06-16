@@ -68,9 +68,20 @@ function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=t
   });
 
   const absolutePath = path.resolve(__dirname, '../../', scriptPath);
+
+  // Pre-load shared content-modules (Price, Delta) into the SAME script scope
+  // so content scripts can reference them as globals — mirroring how the
+  // manifest lists them before their consumers at runtime. Top-level `const`
+  // declarations share one lexical environment only within a single
+  // runInContext call, so they are concatenated ahead of the target script.
+  let preamble = '';
+  for (const rel of ['scripts/modules/price.js', 'scripts/modules/delta.js']) {
+    const dep = path.resolve(__dirname, '../../', rel);
+    if (fs.existsSync(dep)) preamble += fs.readFileSync(dep, 'utf8') + '\n';
+  }
   const code = fs.readFileSync(absolutePath, 'utf8');
 
-  vm.runInContext(code, context);
+  vm.runInContext(preamble + code, context);
 
   // Attach the DOM for later manipulation
   context._dom = dom;

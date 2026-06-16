@@ -225,7 +225,10 @@ async function startScraping() {
 
     await Storage.resetForNewScrape();
 
-    chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+    chrome.tabs.query({ active: true, currentWindow: true }, async tabs => {
+        // Mint a run id (with storefront/keyword source metadata from the tab
+        // URL) before the content script begins; it persists across pagination.
+        await Storage.beginRun(tabs[0] && tabs[0].url);
         chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SCRAPING' });
     });
 

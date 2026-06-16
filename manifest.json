@@ -28,6 +28,8 @@
         {
             "matches": ["*://*.amazon.com/*"],
             "js": [
+                "scripts/modules/price.js",
+                "scripts/modules/delta.js",
                 "scripts/content/scraper.js",
                 "scripts/content/chatbot.js",
                 "scripts/content/offer-fetcher.js"

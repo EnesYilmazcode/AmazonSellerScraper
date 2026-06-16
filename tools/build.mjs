@@ -28,6 +28,8 @@ export const COPY_FILES = [
   'scripts/content/scraper.js',
   'scripts/content/chatbot.js',
   'scripts/content/offer-fetcher.js',
+  'scripts/modules/price.js',
+  'scripts/modules/delta.js',
   'scripts/modules/storage.js',
   'scripts/modules/analyzer.js',
   'scripts/modules/spread-analyzer.js',

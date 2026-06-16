@@ -29,7 +29,19 @@ const Storage = {
         /** @type {string} Map of ASIN → spread data from offer fetcher */
         SPREAD_RESULTS: 'spreadResults',
         /** @type {string} Boolean flag -- true while spread analysis is running */
-        IS_SPREAD_ANALYZING: 'isSpreadAnalyzing'
+        IS_SPREAD_ANALYZING: 'isSpreadAnalyzing',
+        /** @type {string} Current scrape run id (minted per scrape, survives pagination) */
+        SCRAPE_RUN_ID: 'scrapeRunId',
+        /** @type {string} 1-based index of the last page persisted for this run */
+        RUN_PAGE_INDEX: 'scrapeRunPageIndex',
+        /** @type {string} Run source metadata { type, sellerId, keyword, url, startedAt } */
+        RUN_META: 'scrapeRunMeta',
+        /** @type {string} Per-page manifest for the run inbox */
+        RUN_PAGES: 'scrapeRunPages',
+        /** @type {string} Durable, append-only queue of products awaiting cloud sync */
+        SYNC_QUEUE: 'syncQueue',
+        /** @type {string} Per-ASIN last-seen snapshot for month-over-month deltas */
+        LAST_VALUES: 'lastValues'
     },
 
     /**
@@ -136,8 +148,68 @@ const Storage = {
         return this.setMultiple({
             [this.KEYS.RESULTS]: [],
             [this.KEYS.ITEM_COUNT]: 0,
-            [this.KEYS.IS_SCRAPING]: true
+            [this.KEYS.IS_SCRAPING]: true,
+            // Clear the prior run's spread data so it cannot leak into this
+            // scrape's insights/exports (consumers read spreadResults[asin]).
+            [this.KEYS.SPREAD_RESULTS]: {},
+            [this.KEYS.IS_SPREAD_ANALYZING]: false
         });
+    },
+
+    /**
+     * Begin a new scrape run: mint a run id and reset the per-run bookkeeping
+     * (page index, source metadata, page manifest). Deliberately does NOT touch
+     * the durable sync queue or lastValues — those persist across runs so that
+     * unsynced data is never dropped and deltas survive between scrapes.
+     *
+     * @param {string} sourceUrl - The Amazon search/storefront URL being scraped
+     * @returns {Promise<string>} The newly-minted run id
+     */
+    async beginRun(sourceUrl) {
+        const runId = `${Date.now()}-${this._runSuffix()}`;
+        const source = this._detectSource(sourceUrl || '');
+        await this.setMultiple({
+            [this.KEYS.SCRAPE_RUN_ID]: runId,
+            [this.KEYS.RUN_PAGE_INDEX]: 0,
+            [this.KEYS.RUN_META]: {
+                type: source.type,
+                sellerId: source.sellerId,
+                keyword: source.keyword,
+                url: sourceUrl || null,
+                startedAt: new Date().toISOString()
+            },
+            [this.KEYS.RUN_PAGES]: []
+        });
+        return runId;
+    },
+
+    /**
+     * Classify a scrape source URL as a storefront (me=) or keyword (k=) search.
+     * @param {string} url
+     * @returns {{type: string, sellerId: string|null, keyword: string|null}}
+     */
+    _detectSource(url) {
+        try {
+            const u = new URL(url);
+            const me = u.searchParams.get('me');
+            const k = u.searchParams.get('k');
+            if (me) return { type: 'storefront', sellerId: me, keyword: null };
+            if (k) return { type: 'keyword', sellerId: null, keyword: k };
+        } catch (e) { /* not a parseable URL */ }
+        return { type: 'keyword', sellerId: null, keyword: null };
+    },
+
+    /**
+     * Short random suffix for run ids; prefers crypto.randomUUID where present.
+     * @returns {string}
+     */
+    _runSuffix() {
+        try {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                return crypto.randomUUID().slice(0, 8);
+            }
+        } catch (e) { /* fall through */ }
+        return Math.random().toString(36).slice(2, 10);
     },
 
     /**

@@ -112,6 +112,60 @@ describe('Storage', () => {
       expect(state.itemCount).toBe(0);
       expect(state.isActive).toBe(true);
     });
+
+    test('clears stale spreadResults and isSpreadAnalyzing flag', async () => {
+      // A fresh scrape must not inherit the prior run's spread map, or
+      // insights/exports would surface stale per-ASIN spread numbers.
+      await Storage.setMultiple({
+        spreadResults: { B001: { sellerPrices: [10, 20] } },
+        isSpreadAnalyzing: true
+      });
+
+      await Storage.resetForNewScrape();
+
+      const spread = await Storage.get(Storage.KEYS.SPREAD_RESULTS);
+      const analyzing = await Storage.get(Storage.KEYS.IS_SPREAD_ANALYZING);
+      expect(spread).toEqual({});
+      expect(analyzing).toBe(false);
+    });
+  });
+
+  // ── beginRun ─────────────────────────────────────────────────
+  describe('beginRun', () => {
+    test('mints a run id and resets per-run bookkeeping', async () => {
+      const runId = await Storage.beginRun('https://www.amazon.com/s?me=A123XYZ&page=1');
+      expect(typeof runId).toBe('string');
+      expect(runId.length).toBeGreaterThan(0);
+      expect(await Storage.get(Storage.KEYS.SCRAPE_RUN_ID)).toBe(runId);
+      expect(await Storage.get(Storage.KEYS.RUN_PAGE_INDEX)).toBe(0);
+      expect(await Storage.get(Storage.KEYS.RUN_PAGES)).toEqual([]);
+    });
+
+    test('detects a storefront source from the me= param', async () => {
+      await Storage.beginRun('https://www.amazon.com/s?me=A123XYZ');
+      const meta = await Storage.get(Storage.KEYS.RUN_META);
+      expect(meta.type).toBe('storefront');
+      expect(meta.sellerId).toBe('A123XYZ');
+      expect(meta.keyword).toBeNull();
+    });
+
+    test('detects a keyword source from the k= param', async () => {
+      await Storage.beginRun('https://www.amazon.com/s?k=wireless+mouse');
+      const meta = await Storage.get(Storage.KEYS.RUN_META);
+      expect(meta.type).toBe('keyword');
+      expect(meta.keyword).toBe('wireless mouse');
+      expect(meta.sellerId).toBeNull();
+    });
+
+    test('does NOT clear the durable sync queue or lastValues', async () => {
+      await Storage.setMultiple({
+        syncQueue: [{ asin: 'B001' }],
+        lastValues: { B001: { priceCents: 1000 } }
+      });
+      await Storage.beginRun('https://www.amazon.com/s?k=x');
+      expect(await Storage.get(Storage.KEYS.SYNC_QUEUE)).toEqual([{ asin: 'B001' }]);
+      expect(await Storage.get(Storage.KEYS.LAST_VALUES)).toEqual({ B001: { priceCents: 1000 } });
+    });
   });
 
   // ── appendResults ───────────────────────────────────────────

@@ -66,6 +66,13 @@ describe('offer-fetcher.js', () => {
       expect(url).toContain('asin=B0TEST001');
       expect(url).toContain('gp/aod/ajax');
     });
+
+    test('includes condition=new parameter', () => {
+      // The AOD endpoint must filter to new offers like buildOfferUrl does,
+      // or used/refurbished prices pollute the spread distribution.
+      const url = ctx.buildAodUrl('B0TEST001');
+      expect(url).toContain('condition=new');
+    });
   });
 
   // ─��� extractPricesFromDocument ───���───────────────────────────
@@ -97,7 +104,9 @@ describe('offer-fetcher.js', () => {
       expect(prices.length).toBe(3);
     });
 
-    test('deduplicates identical prices', () => {
+    test('preserves duplicate seller prices (each seller is a data point)', () => {
+      // Two distinct sellers legitimately listing the same price are two
+      // real data points for spread stats — they must NOT be deduped.
       const html = wrapHTML(`
         <div class="aod-information-block">
           <div class="a-price"><span class="a-offscreen">$10.00</span></div>
@@ -108,7 +117,22 @@ describe('offer-fetcher.js', () => {
       `);
       const dom = new JSDOM(html);
       const prices = ctx.extractPricesFromDocument(dom.window.document);
-      expect(prices.length).toBe(1);
+      expect(prices.length).toBe(2);
+      expect(prices).toEqual([10, 10]);
+    });
+
+    test('general fallback does not scoop buy-box / non-offer prices', () => {
+      // No scoped offer container matches; only a stray buy-box price exists.
+      // The scoped fallback must return nothing rather than treat the
+      // buy-box price as a competing seller offer.
+      const html = wrapHTML(`
+        <div id="buybox">
+          <div class="a-price"><span class="a-offscreen">$999.00</span></div>
+        </div>
+      `);
+      const dom = new JSDOM(html);
+      const prices = ctx.extractPricesFromDocument(dom.window.document);
+      expect(prices).toEqual([]);
     });
 
     test('returns empty array when no prices found', () => {

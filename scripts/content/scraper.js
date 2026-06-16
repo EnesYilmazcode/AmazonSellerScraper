@@ -271,6 +271,9 @@ function scrapeProduct(listing) {
         name: title,
         asin: asin,
         price: price,
+        // Canonical integer-cents price for cloud sync + delta math; null when
+        // the display price is absent/unparseable (Price loaded via manifest).
+        priceCents: Price.priceToCents(price),
         rating: rating,
         reviewCount: reviewCount,
         isPrime: isPrime,
@@ -364,31 +367,65 @@ function scrapeCurrentPage() {
         results: results
     });
 
-    // Save results to storage
-    chrome.storage.local.get(['currentItemCount', 'results'], (data) => {
-        const previousCount = data.currentItemCount || 0;
-        const previousResults = data.results || [];
-        const newCount = previousCount + results.length;
-        const allResults = [...previousResults, ...results];
+    // Save results to storage, stamping run context + month-over-month deltas,
+    // and appending to the durable queue the service worker drains to Firestore.
+    chrome.storage.local.get(
+        ['currentItemCount', 'results', 'scrapeRunId', 'scrapeRunPageIndex', 'lastValues', 'syncQueue', 'scrapeRunPages'],
+        (data) => {
+            const runId = data.scrapeRunId || null;
+            const pageIndex = (data.scrapeRunPageIndex || 0) + 1; // 1-based page number
+            const lastValues = data.lastValues || {};
+            const stampedAt = new Date().toISOString();
 
-        chrome.storage.local.set({
-            results: allResults,
-            currentItemCount: newCount
-        }, () => {
-            // Check for next page
-            if (hasNextPage() && isScrapingActive) {
-                const nextUrl = getNextPageUrl();
-                console.log(`[ProScan] Navigating to next page: ${nextUrl}`);
+            // Stamp each product with run context + deltas vs its prior snapshot,
+            // then roll its values forward into lastValues for the next run.
+            results.forEach(product => {
+                product.runId = runId;
+                product.pageIndex = pageIndex;
+                product.delta = Delta.computeDeltas(product, lastValues[product.asin] || null);
+                lastValues[product.asin] = Delta.snapshot(product);
+            });
 
-                // 2-second delay to avoid rate limiting
-                setTimeout(() => {
-                    window.location.href = nextUrl;
-                }, 2000);
-            } else {
-                finishScraping(newCount);
-            }
-        });
-    });
+            const previousCount = data.currentItemCount || 0;
+            const previousResults = data.results || [];
+            const newCount = previousCount + results.length;
+            const allResults = [...previousResults, ...results];
+
+            // Durable, append-only sync queue (survives SW restarts + navigation).
+            const syncQueue = data.syncQueue || [];
+            syncQueue.push(...results);
+
+            // Per-page manifest so the run inbox can reconstruct pages pre-sync.
+            const runPages = data.scrapeRunPages || [];
+            runPages.push({ runId, pageIndex, count: results.length, scrapedAt: stampedAt, url: location.href });
+
+            chrome.storage.local.set({
+                results: allResults,
+                currentItemCount: newCount,
+                scrapeRunPageIndex: pageIndex,
+                lastValues: lastValues,
+                syncQueue: syncQueue,
+                scrapeRunPages: runPages
+            }, () => {
+                // Nudge the service worker to flush now; the chrome.alarms tick is
+                // the autonomous safety net if the popup/page closes first.
+                chrome.runtime.sendMessage({ type: 'ENQUEUE_SYNC', runId: runId, pageIndex: pageIndex });
+
+                // Check for next page
+                if (hasNextPage() && isScrapingActive) {
+                    const nextUrl = getNextPageUrl();
+                    console.log(`[ProScan] Navigating to next page: ${nextUrl}`);
+
+                    // 2-second delay to avoid rate limiting
+                    setTimeout(() => {
+                        window.location.href = nextUrl;
+                    }, 2000);
+                } else {
+                    finishScraping(newCount);
+                }
+            });
+        }
+    );
 }
 
 /**

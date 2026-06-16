@@ -37,8 +37,10 @@ const OFFER_SELECTORS = {
     // Legacy offer listing format
     legacyOfferPrice: '.olpOfferPrice',
 
-    // General fallback — any price element on the page
-    generalPrice: '.a-price .a-offscreen'
+    // Scoped fallback — prices inside an offer/seller container only.
+    // Must NOT be the global '.a-price .a-offscreen' selector, which would
+    // scoop up buy-box, sponsored, and accessory prices as fake seller offers.
+    generalPrice: '#aod-offer-list .a-price .a-offscreen, [id^="aod-offer"] .a-price .a-offscreen, .olpOffer .a-price .a-offscreen'
 };
 
 /**
@@ -60,7 +62,7 @@ function buildOfferUrl(asin) {
  * @returns {string} AJAX endpoint URL
  */
 function buildAodUrl(asin) {
-    return `https://www.amazon.com/gp/aod/ajax?asin=${asin}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp`;
+    return `https://www.amazon.com/gp/aod/ajax?asin=${asin}&condition=new&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp`;
 }
 
 /**
@@ -109,8 +111,12 @@ function extractPricesFromDocument(doc) {
         }
     }
 
-    // Deduplicate prices (same price from different selector matches)
-    return [...new Set(prices)];
+    // Return all prices as-is. Do NOT dedup: multiple distinct sellers
+    // legitimately list the same price, and each is a real data point for
+    // the spread statistics (sellerCount, mean, stdDev, CV, confidence factor).
+    // The cascade `break`s after the first selector that yields prices, so a
+    // single physical price element is never matched twice.
+    return prices;
 }
 
 /**
