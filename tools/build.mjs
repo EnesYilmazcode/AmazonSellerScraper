@@ -60,7 +60,15 @@ async function main() {
     outfile: path.join(DIST, BUNDLE_ENTRY),
     bundle: true,
     format: 'iife',
-    target: 'chrome110',
+    target: 'chrome114',
+    platform: 'browser',
+    // firebase/* references these; inline them so the bundle has no bare
+    // `process` reference (undefined in a service worker). PROSCAN_ENV flips
+    // the emulator wiring in firebase-config.js — `PROSCAN_ENV=dev npm run build`.
+    define: {
+      'process.env.NODE_ENV': JSON.stringify('production'),
+      'process.env.PROSCAN_ENV': JSON.stringify(process.env.PROSCAN_ENV ?? 'prod'),
+    },
     minify: false,
   });
 

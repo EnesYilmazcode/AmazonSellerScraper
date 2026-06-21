@@ -1,3 +1,11 @@
+import { auth, db } from './firebase-init.js';
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+} from 'firebase/auth/web-extension';
+import { syncToCloud } from './sync.js';
+
 /**
  * @fileoverview Background Service Worker
  *
@@ -148,4 +156,95 @@ chrome.runtime.onStartup.addListener(() => {
     chrome.storage.local.set({
         isScrapingActive: false
     });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// M3 cloud sync — Firebase Auth (extension-native) + Firestore write path.
+// The popup is a plain (unbundled) page; it drives sign-in / export by sending
+// these messages to the worker, which owns the single Firebase instance.
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Resolve the current Firebase user, waiting for auth to rehydrate from
+ *  IndexedDB after a cold service-worker start. */
+function currentUser() {
+    return new Promise((resolve) => {
+        if (auth.currentUser) return resolve(auth.currentUser);
+        const unsub = onAuthStateChanged(auth, (u) => {
+            unsub();
+            resolve(u);
+        });
+    });
+}
+
+/** Trim a Firebase user to the popup-safe shape. */
+const publicUser = (u) =>
+    u ? { uid: u.uid, email: u.email, displayName: u.displayName } : null;
+
+/** Map Firebase auth error codes to friendly popup messages. */
+function friendlyAuthError(err) {
+    switch (err && err.code) {
+        case 'auth/invalid-credential':
+        case 'auth/wrong-password':
+        case 'auth/user-not-found':
+            return 'Email or password is incorrect.';
+        case 'auth/invalid-email':
+            return 'That email address does not look valid.';
+        case 'auth/too-many-requests':
+            return 'Too many attempts. Wait a minute and try again.';
+        case 'auth/network-request-failed':
+            return 'Network error — check your connection.';
+        case 'auth/operation-not-allowed':
+            return 'Email sign-in is not enabled for this project yet.';
+        default:
+            return ((err && err.message) || 'Sign-in failed.').replace(/^Firebase:\s*/, '');
+    }
+}
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.type === 'PROSCAN_AUTH_STATE') {
+        currentUser().then((u) => sendResponse({ user: publicUser(u) }));
+        return true;
+    }
+
+    if (request.type === 'PROSCAN_SIGN_IN') {
+        signInWithEmailAndPassword(auth, request.email, request.password)
+            .then((cred) => sendResponse({ user: publicUser(cred.user) }))
+            .catch((err) => sendResponse({ error: friendlyAuthError(err) }));
+        return true;
+    }
+
+    if (request.type === 'PROSCAN_SIGN_OUT') {
+        signOut(auth)
+            .then(() => sendResponse({ ok: true }))
+            .catch((err) => sendResponse({ error: err.message }));
+        return true;
+    }
+
+    if (request.type === 'PROSCAN_EXPORT') {
+        (async () => {
+            const user = await currentUser();
+            if (!user) return sendResponse({ error: 'Sign in to ProScan first.' });
+            const bundle = await chrome.storage.local.get([
+                'syncQueue',
+                'scrapeRunMeta',
+                'scrapeRunPages',
+            ]);
+            if (!bundle.syncQueue || bundle.syncQueue.length === 0) {
+                return sendResponse({ ok: true, written: 0, products: 0 });
+            }
+            try {
+                const result = await syncToCloud(user.uid, bundle);
+                // Clear only the drained queue; keep lastValues so future scrapes
+                // still compute month-over-month deltas.
+                await chrome.storage.local.set({ syncQueue: [] });
+                sendResponse({ ok: true, ...result });
+            } catch (err) {
+                console.error('[ProScan] cloud export failed', err);
+                sendResponse({ error: (err && err.message) || 'Export failed.' });
+            }
+        })();
+        return true;
+    }
+
+    return false; // not a sync message — let the other listener handle it
 });
