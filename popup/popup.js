@@ -32,6 +32,12 @@ let currentResults = [];
 /** @type {boolean} Whether spread analysis is currently running */
 let isSpreadAnalyzing = false;
 
+/** @type {?{uid:string,email:string,displayName:string}} Signed-in ProScan user, or null */
+let currentProScanUser = null;
+
+/** @type {boolean} Whether a cloud export to ProScan is in progress */
+let isExporting = false;
+
 /**
  * Cached references to DOM elements used throughout the popup lifecycle.
  * Resolved once at module load time for performance.
@@ -56,7 +62,17 @@ const elements = {
     spreadProgressText: document.getElementById('spreadProgressText'),
     spreadResults: document.getElementById('spreadResults'),
     spreadHighCount: document.getElementById('spreadHighCount'),
-    spreadAvgCV: document.getElementById('spreadAvgCV')
+    spreadAvgCV: document.getElementById('spreadAvgCV'),
+    // ProScan cloud auth + export
+    authForm: document.getElementById('authForm'),
+    authEmail: document.getElementById('authEmail'),
+    authPassword: document.getElementById('authPassword'),
+    authSignInBtn: document.getElementById('authSignInBtn'),
+    authError: document.getElementById('authError'),
+    authAccount: document.getElementById('authAccount'),
+    authStatusEmail: document.getElementById('authStatusEmail'),
+    authSignOutBtn: document.getElementById('authSignOutBtn'),
+    exportToProScanBtn: document.getElementById('exportToProScanBtn')
 };
 
 /**
@@ -331,7 +347,189 @@ async function displaySpreadResults() {
     }
 }
 
+// --- ProScan Cloud Auth + Export ---
+
+/**
+ * Send a message to the background service worker and resolve with its
+ * response. The sync/auth handlers are async (return true), so responses may
+ * arrive after a Firebase cold start.
+ *
+ * @param {Object} message - Message payload (must include a `type`)
+ * @returns {Promise<Object>} The worker's response, or {error} on channel failure
+ */
+function sendToWorker(message) {
+    return new Promise(resolve => {
+        chrome.runtime.sendMessage(message, response => {
+            if (chrome.runtime.lastError) {
+                resolve({ error: chrome.runtime.lastError.message });
+                return;
+            }
+            resolve(response || {});
+        });
+    });
+}
+
+/**
+ * Render the signed-in account state: show the email + sign-out button,
+ * hide the sign-in form, and reveal the cloud-export button.
+ *
+ * @param {{uid:string,email:string,displayName:string}} user
+ */
+function showSignedIn(user) {
+    currentProScanUser = user;
+    elements.authStatusEmail.textContent = user.email || user.displayName || 'Signed in';
+    elements.authForm.classList.add('hidden');
+    elements.authAccount.classList.remove('hidden');
+    elements.authError.classList.add('hidden');
+    elements.authError.textContent = '';
+    elements.exportToProScanBtn.classList.remove('hidden');
+}
+
+/**
+ * Render the signed-out state: show the sign-in form, hide the account state,
+ * and hide the cloud-export button.
+ */
+function showSignInForm() {
+    currentProScanUser = null;
+    elements.authAccount.classList.add('hidden');
+    elements.authForm.classList.remove('hidden');
+    elements.authError.classList.add('hidden');
+    elements.authError.textContent = '';
+    elements.exportToProScanBtn.classList.add('hidden');
+    resetSignInButton();
+}
+
+/**
+ * Show an inline error message under the sign-in form.
+ *
+ * @param {string} message
+ */
+function showAuthError(message) {
+    elements.authError.textContent = message;
+    elements.authError.classList.remove('hidden');
+}
+
+/**
+ * Restore the sign-in button to its idle state.
+ */
+function resetSignInButton() {
+    elements.authSignInBtn.disabled = false;
+    elements.authSignInBtn.innerHTML = '<i class="fas fa-right-to-bracket"></i> Sign in to ProScan';
+}
+
+/**
+ * Query the worker for the current auth state on popup open and render the
+ * matching view (sign-in form vs signed-in account).
+ *
+ * @async
+ */
+async function initializeAuthUI() {
+    const response = await sendToWorker({ type: 'PROSCAN_AUTH_STATE' });
+    if (response && response.user) {
+        showSignedIn(response.user);
+    } else {
+        showSignInForm();
+    }
+}
+
+/**
+ * Sign in to ProScan with the entered email/password. Disables the button and
+ * shows a spinner while the worker talks to Firebase.
+ *
+ * @async
+ */
+async function handleSignIn() {
+    const email = elements.authEmail.value.trim();
+    const password = elements.authPassword.value;
+
+    elements.authError.classList.add('hidden');
+
+    if (!email || !password) {
+        showAuthError('Enter your email and password.');
+        return;
+    }
+
+    elements.authSignInBtn.disabled = true;
+    elements.authSignInBtn.innerHTML = '<span class="spinner"></span> Signing in…';
+
+    const response = await sendToWorker({ type: 'PROSCAN_SIGN_IN', email, password });
+
+    if (response && response.user) {
+        elements.authPassword.value = '';
+        showSignedIn(response.user);
+    } else {
+        showAuthError((response && response.error) || 'Sign-in failed.');
+        resetSignInButton();
+    }
+}
+
+/**
+ * Sign out of ProScan and return to the sign-in form.
+ *
+ * @async
+ */
+async function handleSignOut() {
+    elements.authSignOutBtn.disabled = true;
+    const response = await sendToWorker({ type: 'PROSCAN_SIGN_OUT' });
+    elements.authSignOutBtn.disabled = false;
+
+    if (response && response.ok) {
+        showSignInForm();
+    } else {
+        updateStatus((response && response.error) || 'Sign-out failed.', 'error');
+    }
+}
+
+/**
+ * Push the latest scrape to the signed-in user's ProScan cloud workspace.
+ * Nudges the user to sign in first if needed; otherwise disables the button,
+ * shows progress, and reports the result via the status bar.
+ *
+ * @async
+ */
+async function handleExportToProScan() {
+    if (!currentProScanUser) {
+        updateStatus('Sign in to ProScan first.', 'warning');
+        return;
+    }
+    if (isExporting) return;
+
+    isExporting = true;
+    elements.exportToProScanBtn.disabled = true;
+    elements.exportToProScanBtn.innerHTML = '<span class="spinner"></span> Exporting…';
+    updateStatus('Exporting to ProScan…', 'info');
+
+    const response = await sendToWorker({ type: 'PROSCAN_EXPORT' });
+
+    if (response && response.ok) {
+        const count = response.products || 0;
+        if (!response.written || count === 0) {
+            updateStatus('No new products to export', 'info');
+        } else {
+            updateStatus(`Exported ${count} product${count === 1 ? '' : 's'} to ProScan`, 'success');
+        }
+    } else {
+        updateStatus((response && response.error) || 'Export failed.', 'error');
+    }
+
+    isExporting = false;
+    elements.exportToProScanBtn.disabled = false;
+    elements.exportToProScanBtn.innerHTML = '<i class="fas fa-cloud-arrow-up"></i> Export to ProScan';
+}
+
 // --- Event Listeners ---
+
+// ProScan cloud auth + export
+elements.authSignInBtn.addEventListener('click', handleSignIn);
+elements.authSignOutBtn.addEventListener('click', handleSignOut);
+elements.exportToProScanBtn.addEventListener('click', handleExportToProScan);
+
+// Enter-to-submit from the password field
+elements.authPassword.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        handleSignIn();
+    }
+});
 
 // Spread analysis button: toggle start/stop
 elements.spreadButton.addEventListener('click', () => {
@@ -482,4 +680,5 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     initializeUI();
+    initializeAuthUI();
 });

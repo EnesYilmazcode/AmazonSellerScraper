@@ -41,6 +41,33 @@
             </div>
         </div>
 
+        <!-- ProScan Cloud Auth -->
+        <div class="auth-panel" id="authPanel">
+            <!-- Signed-out: sign-in form -->
+            <div class="auth-form" id="authForm">
+                <div class="auth-title">
+                    <i class="fas fa-cloud"></i> Sign in to ProScan
+                </div>
+                <input type="email" id="authEmail" class="auth-input" placeholder="Email" autocomplete="username">
+                <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="current-password">
+                <button id="authSignInBtn" class="auth-button">
+                    <i class="fas fa-right-to-bracket"></i> Sign in to ProScan
+                </button>
+                <div class="auth-error hidden" id="authError"></div>
+            </div>
+
+            <!-- Signed-in: account state -->
+            <div class="auth-account hidden" id="authAccount">
+                <div class="auth-account-info">
+                    <i class="fas fa-circle-user"></i>
+                    <span class="auth-account-email" id="authStatusEmail"></span>
+                </div>
+                <button id="authSignOutBtn" class="auth-signout">
+                    <i class="fas fa-right-from-bracket"></i> Sign out
+                </button>
+            </div>
+        </div>
+
         <div class="status" id="status">
             <i class="fas fa-info-circle"></i> Ready to start
         </div>
@@ -86,6 +113,11 @@
                 <i class="fas fa-file-code"></i> JSON
             </button>
         </div>
+
+        <!-- Cloud export -->
+        <button id="exportToProScanBtn" class="export-cloud-button hidden">
+            <i class="fas fa-cloud-arrow-up"></i> Export to ProScan
+        </button>
 
     </div>
     <script src="popup.js"></script>
