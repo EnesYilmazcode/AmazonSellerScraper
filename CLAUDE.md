@@ -119,9 +119,11 @@ storage_error, interrupted or updated.
 5. `sync.js` drains the outbox for the signed-in uid, oldest first. `sync-plan.js` turns an entry
    into writes; each is `set` with `mergeFields`, so `latest`, `prev` and `delta` are replaced whole.
    `firstSeenAt` is written only when a read shows the product document does not exist
-6. An entry is deleted after its own commit. Entries of another uid are left alone
-7. `permission-denied` or an invalid token signs out and sets `authNotice: 'expired'`;
-   the popup shows "Your session expired"
+6. An entry is deleted after its own commit. Entries of another uid are left alone. An entry
+   that fails schema validation is dropped, since retrying it would fail the same way
+7. An expired or invalid token signs out and sets `authNotice: 'expired'`; the popup shows
+   "Your session expired". A `permission-denied` (the rules refusing a write) is not a sign-out;
+   the entry stays queued and `lastSync.error` records it
 
 Cloud paths and shapes: `packages/schema/index.js` (keep the dashboard's copy identical, bump `SV`
 on a shape change). Run id `{sourceId}_{startMs}`, minted once in `engine.start`; page id `p0001`;
