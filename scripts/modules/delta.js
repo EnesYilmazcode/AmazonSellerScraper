@@ -63,7 +63,8 @@ const Delta = {
      *
      * A field this scrape could not read keeps the previous snapshot's value,
      * so one failed parse does not wipe the baseline. `carried` then maps the
-     * field to when that value was last actually seen.
+     * field to when that value was last actually seen. `firstSeenAt`, set
+     * by the 2.0 migration, carries over unchanged.
      *
      * @param {Object} product - Scraped product
      * @param {Object|null} [prev] - The snapshot this one replaces
@@ -85,13 +86,14 @@ const Delta = {
             carried[field] = (prev.carried && prev.carried[field]) || prev.scrapedAt || null;
         }
         if (Object.keys(carried).length) snap.carried = carried;
+        if (prev && prev.firstSeenAt) snap.firstSeenAt = prev.firstSeenAt;
         return snap;
     },
 
     /** lastValues keeps at most this many ASINs... */
     MAX_ENTRIES: 5000,
-    /** ...none last seen more than this many days ago. */
-    MAX_AGE_DAYS: 180,
+    /** ...none last seen more than this many days ago. A year keeps a 2.0 user's February scrape. */
+    MAX_AGE_DAYS: 365,
 
     /**
      * Bound lastValues so it cannot fill the storage quota (F-26). Drops

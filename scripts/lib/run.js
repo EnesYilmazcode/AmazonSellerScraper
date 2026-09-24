@@ -28,7 +28,8 @@ const Run = (() => {
         blocked: 'Amazon showed a captcha or a sign-in page, so the run stopped. Solve it in the tab, then start again.',
         selectors_broken: 'ProScan could not read this page. Amazon may have changed its layout.',
         storage_full: 'Browser storage is full, so the run stopped. Download your results, then clear them.',
-        interrupted: 'The run ended early because its tab was closed or left the search.'
+        interrupted: 'The run ended early because its tab was closed or left the search.',
+        updated: 'ProScan was updated during the run, so it stopped. The products found before the update are kept.'
     };
 
     /** Page kinds a run can start on. */

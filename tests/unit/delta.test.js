@@ -82,7 +82,7 @@ describe('delta.js', () => {
     });
 
     test('drops snapshots older than the age limit', () => {
-      const lv = { NEW: at(10), OLD: at(181) };
+      const lv = { NEW: at(10), OLD: at(366) };
       expect(Object.keys(Delta.prune(lv, { now: NOW }))).toEqual(['NEW']);
     });
 

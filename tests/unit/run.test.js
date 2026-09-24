@@ -87,7 +87,7 @@ describe('Run text', () => {
   test('only complete reads as success', () => {
     const run = Run.create({ runId: 'r', tabId: 1 });
     expect(Run.describe(Run.finish(run, 'complete'), 3)).toEqual({ text: 'Scraping complete! 3 products found.', type: 'success' });
-    for (const reason of ['stopped', 'blocked', 'selectors_broken', 'storage_full', 'interrupted']) {
+    for (const reason of ['stopped', 'blocked', 'selectors_broken', 'storage_full', 'interrupted', 'updated']) {
       expect(Run.describe(Run.finish(run, reason), 3).type).toBe('warning');
     }
     expect(Run.describe(run, 4)).toEqual({ text: 'Scraping in progress... 4 items', type: 'info' });

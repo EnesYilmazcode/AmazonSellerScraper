@@ -19,7 +19,9 @@ global.chrome = {
     local: {
       get(keys, callback) {
         const result = {};
-        const keyList = Array.isArray(keys) ? keys : (typeof keys === 'string' ? [keys] : Object.keys(keys || {}));
+        const keyList = keys === null || keys === undefined
+          ? Object.keys(store)
+          : Array.isArray(keys) ? keys : (typeof keys === 'string' ? [keys] : Object.keys(keys));
         keyList.forEach(k => {
           if (store[k] !== undefined) result[k] = store[k];
         });
