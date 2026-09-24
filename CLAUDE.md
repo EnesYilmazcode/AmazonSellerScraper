@@ -4,11 +4,11 @@
 
 Chrome extension (Manifest V3) that scrapes Amazon seller product listings, provides analytics for resellers/arbitrage, and includes a floating AI chatbot on Amazon pages powered by Gemini API. No server required — everything runs client-side.
 
-## Architecture (v2.0)
+## Architecture (v2.2)
 
 ```text
 AmazonSellerScraper/
-├── manifest.json              # Extension config (v2.0)
+├── manifest.json              # Extension config (v2.2)
 ├── popup/                     # UI Layer
 │   ├── popup.html            # Popup interface (dashboard + settings)
 │   ├── popup.css             # Popup styling
@@ -16,17 +16,21 @@ AmazonSellerScraper/
 │   └── ai-key.js             # Gemini key field (AI chat settings)
 ├── scripts/
 │   ├── content/
-│   │   ├── scraper.js        # DOM scraping on Amazon pages
+│   │   ├── scraper.js        # Parses a search page, reports it to the SW (parse only)
 │   │   ├── chatbot.js        # Floating AI chatbot widget (Shadow DOM)
 │   │   └── offer-fetcher.js  # Seller price fetching for spread analysis
 │   ├── lib/
 │   │   ├── parsers.js        # Pure search/offer parsing (global Parsers)
-│   │   ├── run.js            # Scrape run record, bound to one tab (global Run)
-│   │   ├── flags.js          # Build flags (global Flags); CLOUD_SYNC is off in 2.1
+│   │   ├── messages.js       # Every message type and who may send it (global Msg)
+│   │   ├── run.js            # Run state machine, bound to one tab (global Run)
+│   │   ├── flags.js          # Build flags (global Flags); CLOUD_SYNC is off until 2.3
 │   │   ├── migrate.js        # Storage schema migrations, run by the SW
 │   │   └── chat.js           # Gemini request builder, run scoping, error text
 │   ├── background/
-│   │   └── service-worker.js # Message routing + Gemini API calls
+│   │   ├── service-worker.js # Wires router, engine, chat, auth and migrations
+│   │   ├── router.js         # The one typed message router
+│   │   ├── engine.js         # The run engine; the only writer of run data
+│   │   └── db.js             # IndexedDB: runs, products, placements, lastValues, outbox, spread
 │   └── modules/
 │       ├── storage.js        # Chrome storage wrapper
 │       ├── analyzer.js       # Data analysis & insights
@@ -59,7 +63,8 @@ AmazonSellerScraper/
 
 | Module               | Purpose                                                   |
 | -------------------- | --------------------------------------------------------- |
-| `scraper.js`         | DOM scraping with cascading fallback selectors            |
+| `scraper.js`         | Parses a page with `Parsers`, sends `PAGE_RESULT`         |
+| `engine.js`          | Run state machine, page saves, navigation, heartbeat     |
 | `chatbot.js`         | Floating AI chatbot widget on Amazon pages (Shadow DOM)   |
 | `offer-fetcher.js`   | Fetches seller offer pages for price spread analysis      |
 | `chatbot.css`        | Widget styles loaded into Shadow DOM                      |
@@ -67,21 +72,35 @@ AmazonSellerScraper/
 | `analyzer.js`        | Opportunity scoring, insights, statistics                 |
 | `spread-analyzer.js` | Price spread statistics (CV, std dev, arbitrage scoring)  |
 | `exporter.js`        | Multi-format export (Excel, CSV, JSON)                    |
-| `service-worker.js`  | Message routing, Gemini API calls                         |
+| `service-worker.js`  | Router wiring, Gemini API calls, migrations               |
 
 ## Data Flow
 
 ### Scraping
 
-1. User clicks "Start Scraping" in popup
-2. `popup.js` pings the tab; with no answer it offers `chrome.tabs.reload` and starts after the reload
-3. `popup.js` writes a run record (`scripts/lib/run.js`, key `run`) bound to the tab id, then sends `START_SCRAPING`
-4. `scraper.js` classifies the page (results, last, empty, captcha, interstitial, signin, unknown) and extracts products
-5. Results and run progress stored in `chrome.storage.local` in one write per page
-6. Follows the page's Next link after 2 to 4 seconds, up to `settings.maxPages`; on each load the content script asks the SW for its tab id (`WHO_AM_I`) and acts only if its tab owns the run
-7. The run ends with a reason; Stop goes to the run's tab and cancels the pending navigation
-8. `analyzer.js` generates insights and opportunity scores
-9. User exports via `exporter.js` (Excel/CSV/JSON)
+The service worker is the only writer (`scripts/background/engine.js`).
+
+1. User clicks "Start Scraping" in popup; `popup.js` sends `START_RUN {tabId}` to the SW
+2. The SW pings the tab. No answer: the popup offers `chrome.tabs.reload` and starts after the reload.
+   A page that is not a search (captcha, sign-in, product page) is refused and nothing changes
+3. The SW writes the run record (`scripts/lib/run.js`) to `chrome.storage.session` under `run`,
+   bound to the tab id, and asks the tab to parse (`PARSE_PAGE`)
+4. `scraper.js` classifies the page (results, last, empty, captcha, interstitial, signin, unknown),
+   extracts products and sends `PAGE_RESULT`. It never writes storage and never navigates
+5. The SW folds the page into the run and writes products, the page, lastValues and the run
+   to IndexedDB in one transaction, then prunes lastValues
+6. After 2 to 4 seconds the SW opens the page's Next link with `tabs.update`, up to `settings.maxPages`.
+   The new page says `PAGE_READY`; only the run's tab is asked to parse
+7. While a page is pending the tab sends `HEARTBEAT` every 2 seconds. That wakes a stopped SW,
+   which reads the run from session storage and opens the next page when it is due
+8. The run ends with a reason; Stop goes to the SW, which cancels the pending page. Closing the
+   run's tab or taking it elsewhere ends the run as `interrupted`
+9. `analyzer.js` generates insights and opportunity scores
+10. User exports via `exporter.js` (Excel/CSV/JSON)
+
+Run states: idle, starting, running, stopping, then stopped, blocked, failed or done.
+`reason` says why it ended: complete, stopped, blocked, selectors_broken, storage_full,
+storage_error, interrupted or updated.
 
 ### AI Chatbot (client-side, no server)
 
@@ -89,7 +108,7 @@ AmazonSellerScraper/
 2. Widget uses Shadow DOM to isolate styles from Amazon's CSS
 3. User types a question (e.g. "What's the best deal under $30?")
 4. `chatbot.js` sends `CHAT_MESSAGE` to `service-worker.js` with the question and the last few turns
-5. The service worker reads the user's key and the current run from `chrome.storage.local`; the content script never sees the key
+5. The service worker reads the user's key from `chrome.storage.local` and the latest run from IndexedDB; the content script never sees the key
 6. `scripts/lib/chat.js` builds the request: model id in `GEMINI_MODEL`, key in the `x-goog-api-key` header, titles in a fenced JSON block marked untrusted
 7. Response displayed in chat bubble as text, never HTML
 
@@ -114,16 +133,23 @@ npm run test:coverage # With coverage report
 **Test architecture:**
 - Pure logic modules (`analyzer.js`, `spread-analyzer.js`) are tested via `require()` directly
 - Content scripts (`scraper.js`, `offer-fetcher.js`) have no `module.exports` — loaded via `vm.runInContext` into a JSDOM context with Chrome API mocks and an `innerText` polyfill
+- `tests/setup/engine-rig.js` runs the real router and engine over fake-indexeddb with the real `scraper.js` in a JSDOM page per tab; `tests/unit/engine.test.js` drives runs through it
+- `npm run test:e2e` runs the same scenarios in Chromium (`tests/e2e/`), including the worker stopped via CDP between pages and 2.0 and 2.1 builds updated mid-run
 - HTML fixtures in `tests/fixtures/` match the exact CSS selectors the code uses
 - Chrome APIs (`storage`, `runtime`, `tabs`, `downloads`) are mocked in `tests/setup/chrome-mock.js`
 - XLSX is mocked with jest.fn() stubs in exporter.test.js; export-xlsx.test.js uses the real libs/xlsx.full.min.js
 
 ## Chrome APIs Used
 
-- `chrome.storage.local` — state persistence
-- `chrome.runtime.sendMessage/onMessage` — inter-script communication
-- `chrome.downloads` — file downloads
-- `chrome.tabs` — active tab messaging
+- `chrome.storage.local`: settings, the Gemini key and `schemaVersion` only
+- `chrome.storage.session`: the live run record (content scripts cannot read it)
+- IndexedDB: run data, in the extension origin; needs no permission
+- `chrome.runtime.sendMessage/onMessage`: messages, all in `scripts/lib/messages.js`
+- `chrome.downloads`: file downloads
+- `chrome.tabs`: `sendMessage`, `update`, `onRemoved`, `onUpdated`; none need the `tabs` permission
+
+No permission was added for the run engine: no `alarms`, `scripting`, `offscreen` or
+`unlimitedStorage`. `npm run lock` fails on any addition.
 
 ## DOM Selectors (Amazon-specific, updated Sep 2026)
 
@@ -175,17 +201,24 @@ One record per ASIN per run, from `Parsers.parseSearchPage` and the scraper:
 
 ## Storage
 
-- `chrome.storage.local` carries `schemaVersion` (3). Storage without it came from 2.0.
+- `chrome.storage.local` carries `schemaVersion` (4) and settings. Storage without it came from 2.0.
   `scripts/lib/migrate.js` brings it up to date on install, update and browser start;
   each step is idempotent. 2 to 3 adds `priceCents`, nulls and `/dp/` URLs to 2.0 rows,
   seeds `lastValues` from them (with `firstSeenAt`), ends a run the update cut off as
-  `updated`, and drops the untouched 2.0 default settings.
+  `updated`, and drops the untouched 2.0 default settings. 3 to 4 moves results, pages,
+  lastValues, spread data and the run into IndexedDB (a run still running is `updated`);
+  the IndexedDB writes commit before anything is removed.
+- IndexedDB `proscan` (`scripts/background/db.js`): `runs`, `products` (key `[runId, n]`,
+  n is the order found), `placements` (one record per page), `lastValues` (by ASIN),
+  `outbox` (pages waiting for sync), `spread` and `meta` (`latestRunId`). The popup shows
+  the latest run's products.
   `tests/fixtures/v2.0-storage.json` is what the live 2.0 build stores, captured with
   `node tests/e2e/capture-v20-storage.mjs`.
-- `lastValues` is capped by `Delta.prune`: 5,000 ASINs, none older than a year.
-- `Storage` rejects when `chrome.runtime.lastError` is set (code `storage_full` on a
-  quota error). The popup warns from 90% of the quota.
-- Cloud sync is off in 2.1 (`Flags.CLOUD_SYNC`): nothing goes into `syncQueue`, the SW
+- `lastValues` is pruned after every page: 5,000 ASINs, none older than a year
+  (`Delta.MAX_ENTRIES`, `Delta.MAX_AGE_DAYS`).
+- A page write that fails ends the run as `storage_full` (quota) or `storage_error`.
+  The popup warns from 90% of `navigator.storage.estimate()`.
+- Cloud sync is off in 2.1 and 2.2 (`Flags.CLOUD_SYNC`): nothing goes into the outbox, the SW
   refuses `PROSCAN_EXPORT`, and the popup hides sign-in and Export to ProScan.
 
 ## Export

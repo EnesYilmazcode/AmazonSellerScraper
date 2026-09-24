@@ -10,8 +10,8 @@
  * blocked, failed and done. `reason` says why a run ended; `END_STATE` maps
  * each reason to its end state.
  *
- * Loaded as a plain global (`Run`) in the popup and content scripts, and as
- * a CommonJS module in Jest and the bundled service worker.
+ * Loaded as a plain global (`Run`) in the popup, and as a CommonJS module
+ * in Jest and the bundled service worker.
  *
  * @module Run
  */
