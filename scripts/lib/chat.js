@@ -59,7 +59,7 @@ const Chat = (() => {
     /** Strips control and bidi characters, collapses whitespace, truncates. */
     function cleanText(value, max) {
         const s = String(value == null ? '' : value)
-            .replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ')
+            .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
         return s.length > max ? s.slice(0, max - 1) + '…' : s;

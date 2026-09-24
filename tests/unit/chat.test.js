@@ -232,3 +232,15 @@ describe('status', () => {
         expect(JSON.stringify(st)).not.toContain('test-key-123');
     });
 });
+
+describe('cleanText', () => {
+    test('strips bidi and zero-width characters from titles', () => {
+        const title = 'Cable' + String.fromCharCode(0x202e) + 'x' + String.fromCharCode(0x200b) + 'y' + String.fromCharCode(0x2066);
+        expect(Chat.cleanText(title, 120)).toBe('Cable x y');
+    });
+
+    test('the source file has no raw bidi or zero-width characters', () => {
+        const src = fs.readFileSync(path.join(__dirname, '../../scripts/lib/chat.js'), 'utf8');
+        expect(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069]/.test(src)).toBe(false);
+    });
+});
