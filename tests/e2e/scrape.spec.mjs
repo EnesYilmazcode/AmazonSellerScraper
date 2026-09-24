@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { test as base, expect } from '@playwright/test';
 import {
   launch, extPage, getState, clickStart, aimPopupAt, waitForState, endReason,
-  runMetaFor, killServiceWorker, enableDeveloperMode, sleep,
+  runMetaFor, killServiceWorker, enableDeveloperMode, sleep, ended, seedRun, workerTargets,
 } from './lib/extension.mjs';
 import { serveAmazon, simplePlan, searchPage, card, asinFor, corpusPage, CAPTCHA } from './lib/amazon.mjs';
 
@@ -192,30 +192,29 @@ test('a slow page is scraped once and the run still completes', async ({ ext }) 
   expect(endReason(s)).toBe('complete');
 });
 
-test('a full storage quota fails the run loudly', async ({ ext }) => {
-  const served = await serveAmazon(ext.context, simplePlan(2));
-  const store = await extPage(ext);
-  // Fill storage with queued products until about 2 KB is left.
-  const left = await store.evaluate(async () => {
-    const one = { name: 'x'.repeat(100), asin: 'B0FILL0000', price: '$1.00', priceCents: 100, url: 'https://www.amazon.com/dp/B0FILL0000', scrapedAt: new Date().toISOString(), runId: 'old' };
-    const quota = chrome.storage.local.QUOTA_BYTES;
-    const per = JSON.stringify(one).length + 1;
-    let n = Math.floor((quota - 4096) / per);
-    for (;;) {
-      try { await chrome.storage.local.set({ syncQueue: Array.from({ length: n }, () => one) }); break; } catch { n -= 50; }
-    }
-    return quota - await chrome.storage.local.getBytesInUse(null);
-  });
-  expect(left).toBeLessThan(4096);
-
+// Run data lives in IndexedDB now. Chrome gives an extension origin most of
+// the disk and ignores a CDP quota override for it (checked: the override
+// reports active, and a 200 KB write under a 1 KB quota still commits), so
+// a real quota error cannot be forced here. engine.test.js covers the
+// storage_full path; this breaks the database for real instead.
+test('a page that cannot be saved fails the run loudly (F-26)', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(4));
   const tab = await openSearch(ext, 'full disk');
-  await clickStart(ext, tab);
-  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
-  await sleep(2500);
+  const store = await extPage(ext);
+  const popup = await clickStart(ext, tab);
+  await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
+  // A newer schema from elsewhere: the worker's connection closes and it can no longer open version 1.
+  await store.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('proscan', 99);
+    req.onsuccess = () => { req.result.close(); resolve(); };
+    req.onerror = () => reject(req.error);
+  }));
+  await sleep(6000);
+  const run = await popup.evaluate(async () => (await chrome.storage.session.get('run')).run);
 
-  expect(pagesOf(served, 'full disk').length).toBeGreaterThanOrEqual(1);
-
-  expect(endReason(s)).toBe('storage_full');
+  expect(pagesOf(served, 'full disk')).toEqual([1, 2]);
+  expect(run).toMatchObject({ state: 'failed', reason: 'storage_error', page: 1 });
+  await expect(popup.locator('#status')).toContainText(/could not save a page/);
 });
 
 const Flags = require('../../scripts/lib/flags.js');
@@ -236,7 +235,7 @@ async function twoRuns(ext, store, done = () => true) {
     (x.results || []).some((r) => r.name.startsWith('yoga mat')) && done(x), { timeout: 30000 });
 }
 
-test('with cloud sync off (2.1), two runs queue nothing and keep their deltas (F-26)', async ({ ext }) => {
+test('with cloud sync off, two runs queue nothing and keep their deltas (F-26)', async ({ ext }) => {
   test.skip(Flags.CLOUD_SYNC, 'cloud sync is on in this build');
   await serveAmazon(ext.context, simplePlan(2));
   const store = await extPage(ext);
@@ -244,10 +243,11 @@ test('with cloud sync off (2.1), two runs queue nothing and keep their deltas (F
 
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('yoga mat', [1, 2]));
   expect(s).not.toHaveProperty('syncQueue');
+  expect(s.outbox).toEqual([]);
   expect(Object.keys(s.lastValues).sort()).toEqual([...allAsins('garden hose', [1, 2]), ...allAsins('yoga mat', [1, 2])].sort());
 });
 
-test('with cloud sync off (2.1), the popup shows no sign-in and no Export to ProScan', async ({ ext }) => {
+test('with cloud sync off, the popup shows no sign-in and no Export to ProScan', async ({ ext }) => {
   test.skip(Flags.CLOUD_SYNC, 'cloud sync is on in this build');
   const popup = await extPage(ext);
   await sleep(500);
@@ -259,18 +259,15 @@ test('with cloud sync off (2.1), the popup shows no sign-in and no Export to Pro
 });
 
 test('two runs without an export keep their own attribution', async ({ ext }) => {
-  test.skip(!Flags.CLOUD_SYNC, 'F-20: cloud sync is off in 2.1, so nothing is queued to attribute');
+  test.skip(!Flags.CLOUD_SYNC, 'F-20: cloud sync is off until 2.3, so nothing is queued to attribute');
   await serveAmazon(ext.context, simplePlan(2));
   const store = await extPage(ext);
-  const s = await twoRuns(ext, store, (x) => (x.syncQueue || []).length >= 16);
+  const s = await twoRuns(ext, store, (x) => (x.outbox || []).length >= 4);
 
-  const runIds = [...new Set(s.syncQueue.map((p) => p.runId))];
+  const runIds = [...new Set(s.outbox.map((p) => p.runId))];
   expect(runIds).toHaveLength(2);
-
-  bug('F-20', 'only the newest run keeps its source; older queued items lose theirs');
-  for (const item of s.syncQueue) {
-    const meta = runMetaFor(s, item.runId);
-    expect(meta && meta.keyword).toBe(item.name.startsWith('garden hose') ? 'garden hose' : 'yoga mat');
+  for (const runId of runIds) {
+    expect(runMetaFor(s, runId)).toBeTruthy();
   }
 });
 
@@ -281,7 +278,8 @@ test('a service worker stopped between pages does not break the run', async ({ e
   await clickStart(ext, tab);
   await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
   expect(await killServiceWorker(ext, tab)).toBe(true);
-
+  // The pending page lived in the dead worker's timer. Nothing here wakes
+  // it: the state reads go straight to storage, so the tab's heartbeat must.
   const s = await waitForState(store, (x) => x.scrapeRunPages?.length >= 3 && !x.isScrapingActive, { timeout: 30000 });
   expect(pagesOf(served, 'sleepy')).toEqual([1, 2, 3]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('sleepy', [1, 2, 3]));
@@ -294,7 +292,7 @@ test('the page cap in settings ends the run as complete', async ({ ext }) => {
   await store.evaluate(() => chrome.storage.local.set({ settings: { pageDelay: 2000, maxPages: 2 } }));
   const tab = await openSearch(ext, 'capped');
   await clickStart(ext, tab);
-  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+  const s = await waitForState(store, ended, { timeout: 30000 });
   await sleep(4500);
 
   expect(pagesOf(served, 'capped')).toEqual([1, 2]);
@@ -305,14 +303,14 @@ test('the page cap in settings ends the run as complete', async ({ ext }) => {
 test('Start on a captcha page changes nothing and says why', async ({ ext }) => {
   await serveAmazon(ext.context, () => ({ body: CAPTCHA() }));
   const store = await extPage(ext);
-  await store.evaluate(() => chrome.storage.local.set({ results: [{ asin: 'B0KEEP0001', name: 'kept' }] }));
+  await seedRun(store, [{ asin: 'B0KEEP0001', name: 'kept' }]);
   const tab = await openSearch(ext, 'robot');
   const popup = await clickStart(ext, tab);
   await sleep(1000);
   const s = await getState(store);
 
   expect(s.results.map((r) => r.asin)).toEqual(['B0KEEP0001']);
-  expect(s.run).toBeUndefined();
+  expect(s.run.runId).toBe('seeded');
   expect(s.isScrapingActive).toBeFalsy();
   expect(await popup.textContent('#status')).toMatch(/captcha/);
 });
@@ -321,7 +319,7 @@ test('Start on a tab left over from an update offers a reload, then runs', async
   const served = await serveAmazon(ext.context, simplePlan(2));
   const tab = await openSearch(ext, 'orphan');
   const before = await extPage(ext);
-  await before.evaluate(() => chrome.storage.local.set({ results: [{ asin: 'B0KEEP0001', name: 'kept' }] }));
+  await seedRun(before, [{ asin: 'B0KEEP0001', name: 'kept' }]);
 
   // Reloading the extension orphans the content script already in the tab,
   // as a Chrome Web Store update does.
@@ -338,7 +336,7 @@ test('Start on a tab left over from an update offers a reload, then runs', async
   expect(await popup.isVisible('#reloadTabButton')).toBe(true);
 
   await popup.click('#reloadTabButton');
-  s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+  s = await waitForState(store, (x) => ended(x) && x.run.runId !== 'seeded', { timeout: 30000 });
 
   expect(pagesOf(served, 'orphan')).toEqual([1, 1, 2]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('orphan', [1, 2]));
