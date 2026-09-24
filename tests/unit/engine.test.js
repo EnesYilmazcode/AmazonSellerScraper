@@ -1,0 +1,489 @@
+/**
+ * @jest-environment node
+ *
+ * The service worker run engine with the real scraper.js in each tab
+ * (tests/setup/engine-rig.js). The Chromium harness in tests/e2e runs the
+ * same scenarios in a real browser.
+ */
+const fs = require('fs');
+const path = require('path');
+const { createRig, settle } = require('../setup/engine-rig');
+const { foldPage } = require('../../scripts/background/engine');
+const Run = require('../../scripts/lib/run');
+
+const CAPTCHA = fs.readFileSync(path.join(__dirname, '../pages/2026-09/captcha-synthetic.html'), 'utf8');
+const PRODUCT = fs.readFileSync(path.join(__dirname, '../pages/2026-09/product-dp.html'), 'utf8');
+
+const asinFor = (k, page, i) => `B0${k.slice(0, 3).toUpperCase().padEnd(3, 'X')}${String(page).padStart(2, '0')}${String(i).padStart(3, '0')}`;
+const card = (asin, price, { ad = false, rating = true } = {}) => `
+  <div class="s-result-item${ad ? ' AdHolder' : ''}" data-asin="${asin}" data-component-type="s-search-result">
+    <a href="/dp/${asin}"><h2><span>Item ${asin}</span></h2></a>
+    <div class="a-price" data-a-size="xl"><span class="a-offscreen">${price}</span></div>
+    ${rating ? '<div data-cy="reviews-ratings-slot"><span class="a-icon-alt">4.5 out of 5 stars</span></div><a aria-label="1,000 ratings" href="#r">(1K)</a>' : ''}
+  </div>`;
+const page = (cards, next) => `<!DOCTYPE html><html><body><div class="s-main-slot">${cards}</div>${
+  next ? `<a class="s-pagination-next" href="${next}">Next</a>` : '<span class="s-pagination-next s-pagination-disabled">Next</span>'
+}</body></html>`;
+const searchUrl = (k, p = 1) => `https://www.amazon.com/s?k=${k}${p > 1 ? `&page=${p}` : ''}`;
+const pageNo = (url) => Number(new URL(url).searchParams.get('page') || 1);
+
+/** A site of `pages` generated search pages per keyword. */
+function simpleSite(pages, { captchaAt = null } = {}) {
+  return (url) => {
+    const u = new URL(url);
+    if (u.pathname.startsWith('/dp/')) return PRODUCT;
+    const k = u.searchParams.get('k');
+    const p = pageNo(url);
+    if (p === captchaAt) return CAPTCHA;
+    if (p > pages) return null;
+    const cards = [0, 1, 2, 3].map((i) => card(asinFor(k, p, i), `$${10 + i}.0${p}`)).join('');
+    return page(cards, p < pages ? `/s?k=${k}&page=${p + 1}` : null);
+  };
+}
+
+const served = (rig, k) => rig.served.filter((s) => s.url.includes(`k=${k}`)).map((s) => pageNo(s.url));
+
+async function results(rig) {
+  return (await rig.popup({ type: 'GET_STATE' })).results;
+}
+
+/** Opens a search tab and starts a run in it. */
+async function startIn(rig, k) {
+  const tab = rig.openTab(searchUrl(k));
+  await settle();
+  const resp = await rig.popup({ type: 'START_RUN', tabId: tab });
+  return { tab, resp };
+}
+
+/** Moves time on until the run ends or `ms` passes. */
+async function runUntilEnd(rig, ms = 30000) {
+  for (let t = 0; t < ms; t += 500) {
+    const run = await rig.run();
+    if (run && !Run.isActive(run)) return run;
+    await settle(500);
+  }
+  return rig.run();
+}
+
+beforeEach(() => jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] }));
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
+});
+
+describe('a run', () => {
+  test('a clean 3 page run scrapes every page once and completes', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    const { resp } = await startIn(rig, 'hose');
+    expect(resp).toMatchObject({ ok: true });
+    const run = await runUntilEnd(rig);
+    expect(served(rig, 'hose')).toEqual([1, 2, 3]);
+    expect(run).toMatchObject({ state: 'done', reason: 'complete', page: 3, itemCount: 12 });
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.results.map((r) => r.asin)).toEqual([1, 2, 3].flatMap((p) => [0, 1, 2, 3].map((i) => asinFor('hose', p, i))));
+    expect(st.results[0]).toMatchObject({ priceCents: 1001, rating: 4.5, reviewCount: 1000, runId: run.runId, pageIndex: 1 });
+    expect(st.pages.map((p) => [p.pageIndex, p.count, p.kind])).toEqual([[1, 4, 'results'], [2, 4, 'results'], [3, 4, 'last']]);
+    expect(st.run.source).toMatchObject({ type: 'keyword', keyword: 'hose' });
+  });
+
+  test('waits 2 to 4 seconds between pages', async () => {
+    const rig = createRig({ site: simpleSite(3), random: () => 0.5 });
+    await startIn(rig, 'wait');
+    await settle(2500);
+    expect(served(rig, 'wait')).toEqual([1]);
+    await settle(1000);
+    expect(served(rig, 'wait')).toEqual([1, 2]);
+  });
+
+  test('a captcha at page 2 ends the run as blocked', async () => {
+    const rig = createRig({ site: simpleSite(4, { captchaAt: 2 }) });
+    await startIn(rig, 'usb');
+    const run = await runUntilEnd(rig);
+    await settle(5000);
+
+    expect(served(rig, 'usb')).toEqual([1, 2]);
+    expect(run).toMatchObject({ state: 'blocked', reason: 'blocked' });
+    expect((await results(rig)).map((r) => r.asin)).toEqual([0, 1, 2, 3].map((i) => asinFor('usb', 1, i)));
+  });
+
+  test('the page cap in settings ends the run on that page', async () => {
+    const rig = createRig({ site: simpleSite(5), local: { settings: { maxPages: 2 } } });
+    await startIn(rig, 'cap');
+    const run = await runUntilEnd(rig);
+    await settle(5000);
+    expect(served(rig, 'cap')).toEqual([1, 2]);
+    expect(run).toMatchObject({ state: 'done', reason: 'complete', maxPages: 2 });
+  });
+
+  test('a page whose cards all fail to parse ends the run as selectors_broken', async () => {
+    const broken = '<div class="s-main-slot"><div class="s-result-item" data-asin="B0BROKEN01" data-component-type="s-search-result"></div></div>';
+    const rig = createRig({ site: (url) => (pageNo(url) === 1 ? simpleSite(3)(url) : page(broken, null)) });
+    await startIn(rig, 'broke');
+    const run = await runUntilEnd(rig);
+    expect(run).toMatchObject({ state: 'failed', reason: 'selectors_broken', page: 1 });
+  });
+});
+
+describe('Stop', () => {
+  test('Stop halts the run before the next page loads', async () => {
+    const rig = createRig({ site: simpleSite(4) });
+    await startIn(rig, 'stop');
+    await settle();
+    expect((await rig.run()).page).toBe(1);
+    expect(await rig.popup({ type: 'STOP_RUN' })).toEqual({ ok: true, stopped: true });
+    await settle(8000);
+
+    expect(served(rig, 'stop')).toEqual([1]);
+    expect(await rig.run()).toMatchObject({ state: 'stopped', reason: 'stopped' });
+    expect((await results(rig))).toHaveLength(4);
+  });
+
+  test('Stop that lands while a page is being saved still ends the run as stopped', async () => {
+    const rig = createRig({ site: simpleSite(4) });
+    const tab = rig.openTab(searchUrl('race'));
+    await settle();
+    await rig.popup({ type: 'START_RUN', tabId: tab });
+    // The page result is on its way; Stop queues behind its save.
+    const stopped = rig.popup({ type: 'STOP_RUN' });
+    await settle();
+    await stopped;
+    await settle(8000);
+    const run = await rig.run();
+    expect(run).toMatchObject({ state: 'stopped' });
+    expect(served(rig, 'race')).toEqual([1]);
+  });
+
+  test('Stop with no run changes nothing', async () => {
+    const rig = createRig({ site: simpleSite(1) });
+    expect(await rig.popup({ type: 'STOP_RUN' })).toEqual({ ok: true, stopped: false });
+    expect(await rig.run()).toBeNull();
+  });
+});
+
+describe('the run belongs to its tab', () => {
+  test('a second search tab opened mid-run does not join the run', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'alpha');
+    await settle();
+    const other = rig.openTab(searchUrl('beta'));
+    const run = await runUntilEnd(rig);
+
+    expect(served(rig, 'beta')).toEqual([1]);
+    expect(run).toMatchObject({ reason: 'complete' });
+    const got = await results(rig);
+    expect(got.filter((r) => r.asin.startsWith('B0BET'))).toEqual([]);
+    expect(got).toHaveLength(12);
+    expect(other).not.toBe(run.tabId);
+  });
+
+  test('a product page opened in another tab does not end the run', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'gamma');
+    await settle();
+    rig.openTab('https://www.amazon.com/dp/B09B8V1LZ3');
+    const run = await runUntilEnd(rig);
+    expect(run).toMatchObject({ reason: 'complete', page: 3 });
+  });
+
+  test('closing the run tab ends the run as interrupted', async () => {
+    const rig = createRig({ site: simpleSite(4) });
+    const { tab } = await startIn(rig, 'close');
+    await settle();
+    await rig.closeTab(tab);
+    await settle(8000);
+    expect(await rig.run()).toMatchObject({ state: 'failed', reason: 'interrupted' });
+    expect(served(rig, 'close')).toEqual([1]);
+  });
+
+  test('taking the run tab elsewhere ends the run, and the tab is not pulled back', async () => {
+    const rig = createRig({ site: simpleSite(4) });
+    const { tab } = await startIn(rig, 'left');
+    await settle();
+    rig.goTo(tab, 'https://www.amazon.com/dp/B09B8V1LZ3');
+    await settle(8000);
+    expect(await rig.run()).toMatchObject({ reason: 'interrupted' });
+    expect(served(rig, 'left')).toEqual([1]);
+  });
+
+  test('a reload of the run tab between pages does not end the run', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    const { tab } = await startIn(rig, 'reload');
+    await settle();
+    rig.goTo(tab, searchUrl('reload'));
+    const run = await runUntilEnd(rig);
+    expect(run).toMatchObject({ reason: 'complete', page: 3 });
+    expect(served(rig, 'reload')).toEqual([1, 1, 2, 3]);
+  });
+});
+
+describe('starting', () => {
+  test('Start on a captcha page changes nothing and says why', async () => {
+    const rig = createRig({ site: () => CAPTCHA });
+    const tab = rig.openTab(searchUrl('robot'));
+    await settle();
+    const resp = await rig.popup({ type: 'START_RUN', tabId: tab });
+    expect(resp).toMatchObject({ error: 'refused', kind: 'captcha' });
+    expect(resp.message).toMatch(/captcha/);
+    expect(await rig.run()).toBeNull();
+  });
+
+  test('Start on a tab with no content script asks for a reload', async () => {
+    const rig = createRig({ site: simpleSite(1) });
+    expect(await rig.popup({ type: 'START_RUN', tabId: 99 })).toEqual({ error: 'no_receiver' });
+    expect(await rig.run()).toBeNull();
+  });
+
+  test('a second Start while a run is going is refused', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'one');
+    const tab2 = rig.openTab(searchUrl('two'));
+    await settle();
+    expect(await rig.popup({ type: 'START_RUN', tabId: tab2 })).toMatchObject({ error: 'busy' });
+  });
+
+  test('START_RUN from a content script is refused', async () => {
+    const rig = createRig({ site: simpleSite(1) });
+    const respond = jest.fn();
+    expect(rig.worker.router.listener({ type: 'START_RUN', tabId: 1 }, { id: 'test-extension', tab: { id: 1 } }, respond)).toBe(false);
+    expect(respond).not.toHaveBeenCalled();
+  });
+});
+
+describe('the worker stopped between pages', () => {
+  test('the heartbeat wakes it and the run resumes from session storage', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'sleepy');
+    await settle();
+    expect((await rig.run()).page).toBe(1);
+    rig.killWorker();
+    const run = await runUntilEnd(rig);
+    expect(served(rig, 'sleepy')).toEqual([1, 2, 3]);
+    expect(run).toMatchObject({ reason: 'complete', itemCount: 12 });
+  });
+
+  test('killed on every page, the run still finishes once each', async () => {
+    const rig = createRig({ site: simpleSite(4) });
+    await startIn(rig, 'again');
+    for (let i = 0; i < 12; i++) {
+      await settle(500);
+      rig.killWorker();
+    }
+    const run = await runUntilEnd(rig);
+    expect(served(rig, 'again')).toEqual([1, 2, 3, 4]);
+    expect(run).toMatchObject({ reason: 'complete', page: 4 });
+    expect(await results(rig)).toHaveLength(16);
+  });
+
+  test('a run whose tab stopped checking in ends as interrupted on the next wake', async () => {
+    let clock = Date.parse('2026-09-24T10:00:00Z');
+    const rig = createRig({ site: simpleSite(3), now: () => clock });
+    await startIn(rig, 'stale');
+    await settle();
+    expect(await rig.run()).toMatchObject({ state: 'running', page: 1 });
+    // No heartbeat for longer than STALE_MS: time moves, the page's timers do not.
+    clock += Run.STALE_MS + 1;
+    rig.killWorker();
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.run).toMatchObject({ state: 'failed', reason: 'interrupted' });
+  });
+
+  test('after a browser restart a run IndexedDB still has as live is ended', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'restart');
+    await settle();
+    await rig.session.remove('run');
+    rig.killWorker();
+    await rig.engine().recover();
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.run).toMatchObject({ state: 'failed', reason: 'interrupted' });
+    expect(st.results).toHaveLength(4);
+  });
+});
+
+describe('page results', () => {
+  test('a repeated or out of order PAGE_RESULT is ignored', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    const { tab } = await startIn(rig, 'latch');
+    await settle();
+    const run = await rig.run();
+    const send = (msg) => new Promise((r) => rig.worker.router.listener(msg, { id: 'test-extension', tab: { id: tab } }, r));
+    const result = { kind: 'results', products: [{ asin: 'B0XXXXXXX1', placements: [] }], placements: 1, nextHref: 'x', fill: { title: 1, price: 1 } };
+    expect(await send({ type: 'PAGE_RESULT', runId: run.runId, page: 1, url: 'u', result })).toMatchObject({ ignored: true });
+    expect(await send({ type: 'PAGE_RESULT', runId: run.runId, page: 5, url: 'u', result })).toMatchObject({ ignored: true });
+    expect(await send({ type: 'PAGE_RESULT', runId: 'other', page: 2, url: 'u', result })).toMatchObject({ ignored: true });
+    expect(await results(rig)).toHaveLength(4);
+  });
+
+  test('PAGE_RESULT from another tab is ignored', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'owner');
+    await settle();
+    const run = await rig.run();
+    const resp = await new Promise((r) => rig.worker.router.listener(
+      { type: 'PAGE_RESULT', runId: run.runId, page: 2, url: 'u', result: { kind: 'results', products: [] } },
+      { id: 'test-extension', tab: { id: run.tabId + 1 } }, r));
+    expect(resp).toMatchObject({ ignored: true });
+  });
+
+  test('a page that cannot be saved ends the run loudly as storage_full', async () => {
+    let writes = 0;
+    const wrapDb = (db) => ({
+      ...db,
+      write: (ops) => {
+        if (ops.some((o) => o.store === 'placements') && ++writes === 2) {
+          return Promise.reject(Object.assign(new Error('QuotaExceededError'), { name: 'StorageError', code: 'storage_full' }));
+        }
+        return db.write(ops);
+      },
+    });
+    const rig = createRig({ site: simpleSite(4), wrapDb });
+    await startIn(rig, 'full');
+    const run = await runUntilEnd(rig);
+    await settle(5000);
+    expect(run).toMatchObject({ state: 'failed', reason: 'storage_full', page: 1 });
+    expect(served(rig, 'full')).toEqual([1, 2]);
+    expect(Run.describe(run, 4).text).toMatch(/storage is full/);
+  });
+});
+
+describe('products across pages (F-27, F-28)', () => {
+  const PAGE1 = page(card('B0A', '$5.00', { ad: true }) + card('B0B', '$2.00') + card('B0A', '$5.00'), '/s?k=w&page=2');
+  const PAGE2 = page(card('B0C', '$3.00') + card('B0A', '$5.00') + card('B0B', '$2.00', { rating: false }), null);
+  const site = (url) => (pageNo(url) === 1 ? PAGE1 : PAGE2);
+
+  async function twoPages({ lastValues = [], flags } = {}) {
+    const rig = createRig({ site, flags });
+    const db = await rig.db();
+    await db.write(lastValues.map((v) => ({ store: 'lastValues', put: v })));
+    db.close();
+    await startIn(rig, 'w');
+    await runUntilEnd(rig);
+    return rig;
+  }
+  const prevRun = (asin, priceCents) => ({ asin, priceCents, rating: 4.5, reviewCount: 900, runId: 'r0', scrapedAt: null });
+
+  test('each ASIN is stored once per run, with every placement', async () => {
+    const rig = await twoPages();
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.results.map((r) => r.asin)).toEqual(['B0A', 'B0B', 'B0C']);
+    expect(st.run.itemCount).toBe(3);
+    const a = st.results[0];
+    expect(a.url).toBe('https://www.amazon.com/dp/B0A');
+    expect(a.sponsored).toBe(true);
+    expect(a.organicRank).toBe(2);
+    expect(a.placements).toEqual([
+      { page: 1, position: 1, sponsored: true, rank: null },
+      { page: 1, position: 3, sponsored: false, rank: 2 },
+      { page: 2, position: 2, sponsored: false, rank: 4 },
+    ]);
+    expect(st.results[2]).toMatchObject({ asin: 'B0C', organicRank: 3, sponsored: false });
+    expect(st.pages.map((p) => [p.count, p.placements])).toEqual([[2, 3], [1, 3]]);
+  });
+
+  test('with cloud sync off nothing goes into the outbox (F-26)', async () => {
+    const rig = await twoPages({ flags: { CLOUD_SYNC: false } });
+    const db = await rig.db();
+    expect(await db.count('outbox')).toBe(0);
+    db.close();
+  });
+
+  test('an outbox left by an older build is not grown while sync is off', async () => {
+    const rig = createRig({ site, flags: { CLOUD_SYNC: false } });
+    const db = await rig.db();
+    await db.write([{ store: 'outbox', put: { seq: 1, runId: 'r0', pageIndex: null } }]);
+    db.close();
+    await startIn(rig, 'w');
+    await runUntilEnd(rig);
+    const after = await rig.db();
+    expect(await after.getAll('outbox')).toEqual([{ seq: 1, runId: 'r0', pageIndex: null }]);
+    after.close();
+  });
+
+  test('with cloud sync on each page is queued once, and the bundle has the products as they are now', async () => {
+    const rig = await twoPages({ flags: { CLOUD_SYNC: true } });
+    const { bundle, seqs } = await rig.engine().outboxBundle();
+    expect(seqs).toHaveLength(2);
+    expect(bundle.syncQueue.map((p) => p.asin)).toEqual(['B0A', 'B0B', 'B0C']);
+    expect(bundle.syncQueue[0].placements).toHaveLength(3);
+    expect(bundle.scrapeRunMeta).toMatchObject({ keyword: 'w' });
+    await rig.engine().clearOutbox(seqs);
+    expect((await rig.engine().outboxBundle()).seqs).toEqual([]);
+  });
+
+  test('each page drops lastValues older than the age limit (F-26)', async () => {
+    const stale = { asin: 'B0GONE', priceCents: 1, runId: 'r0', scrapedAt: new Date(Date.now() - 400 * 86400000).toISOString() };
+    const rig = await twoPages({ lastValues: [stale] });
+    const db = await rig.db();
+    expect((await db.getAll('lastValues')).map((s) => s.asin).sort()).toEqual(['B0A', 'B0B', 'B0C']);
+    db.close();
+  });
+
+  test('a repeat in the same run keeps the delta against the last run', async () => {
+    const rig = await twoPages({ lastValues: [prevRun('B0A', 600), prevRun('B0B', 250)] });
+    const [a, b] = await results(rig);
+    expect(a.delta).toEqual({ isNew: false, dPriceCents: -100, dRating: 0, dReviews: 100 });
+    // B0B lost its rating markup on page 2; the page 1 delta stays
+    expect(b.delta).toEqual({ isNew: false, dPriceCents: -50, dRating: 0, dReviews: 100 });
+    const db = await rig.db();
+    expect(await db.get('lastValues', 'B0B')).toMatchObject({ priceCents: 200, rating: 4.5, reviewCount: 1000 });
+    db.close();
+  });
+
+  test('a card with no rating gives a null delta, not a fake drop (F-28)', async () => {
+    const rig = createRig({ site: () => page(card('B0B', '$2.00', { rating: false }), null) });
+    const db = await rig.db();
+    await db.write([{ store: 'lastValues', put: prevRun('B0B', 200) }]);
+    db.close();
+    await startIn(rig, 'w');
+    await runUntilEnd(rig);
+    const [b] = await results(rig);
+    expect(b).toMatchObject({ rating: null, reviewCount: null });
+    expect(b.delta).toEqual({ isNew: false, dPriceCents: 0, dRating: null, dReviews: null });
+  });
+
+  test('two runs keep their own products, and organic ranks start at 1 in each', async () => {
+    const rig = createRig({ site: simpleSite(1) });
+    const first = await startIn(rig, 'aaa');
+    await runUntilEnd(rig);
+    const firstRun = await rig.run();
+    await startIn(rig, 'bbb');
+    await runUntilEnd(rig);
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.results.map((r) => r.asin)).toEqual([0, 1, 2, 3].map((i) => asinFor('bbb', 1, i)));
+    expect(st.results.map((r) => r.organicRank)).toEqual([1, 2, 3, 4]);
+    const db = await rig.db();
+    expect(await db.runProducts(firstRun.runId)).toHaveLength(4);
+    expect(await db.count('lastValues')).toBe(8);
+    db.close();
+    expect(first.resp.ok).toBe(true);
+  });
+});
+
+describe('spread results', () => {
+  test('are kept per run and come back with the state', async () => {
+    const rig = createRig({ site: simpleSite(1) });
+    const { tab } = await startIn(rig, 'spread');
+    await runUntilEnd(rig);
+    const send = (msg) => new Promise((r) => rig.worker.router.listener(msg, { id: 'test-extension', tab: { id: tab } }, r));
+    const got = await send({ type: 'GET_RESULTS' });
+    expect(got.results).toHaveLength(4);
+    await send({ type: 'SPREAD_RESULT', asin: got.results[0].asin, data: { sellerPrices: [1, 2] } });
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.spread).toEqual({ [got.results[0].asin]: { sellerPrices: [1, 2] } });
+  });
+});
+
+describe('foldPage', () => {
+  test('does not change the records it is given', () => {
+    const before = [{ asin: 'B0A', organicRank: 1, placements: [{ page: 1, position: 1, sponsored: false, rank: 1 }] }];
+    const frozen = JSON.stringify(before);
+    const { fresh, changed } = foldPage(before, [
+      { asin: 'B0A', sponsored: true, placements: [{ position: 1, sponsored: true, rank: null }] },
+      { asin: 'B0B', sponsored: false, placements: [{ position: 2, sponsored: false, rank: 1 }] },
+    ], 2);
+    expect(JSON.stringify(before)).toBe(frozen);
+    expect(fresh.map((p) => [p.asin, p.organicRank])).toEqual([['B0B', 2]]);
+    expect(changed[0]).toMatchObject({ asin: 'B0A', sponsored: true, organicRank: 1 });
+    expect(changed[0].placements).toHaveLength(2);
+  });
+});

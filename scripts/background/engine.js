@@ -1,0 +1,453 @@
+/**
+ * @fileoverview The run engine. The service worker is the only writer.
+ *
+ * The live run record is in chrome.storage.session, so it survives the
+ * worker being stopped between pages but not a browser restart. What the
+ * run collects goes to IndexedDB (db.js) in one transaction per page.
+ *
+ * A run moves page by page:
+ * 1. START_RUN from the popup: ping the tab, make the run, ask the tab to
+ *    parse (PARSE_PAGE).
+ * 2. The content script parses and answers with PAGE_RESULT. The engine
+ *    folds the page into the run and saves it.
+ * 3. After a 2 to 4 second delay the engine opens the page's Next link with
+ *    tabs.update. The new page says PAGE_READY and is asked to parse.
+ *
+ * The delay is a timer in the worker, which dies with it. The content
+ * script's HEARTBEAT every few seconds wakes a stopped worker, and every
+ * wake runs tick(), which opens the next page once it is due. All changes
+ * go through one queue, so two messages never interleave their writes.
+ *
+ * @module Engine
+ */
+
+const Run = require('../lib/run.js');
+const Msg = require('../lib/messages.js');
+const Flags = require('../lib/flags.js');
+const Delta = require('../modules/delta.js');
+
+/** A page asked for but not reported this long is asked for again. */
+const PAGE_TIMEOUT_MS = 20000;
+
+/**
+ * Folds one page's products into a run. Placements get the page number and
+ * a run-wide organic rank. An ASIN the run already has only adds its
+ * placements to that record. Pure: `runProducts` is not changed.
+ *
+ * @returns {{fresh: Object[], changed: Object[]}} new records, and copies
+ *   of existing records that changed
+ */
+function foldPage(runProducts, pageProducts, pageIndex) {
+    const organicBefore = runProducts.reduce(
+        (n, r) => n + (r.placements || []).filter(pl => !pl.sponsored).length, 0);
+    const known = new Map(runProducts.map(r => [r.asin, r]));
+    const changed = new Map();
+    const fresh = [];
+
+    for (const product of pageProducts) {
+        const placements = (product.placements || []).map(pl => ({
+            page: pageIndex,
+            ...pl,
+            rank: pl.rank === null ? null : pl.rank + organicBefore
+        }));
+        const firstRank = (placements.find(pl => pl.rank !== null) || {}).rank;
+        const organicRank = firstRank === undefined ? null : firstRank;
+
+        const seen = changed.get(product.asin) || known.get(product.asin);
+        if (!seen) {
+            fresh.push({ ...product, placements, organicRank });
+            continue;
+        }
+        changed.set(product.asin, {
+            ...seen,
+            placements: [...(seen.placements || []), ...placements],
+            sponsored: !!seen.sponsored || !!product.sponsored,
+            organicRank: seen.organicRank == null ? organicRank : seen.organicRank
+        });
+    }
+    return { fresh, changed: [...changed.values()] };
+}
+
+/** The run as kept in IndexedDB: without the fields that only matter live. */
+function durable(run) {
+    const { heartbeat, navAt, awaiting, expectUrl, navigatedAt, ...rest } = run;
+    return rest;
+}
+
+function runSuffix(random) {
+    return Math.floor(random() * 0x100000000).toString(36).padStart(7, '0').slice(0, 8);
+}
+
+/**
+ * @param {Object} deps
+ * @param {Object} deps.chrome - chrome.* (storage.session, storage.local, tabs)
+ * @param {function(): Promise<Object>} deps.openDb - resolves to the db.js api
+ */
+function createEngine({
+    chrome,
+    openDb,
+    now = Date.now,
+    random = Math.random,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
+    flags = Flags,
+    log = console
+}) {
+    let dbPromise = null;
+    let timer = null;
+    let chain = Promise.resolve();
+
+    const db = () => {
+        if (!dbPromise) dbPromise = openDb().catch((err) => { dbPromise = null; throw err; });
+        return dbPromise;
+    };
+
+    /** Runs `fn` after every change queued before it. */
+    function serial(fn) {
+        const p = chain.then(fn, fn);
+        chain = p.catch(() => {});
+        return p;
+    }
+
+    async function getRun() {
+        const data = await chrome.storage.session.get(Run.KEY);
+        return (data && data[Run.KEY]) || null;
+    }
+
+    const saveRun = (run) => chrome.storage.session.set({ [Run.KEY]: run });
+
+    function sendToTab(tabId, message) {
+        return new Promise((resolve) => {
+            try {
+                chrome.tabs.sendMessage(tabId, message, { frameId: 0 }, (response) => {
+                    if (chrome.runtime.lastError) return resolve(null);
+                    resolve(response || null);
+                });
+            } catch (e) {
+                resolve(null);
+            }
+        });
+    }
+
+    function schedule(ms) {
+        if (timer) clearTimer(timer);
+        timer = setTimer(() => { timer = null; tick(); }, Math.max(0, ms));
+    }
+
+    function cancelTimer() {
+        if (timer) clearTimer(timer);
+        timer = null;
+    }
+
+    /** Ends `run` for `reason` and tells its tab. Returns the ended run. */
+    async function end(run, reason) {
+        const ended = Run.finish(run, reason, now());
+        cancelTimer();
+        await saveRun(ended);
+        try {
+            await (await db()).write([{ store: 'runs', put: durable(ended) }]);
+        } catch (err) {
+            log.warn('[ProScan] Could not record the end of the run:', err.message);
+        }
+        log.log(`[ProScan] Run ended: ${reason}. ${ended.itemCount} items`);
+        sendToTab(ended.tabId, { type: Msg.T.RUN_ENDED, runId: ended.runId, reason });
+        return ended;
+    }
+
+    /** The live run, after ending it if its tab stopped checking in. */
+    async function liveRun() {
+        const run = await getRun();
+        if (Run.isStale(run, now())) return end(run, 'interrupted');
+        return run;
+    }
+
+    function start({ tabId }) {
+        return serial(async () => {
+            if (typeof tabId !== 'number') return { error: 'refused', message: Run.refusal('unknown') };
+            const current = await liveRun();
+            if (Run.isActive(current)) {
+                return { error: 'busy', message: 'A run is already going. Stop it before starting another.' };
+            }
+            const pong = await sendToTab(tabId, { type: Msg.T.PING });
+            if (!pong || !pong.ok) return { error: 'no_receiver' };
+            if (!Run.STARTABLE.includes(pong.kind)) {
+                return { error: 'refused', kind: pong.kind, message: Run.refusal(pong.kind) };
+            }
+
+            const local = await chrome.storage.local.get('settings');
+            const settings = (local && local.settings) || {};
+            const t = now();
+            const runId = `${t}-${runSuffix(random)}`;
+            let run = Run.create({ runId, tabId, maxPages: settings.maxPages, source: Run.sourceOf(pong.url, t), now: t });
+            await saveRun(run);
+            try {
+                await (await db()).write([
+                    { store: 'runs', put: durable(run) },
+                    { store: 'meta', put: { key: 'latestRunId', value: runId } }
+                ]);
+            } catch (err) {
+                await end(run, err.code === 'storage_full' ? 'storage_full' : 'storage_error');
+                return { error: err.code || 'storage_error', message: Run.MESSAGES[err.code] || Run.MESSAGES.storage_error };
+            }
+
+            run = Run.transition(run, 'running', { awaiting: true, expectUrl: pong.url, navigatedAt: t });
+            await saveRun(run);
+            const ack = await sendToTab(tabId, { type: Msg.T.PARSE_PAGE, runId, page: 1 });
+            if (!ack || !ack.ok) {
+                await end(run, 'interrupted');
+                return { error: 'no_receiver' };
+            }
+            return { ok: true, runId };
+        });
+    }
+
+    function stop() {
+        return serial(async () => {
+            const run = await getRun();
+            if (!Run.isActive(run)) return { ok: true, stopped: false };
+            const stopping = Run.transition(run, 'stopping');
+            await saveRun(stopping);
+            await end(stopping, 'stopped');
+            return { ok: true, stopped: true };
+        });
+    }
+
+    /** A page in some tab finished loading. Only the run's tab is asked to parse. */
+    function pageReady({ url }, sender) {
+        return serial(async () => {
+            const run = await liveRun();
+            const tabId = sender && sender.tab ? sender.tab.id : null;
+            if (!Run.owns(run, tabId) || run.state !== 'running') return { idle: true };
+            if (run.awaiting) return { parse: true, runId: run.runId, page: run.page + 1 };
+            if (url === run.lastUrl) return { heartbeat: true, runId: run.runId };
+            // The tab went somewhere else while the next page was pending.
+            await end(run, 'interrupted');
+            return { idle: true };
+        });
+    }
+
+    function pageResult({ runId, page, url, result }, sender) {
+        return serial(async () => {
+            const run = await liveRun();
+            const tabId = sender && sender.tab ? sender.tab.id : null;
+            if (!Run.owns(run, tabId) || run.runId !== runId || run.state !== 'running' ||
+                !run.awaiting || page !== run.page + 1 || !result || !Array.isArray(result.products)) {
+                return { ok: false, ignored: true };
+            }
+            const ending = Run.outcome(result, page, run.maxPages);
+            if (result.products.length === 0 || ending === 'selectors_broken') {
+                const ended = await end(run, ending || 'complete');
+                return { ok: true, next: 'end', reason: ended.reason };
+            }
+
+            const store = await db();
+            const t = now();
+            let ops;
+            let next;
+            try {
+                const existing = await store.runProducts(runId);
+                const { fresh, changed } = foldPage(existing, result.products, page);
+                const prevs = await store.getMany('lastValues', fresh.map(p => p.asin));
+                ops = [];
+                fresh.forEach((p, i) => {
+                    p.runId = runId;
+                    p.pageIndex = page;
+                    p.n = existing.length + i;
+                    const prev = prevs[i] || null;
+                    // Only an ASIN's first sighting in the run gets a delta.
+                    p.delta = Delta.computeDeltas(p, prev);
+                    ops.push({ store: 'lastValues', put: { asin: p.asin, ...Delta.snapshot(p, prev) } });
+                    ops.push({ store: 'products', put: p });
+                });
+                changed.forEach(p => ops.push({ store: 'products', put: p }));
+                ops.push({
+                    store: 'placements',
+                    put: {
+                        runId, pageIndex: page, count: fresh.length, placements: result.placements || 0,
+                        kind: result.kind, fill: result.fill || null, scrapedAt: new Date(t).toISOString(), url
+                    }
+                });
+                if (flags.CLOUD_SYNC) ops.push({ store: 'outbox', put: { runId, pageIndex: page, queuedAt: t } });
+
+                next = {
+                    ...run, page, itemCount: run.itemCount + fresh.length, heartbeat: t,
+                    lastUrl: url, nextHref: result.nextHref || null, awaiting: false
+                };
+                if (ending) next = Run.finish(next, ending, t);
+                else next.navAt = t + Run.pageDelay(random());
+                ops.push({ store: 'runs', put: durable(next) });
+                await store.write(ops);
+            } catch (err) {
+                log.warn('[ProScan] Could not save the page:', err.message);
+                const ended = await end(run, err.code === 'storage_full' ? 'storage_full' : 'storage_error');
+                return { ok: false, next: 'end', reason: ended.reason };
+            }
+
+            await saveRun(next);
+            store.pruneLastValues({ max: Delta.MAX_ENTRIES, maxAgeDays: Delta.MAX_AGE_DAYS, now: t })
+                .catch(err => log.warn('[ProScan] Could not prune lastValues:', err.message));
+            if (ending) {
+                log.log(`[ProScan] Run ended: ${ending}. ${next.itemCount} items`);
+                sendToTab(next.tabId, { type: Msg.T.RUN_ENDED, runId, reason: ending });
+                return { ok: true, next: 'end', reason: ending };
+            }
+            schedule(next.navAt - t);
+            return { ok: true, next: 'wait' };
+        });
+    }
+
+    /** Opens the next page once it is due, and re-asks a page that never reported. */
+    function tick() {
+        return serial(async () => {
+            let run = await liveRun();
+            if (!run || run.state !== 'running') return;
+            const t = now();
+            if (!run.awaiting && run.nextHref && run.navAt != null) {
+                if (run.navAt > t) {
+                    if (!timer) schedule(run.navAt - t);
+                    return;
+                }
+                run = { ...run, awaiting: true, expectUrl: run.nextHref, navigatedAt: t, navAt: null };
+                await saveRun(run);
+                log.log(`[ProScan] Navigating to next page: ${run.expectUrl}`);
+                try {
+                    await chrome.tabs.update(run.tabId, { url: run.expectUrl });
+                } catch (err) {
+                    await end(run, 'interrupted');
+                }
+                return;
+            }
+            if (run.awaiting && t - (run.navigatedAt || 0) > PAGE_TIMEOUT_MS) {
+                await saveRun({ ...run, navigatedAt: t });
+                sendToTab(run.tabId, { type: Msg.T.PARSE_PAGE, runId: run.runId, page: run.page + 1 });
+            }
+        });
+    }
+
+    function heartbeat({ runId }, sender) {
+        return serial(async () => {
+            const run = await liveRun();
+            const tabId = sender && sender.tab ? sender.tab.id : null;
+            if (!Run.owns(run, tabId) || run.runId !== runId) return { active: false };
+            await saveRun({ ...run, heartbeat: now() });
+            return { active: true };
+        }).then((out) => { tick(); return out; });
+    }
+
+    function tabRemoved(tabId) {
+        return serial(async () => {
+            const run = await getRun();
+            if (Run.isActive(run) && run.tabId === tabId) await end(run, 'interrupted');
+        });
+    }
+
+    /**
+     * The run's tab started loading a page the engine did not open: a reload
+     * is fine, anything else means the user took the tab elsewhere. Without
+     * the tabs permission a non-Amazon URL is hidden, which also counts.
+     */
+    function tabUpdated(tabId, info, tab) {
+        if (!info || info.status !== 'loading') return Promise.resolve();
+        return serial(async () => {
+            const run = await getRun();
+            if (!Run.owns(run, tabId) || run.state !== 'running' || run.awaiting) return;
+            const url = info.url || (tab && tab.url);
+            if (url && url === run.lastUrl) return;
+            await end(run, 'interrupted');
+        });
+    }
+
+    /** After a browser restart the session is empty; a run IndexedDB still has as live was cut off. */
+    function recover() {
+        return serial(async () => {
+            if (await getRun()) return;
+            const store = await db();
+            const latest = await store.getMeta('latestRunId');
+            const rec = latest ? await store.get('runs', latest) : null;
+            if (Run.isActive(rec)) {
+                await store.write([{ store: 'runs', put: durable(Run.finish(rec, 'interrupted', now())) }]);
+            }
+        });
+    }
+
+    /** The latest run and what it found, for the popup and the chat. */
+    async function latest() {
+        const live = await liveRun();
+        const store = await db();
+        const runId = (live && live.runId) || await store.getMeta('latestRunId');
+        if (!runId) return { run: null, results: [], pages: [], spread: {} };
+        const [rec, results, pages, spreadRows] = await Promise.all([
+            store.get('runs', runId),
+            store.runProducts(runId),
+            store.runPages(runId),
+            store.getAll('spread', 'runId', runId)
+        ]);
+        const spread = {};
+        spreadRows.forEach(r => { spread[r.asin] = r.data; });
+        const run = live && live.runId === runId ? live : (rec || null);
+        return { run, results, pages, spread };
+    }
+
+    function getState() {
+        return serial(latest);
+    }
+
+    async function getResults() {
+        const { run, results } = await getState();
+        return { runId: run ? run.runId : null, results };
+    }
+
+    function spreadResult({ asin, data }) {
+        return serial(async () => {
+            const store = await db();
+            const runId = await store.getMeta('latestRunId');
+            if (!runId || typeof asin !== 'string') return { ok: false };
+            await store.write([{ store: 'spread', put: { runId, asin, data: data || null } }]);
+            return { ok: true };
+        });
+    }
+
+    /** What chat.js reads, in the shape it was written for. */
+    async function chatData(keys) {
+        const local = await chrome.storage.local.get(keys.filter(k => k === 'geminiApiKey'));
+        const { run, results, pages } = await getState();
+        return {
+            ...local,
+            results,
+            scrapeRunId: run ? run.runId : null,
+            scrapeRunMeta: run ? run.source : null,
+            scrapeRunPages: pages
+        };
+    }
+
+    /**
+     * The sync bundle for every run in the outbox, built from the products
+     * as they are now, and the outbox keys to delete once it is written.
+     */
+    async function outboxBundle() {
+        const store = await db();
+        const entries = await store.getAll('outbox');
+        const runIds = [...new Set(entries.map(e => e.runId))];
+        const syncQueue = [];
+        const scrapeRunPages = [];
+        let scrapeRunMeta = null;
+        for (const runId of runIds) {
+            syncQueue.push(...await store.runProducts(runId));
+            scrapeRunPages.push(...await store.runPages(runId));
+            const rec = await store.get('runs', runId);
+            if (rec) scrapeRunMeta = rec.source;
+        }
+        return { bundle: { syncQueue, scrapeRunMeta, scrapeRunPages }, seqs: entries.map(e => e.seq) };
+    }
+
+    async function clearOutbox(seqs) {
+        await (await db()).write(seqs.map(seq => ({ store: 'outbox', delete: seq })));
+    }
+
+    return {
+        start, stop, pageReady, pageResult, heartbeat, tick, tabRemoved, tabUpdated, recover,
+        getState, getResults, spreadResult, chatData, outboxBundle, clearOutbox, db
+    };
+}
+
+module.exports = { createEngine, foldPage, durable, PAGE_TIMEOUT_MS };
