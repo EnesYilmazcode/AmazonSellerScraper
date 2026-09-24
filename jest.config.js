@@ -6,12 +6,13 @@ module.exports = {
   // Older builds checked out by the e2e upgrade harness have their own tests.
   testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/e2e/\\.build/'],
   modulePathIgnorePatterns: ['<rootDir>/tests/e2e/\\.build/'],
-  // sync.js and service-worker.js are authored as ESM (esbuild bundles
-  // them). A tiny scoped transform rewrites their import/export to
-  // CommonJS so they can be unit-tested; every other file keeps the
-  // default babel-jest transform.
+  // sync.js, sync-plan.js, service-worker.js and the shared schema are
+  // authored as ESM (esbuild bundles them). A tiny scoped transform
+  // rewrites their import/export to CommonJS so they can be unit-tested;
+  // every other file keeps the default babel-jest transform.
   transform: {
-    '[\\\\/]scripts[\\\\/]background[\\\\/](sync|service-worker)\\.js$': '<rootDir>/tests/setup/esm-to-cjs-transform.js',
+    '[\\\\/]scripts[\\\\/]background[\\\\/](sync|sync-plan|service-worker)\\.js$': '<rootDir>/tests/setup/esm-to-cjs-transform.js',
+    '[\\\\/]packages[\\\\/]schema[\\\\/]index\\.js$': '<rootDir>/tests/setup/esm-to-cjs-transform.js',
     '\\.[jt]sx?$': 'babel-jest'
   },
   coverageDirectory: 'coverage',
@@ -20,6 +21,7 @@ module.exports = {
     'scripts/lib/*.js',
     'scripts/content/scraper.js',
     'scripts/content/offer-fetcher.js',
+    'packages/schema/index.js',
     '!**/node_modules/**'
   ]
 };

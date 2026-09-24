@@ -15,6 +15,7 @@
  *   import x from 'mod';                 -> const x = require('mod');
  *   export async function f() {}         -> async function f() {}; module.exports.f = f;
  *   export function f() {}               -> function f() {}; module.exports.f = f;
+ *   export const X = ...;                -> const X = ...; module.exports.X = X;
  */
 function rewrite(src) {
   const named = [];
@@ -37,6 +38,11 @@ function rewrite(src) {
       /import\s+([A-Za-z_$][\w$]*)\s+from\s*['"]([^'"]+)['"]\s*;?/g,
       (_m, name, mod) => `const ${name} = require('${mod}');`
     )
+    // export const NAME = ... -> strip `export`, remember the name
+    .replace(/^export\s+const\s+([A-Za-z_$][\w$]*)/gm, (_m, name) => {
+      named.push(name);
+      return `const ${name}`;
+    })
     // export (async) function name(...) -> strip `export`, remember the name
     .replace(
       /export\s+(async\s+)?function\s+([A-Za-z_$][\w$]*)/g,
