@@ -1,0 +1,15 @@
+{
+  "type": "search",
+  "synthetic": true,
+  "url": "https://www.amazon.com/s?k=test+widgets&page=5",
+  "source": "Copy of tests/fixtures/amazon-search-lastpage.html.",
+  "kind": "last",
+  "asins": [
+    "B0LAST001"
+  ],
+  "placements": 1,
+  "sponsored": 0,
+  "next": null,
+  "total": 0,
+  "minFill": 1
+}

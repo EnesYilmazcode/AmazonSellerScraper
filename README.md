@@ -142,6 +142,8 @@ For local Firebase work, `npm run build:dev` points the build at the emulators u
 
 `npm test` runs the Jest suite and the tool tests. `npm run check` builds, then runs the permission lock (nothing may be added over `tools/live-manifest.json`, the published v2.0 manifest), the version gate and the secret scan. `npm run zip` writes the store package to `dist-zips/` and refuses a dev build, a stray file, uncommitted changes (`node tools/zip.mjs --allow-dirty` overrides that for local tries), or any gate failure. CI runs all of these.
 
+The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, see its README). `npm run test:e2e` loads the built extension into Chromium and runs scrape scenarios against those pages, with every request answered locally. Run `npx playwright install --no-shell chromium` once first. Known bugs run as expected failures tagged with their audit finding id; `PROSCAN_SHOW_KNOWN=1 npm run test:e2e` shows what they fail on.
+
 ## Usage
 
 1. Navigate to any Amazon search results or seller page
@@ -179,9 +181,11 @@ AmazonSellerScraper/
 │   └── popup.js                  # UI state management and export handling
 ├── scripts/
 │   ├── content/
-│   │   ├── scraper.js            # DOM scraping with cascading selectors
+│   │   ├── scraper.js            # Scrape loop: storage, messages, pagination
 │   │   ├── chatbot.js            # Floating AI chatbot (Shadow DOM)
 │   │   └── offer-fetcher.js      # Seller offer page fetching for spread analysis
+│   ├── lib/
+│   │   └── parsers.js            # Pure search and offer page parsing
 │   ├── background/
 │   │   └── service-worker.js     # Message routing + Gemini API
 │   └── modules/

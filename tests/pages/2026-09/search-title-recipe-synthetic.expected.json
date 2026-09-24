@@ -1,0 +1,28 @@
+{
+  "type": "search",
+  "synthetic": true,
+  "url": "https://www.amazon.com/s?k=widget",
+  "source": "Current title-recipe card markup from the scraper-pagination audit fixtures: brand h2 before the title h2, an sspa sponsored card repeated as organic, and a card with only a unit price.",
+  "kind": "results",
+  "asins": [
+    "B0SPONS001",
+    "B0ORGANIC1",
+    "B0UNITONLY"
+  ],
+  "placements": 4,
+  "sponsored": 1,
+  "next": "/s?k=widget&page=2&ref=sr_pg_1",
+  "nextExact": true,
+  "total": 312,
+  "minFill": 0.6,
+  "spot": {
+    "B0SPONS001": {
+      "name": "Acme Widget Pro, 6 ft, Braided",
+      "priceCents": 1299
+    },
+    "B0UNITONLY": {
+      "name": "Bulk pack of widgets, 24 count",
+      "priceCents": null
+    }
+  }
+}
