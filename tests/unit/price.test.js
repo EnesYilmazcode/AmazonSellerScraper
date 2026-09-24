@@ -46,6 +46,38 @@ describe('price.js', () => {
     });
   });
 
+  describe('usdToCents', () => {
+    test.each([
+      ['$19.99', 1999],
+      ['$1,299.00', 129900],
+      ['US$ 24.99', 2499],
+      ['$24', 2400],
+      ['$0.00', 0],
+      ['$12.99 - $24.99', 1299],
+      ['$19.99 ($0.33/Ounce)', 1999],
+    ])('%s -> %s', (input, cents) => {
+      expect(Price.usdToCents(input)).toBe(cents);
+    });
+
+    test.each(['€19,99', 'CDN$ 24.99', 'EUR 25,50', '¥1,980', '19,99 €', 'FREE', '$1.005', '$1,29', '', null])(
+      '%s is not a USD amount',
+      (input) => {
+        expect(Price.usdToCents(input)).toBeNull();
+      },
+    );
+  });
+
+  describe('currencyOf', () => {
+    test('names the currency in front of or after the number', () => {
+      expect(Price.currencyOf('$19.99')).toBe('USD');
+      expect(Price.currencyOf('€19,99')).toBe('€');
+      expect(Price.currencyOf('CDN$ 24.99')).toBe('CDN$');
+      expect(Price.currencyOf('19,99 €')).toBe('€');
+      expect(Price.currencyOf('FREE')).toBeNull();
+      expect(Price.currencyOf(null)).toBeNull();
+    });
+  });
+
   describe('centsToDisplay', () => {
     test('formats 1999 -> "$19.99"', () => {
       expect(Price.centsToDisplay(1999)).toBe('$19.99');
