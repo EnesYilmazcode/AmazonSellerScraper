@@ -372,7 +372,7 @@ test('a new search typed in the run tab ends the run and is not scraped into it'
   await clickStart(ext, tab);
   await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
   await tab.goto(searchUrl('second'));
-  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 15000 });
+  const s = await waitForState(store, (x) => ended(x), { timeout: 15000 });
   await sleep(5000);
 
   expect(pagesOf(served, 'second')).toEqual([1]);
@@ -391,12 +391,14 @@ test('a run tab that left Amazon and comes back after a minute does not resume',
   await tab.route('https://example.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>elsewhere</p>' }));
   await tab.goto('https://example.com/');
   // Age the heartbeat instead of waiting out the 60 s.
+  // From 2.2 the live run is in session storage.
   await store.evaluate(async () => {
-    const { run } = await chrome.storage.local.get('run');
-    await chrome.storage.local.set({ run: { ...run, heartbeat: Date.now() - 120000 } });
+    const area = (await chrome.storage.session.get('run')).run ? chrome.storage.session : chrome.storage.local;
+    const { run } = await area.get('run');
+    if (run) await area.set({ run: { ...run, heartbeat: Date.now() - 120000 } });
   });
   await tab.goto(searchUrl('wander', 2));
-  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 15000 });
+  const s = await waitForState(store, (x) => ended(x), { timeout: 15000 });
   await sleep(5000);
 
   expect(pagesOf(served, 'wander')).toEqual([1, 2]);
@@ -412,7 +414,7 @@ test('a 503 error page at page 2 ends the run as a warning, not complete', async
   const tab = await openSearch(ext, 'throttled');
   const store = await extPage(ext);
   await clickStart(ext, tab);
-  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+  const s = await waitForState(store, (x) => ended(x), { timeout: 30000 });
   await sleep(2500);
 
   expect(pagesOf(served, 'throttled')).toEqual([1, 2]);
