@@ -123,33 +123,53 @@ npm run test:coverage # With coverage report
 - `chrome.downloads` — file downloads
 - `chrome.tabs` — active tab messaging
 
-## DOM Selectors (Amazon-specific, updated Feb 2026)
+## DOM Selectors (Amazon-specific, updated Sep 2026)
 
 ```javascript
-// Product container
+// Product container: real result cards when the page marks them,
+// otherwise any result item with an ASIN
+'[data-component-type="s-search-result"]'
 '.s-result-item[data-asin]:not([data-asin=""])'
 
-// Title — structural first, class fallback
+// Title: the h2 inside the product link, then the last title-recipe h2,
+// then the old fallbacks (a brand line can be its own h2)
+'a h2'
+'[data-cy="title-recipe"] h2'
 'h2 span'
 '.a-size-base-plus.a-color-base.a-text-normal'
 
-// Price — data attribute for main price
+// Price: the main price; a-text-price is a unit or list price
 '.a-price[data-a-size="xl"] .a-offscreen'
-'.a-price .a-offscreen'
+'.a-price:not(.a-text-price) .a-offscreen'   // outside secondary-offer-recipe
 
-// Rating — cascading: data-cy > star-mini > star-small > plain text
+// Rating: cascading data-cy > star-mini > star-small > plain text
 '[data-cy="reviews-ratings-slot"] .a-icon-alt'
 '.a-icon-star-mini .a-icon-alt'
 '.a-icon-star-small .a-icon-alt'
 '[data-cy="reviews-block"] span.a-size-base.a-color-secondary'
 
-// Review count — aria-label has full number, display text has K/M suffix
-'a[aria-label$="ratings"]'
+// Review count: aria-label has the full number, display text has K/M
+'a[aria-label$="ratings"], a[aria-label$="rating"]'
 '.a-size-mini.puis-normal-weight-text.s-underline-text'
+
+// Sponsored: AdHolder card, the label, or an sspa ad link
+'.puis-sponsored-label-text, [data-component-type="sp-sponsored-result"], a[href*="/sspa/"]'
 
 // Prime badge
 '.a-icon-prime'
 ```
+
+## Product record
+
+One record per ASIN per run, from `Parsers.parseSearchPage` and the scraper:
+
+- `name`, `price`, `rating`, `reviewCount`: null when the card has none, never 0 or "N/A"
+- `priceCents`: integer cents from a dollar price only; `currency` is `USD`, another symbol, or null
+- `url`: always `https://www.amazon.com/dp/{asin}`, never the sspa ad link
+- `sponsored`: true if any placement was an ad; `organicRank`: run-wide rank of the first organic card, or null
+- `placements`: every card the ASIN had, as `{page, position, sponsored, rank}`
+- `delta`: taken once, on the ASIN's first sighting in the run, against `lastValues` from earlier runs.
+  A field that fails to parse keeps its last good value in `lastValues`, with the time in `carried`
 
 ## Analytics
 
