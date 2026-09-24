@@ -6,9 +6,9 @@
  * global (`Parsers`) after price.js in the content scripts and the popup, and
  * as a CommonJS module in Jest and Node.
  *
- * The logic was moved here unchanged from scraper.js, offer-fetcher.js and
- * analyzer.js, known bugs included. The golden tests in tests/golden mark
- * each of those with its finding id.
+ * Search parsing returns one product per ASIN with its placements, null for
+ * any field the card lacks, a /dp/ URL and a USD-only price. The golden tests
+ * in tests/golden mark what is still wrong with its finding id.
  *
  * @module Parsers
  */
