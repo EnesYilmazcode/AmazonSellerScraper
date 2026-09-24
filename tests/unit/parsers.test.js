@@ -31,7 +31,7 @@ describe('Parsers.parseSearchPage', () => {
   test('no result cards is empty', () => {
     const doc = parseDoc(page('<p>nothing</p>'), URL_P1);
     const r = Parsers.parseSearchPage(doc, URL_P1);
-    expect(r).toEqual({ kind: 'empty', products: [], nextHref: null, total: 0, fill: { asin: 0, title: 0, price: 0 } });
+    expect(r).toEqual({ kind: 'empty', products: [], placements: 0, nextHref: null, total: 0, fill: { asin: 0, title: 0, price: 0 } });
   });
 
   test('the next page is the Next link itself, resolved against the page', () => {
@@ -62,6 +62,38 @@ describe('Parsers.parseSearchPage', () => {
   test('fill counts products with a price', () => {
     const doc = parseDoc(page(card('B0A', '$1.00') + card('B0B', null)), URL_P1);
     expect(Parsers.parseSearchPage(doc, URL_P1).fill).toEqual({ asin: 1, title: 1, price: 0.5 });
+  });
+});
+
+describe('Parsers dedupe (F-27)', () => {
+  const ad = (asin) => `<div class="s-result-item AdHolder" data-asin="${asin}"><h2><span>Ad ${asin}</span></h2>`
+    + '<div class="a-price" data-a-size="xl"><span class="a-offscreen">$5.00</span></div></div>';
+
+  test('an ASIN shown as an ad and as a result is one product with both placements', () => {
+    const doc = parseDoc(page(ad('B0A') + card('B0B', '$2.00') + card('B0A', '$5.00')), URL_P1);
+    const r = Parsers.parseSearchPage(doc, URL_P1);
+    expect(r.products.map((p) => p.asin)).toEqual(['B0A', 'B0B']);
+    expect(r.placements).toBe(3);
+    const a = r.products[0];
+    expect(a.sponsored).toBe(true);
+    expect(a.organicRank).toBe(2);
+    expect(a.name).toBe('Item B0A');
+    expect(a.placements).toEqual([
+      { position: 1, sponsored: true, rank: null },
+      { position: 3, sponsored: false, rank: 2 },
+    ]);
+    expect(r.products[1]).toMatchObject({ sponsored: false, organicRank: 1 });
+  });
+
+  test('an ad-only product has no organic rank', () => {
+    const r = Parsers.parseSearchPage(parseDoc(page(ad('B0A')), URL_P1), URL_P1);
+    expect(r.products[0]).toMatchObject({ sponsored: true, organicRank: null });
+  });
+
+  test('cards outside s-search-result are ignored when the page marks its results', () => {
+    const result = (asin) => card(asin, '$1.00').replace('class="s-result-item"', 'class="s-result-item" data-component-type="s-search-result"');
+    const doc = parseDoc(page(result('B0A') + card('B0WIDGET', '$9.00') + result('B0B')), URL_P1);
+    expect(Parsers.parseSearchPage(doc, URL_P1).products.map((p) => p.asin)).toEqual(['B0A', 'B0B']);
   });
 });
 

@@ -16,14 +16,6 @@ const Parsers = require('../../scripts/lib/parsers');
 const { corpus, parseDoc } = require('../setup/corpus');
 
 const KNOWN = {
-  '2026-09/search-yoga-mat': {
-    'each ASIN once': 'F-27',
-    'only search-result cards': 'F-27',
-    'sponsored count': 'F-16',
-  },
-  '2026-09/search-title-recipe-synthetic': {
-    'each ASIN once': 'F-27',
-  },
   '2026-09/aod-pinned-only': {
     'seller prices': 'F-30',
     'total offer count': 'F-37',
@@ -73,6 +65,16 @@ for (const page of corpus()) {
       check(id, 'only search-result cards', () => {
         const found = [...new Set(parsed.products.map((p) => p.asin))].sort();
         expect(found).toEqual([...exp.asins].sort());
+      });
+
+      check(id, 'placement count', () => {
+        expect(parsed.placements).toBe(exp.placements);
+      });
+
+      check(id, 'organic ranks run 1..n', () => {
+        const ranks = parsed.products.flatMap((p) => p.placements).map((pl) => pl.rank).filter((r) => r !== null);
+        expect(ranks.sort((x, y) => x - y)).toEqual(ranks.map((_, i) => i + 1));
+        expect(ranks.length).toBe(exp.placements - exp.sponsored);
       });
 
       check(id, 'sponsored count', () => {

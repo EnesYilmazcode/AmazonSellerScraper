@@ -20,6 +20,8 @@ const Parsers = (() => {
     const SEARCH_SELECTORS = {
         // Filtered to exclude empty ASINs (ad placeholders)
         productItem: '.s-result-item[data-asin]:not([data-asin=""])',
+        // Real result cards; carousels and video widgets share the class above
+        searchResult: '[data-component-type="s-search-result"]',
 
         // The title h2 sits inside the product link; a brand line is its own h2 before it
         titleLinked: 'a h2',
@@ -289,33 +291,80 @@ const Parsers = (() => {
     }
 
     /**
+     * The search-result cards on a page. When the page marks its real results
+     * with s-search-result, only those count; older layouts fall back to every
+     * .s-result-item with an ASIN.
+     */
+    function resultCards(doc) {
+        const all = [...doc.querySelectorAll(SEARCH_SELECTORS.productItem)];
+        const main = all.filter(el => el.matches(SEARCH_SELECTORS.searchResult));
+        return main.length ? main : all;
+    }
+
+    /**
+     * One product per ASIN from the page's cards. Each product keeps every
+     * placement ({position, sponsored, rank}), where rank counts organic
+     * cards only. `sponsored` is true if any placement was an ad, and
+     * `organicRank` is the rank of the first organic one, or null. The fields
+     * come from the first organic card when there is one.
+     */
+    function dedupe(cards) {
+        const products = [];
+        const byAsin = new Map();
+        let organic = 0;
+        cards.forEach((card, i) => {
+            const product = scrapeProduct(card);
+            if (!product) return;
+            const placement = {
+                position: i + 1,
+                sponsored: product.sponsored,
+                rank: product.sponsored ? null : ++organic
+            };
+            const seen = byAsin.get(product.asin);
+            if (!seen) {
+                product.organicRank = placement.rank;
+                product.placements = [placement];
+                byAsin.set(product.asin, product);
+                products.push(product);
+                return;
+            }
+            seen.placements.push(placement);
+            if (seen.organicRank === null && placement.rank !== null) {
+                Object.assign(seen, product, {
+                    sponsored: true,
+                    organicRank: placement.rank,
+                    placements: seen.placements
+                });
+            }
+        });
+        return products;
+    }
+
+    /**
      * Parses one search page.
      *
      * kind is 'results' when there is a next page, 'last' when there is not,
      * and otherwise what classifyPage says (empty, captcha, interstitial,
      * signin or unknown). nextHref follows the page's own Next link.
+     * products holds each ASIN once; placements counts the cards.
      *
      * @param {Document} doc
      * @param {string} url - the page's address
-     * @returns {{kind: string, products: Object[], nextHref: string|null, total: number, fill: Object}}
+     * @returns {{kind: string, products: Object[], placements: number, nextHref: string|null, total: number, fill: Object}}
      */
     function parseSearchPage(doc, url) {
-        const listings = doc.querySelectorAll(SEARCH_SELECTORS.productItem);
+        const cards = resultCards(doc);
         const total = getTotalResults(doc);
-        if (listings.length === 0) {
-            return { kind: classifyPage(doc, url), products: [], nextHref: null, total, fill: fillRates([]) };
+        if (cards.length === 0) {
+            return { kind: classifyPage(doc, url), products: [], placements: 0, nextHref: null, total, fill: fillRates([]) };
         }
 
-        const products = [];
-        listings.forEach(listing => {
-            const product = scrapeProduct(listing);
-            if (product) products.push(product);
-        });
-
+        const products = dedupe(cards);
         const nextHref = nextPageHref(doc, url);
         return {
             kind: nextHref ? 'results' : 'last',
             products,
+            placements: products.reduce((n, p) => n + p.placements.length, 0),
             nextHref,
             total,
             fill: fillRates(products)
@@ -406,6 +455,8 @@ const Parsers = (() => {
         hasNextPage,
         nextPageHref,
         classifyPage,
+        resultCards,
+        dedupe,
         fillRates,
         parseSearchPage,
         buildOfferUrl,
