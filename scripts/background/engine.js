@@ -325,7 +325,10 @@ function createEngine({
                     await chrome.tabs.update(run.tabId, { url: run.expectUrl });
                 } catch (err) {
                     await end(run, 'interrupted');
+                    return;
                 }
+                // If the page never reports, ask it again.
+                schedule(PAGE_TIMEOUT_MS + 1000);
                 return;
             }
             if (run.awaiting && t - (run.navigatedAt || 0) > PAGE_TIMEOUT_MS) {

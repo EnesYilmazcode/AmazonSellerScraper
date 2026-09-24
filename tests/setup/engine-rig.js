@@ -55,6 +55,7 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
   const tabs = new Map();
   const served = [];
   const sent = [];
+  const dropped = new Set();
   const log = { log() {}, warn() {}, error() {} };
   let nextTabId = 1;
   let worker = null;
@@ -113,6 +114,10 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
   /** A content script message to the worker, from tab `tabId`. Starts a stopped worker. */
   function fromTab(tabId, message, cb) {
     sent.push({ tabId, type: message && message.type });
+    if (dropped.has(message && message.type)) {
+      setImmediate(() => { if (cb) withError('Could not establish connection. Receiving end does not exist.', () => cb()); });
+      return;
+    }
     setImmediate(() => {
       const w = worker || startWorker();
       let answered = false;
@@ -171,6 +176,8 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
       return (worker || startWorker()).engine.tabRemoved(id);
     },
     goTo(id, url) { navigate(id, url); },
+    /** Messages of these types from tabs are lost, as when the worker is not up. */
+    drop(...types) { dropped.clear(); types.forEach((t) => dropped.add(t)); },
     tabCtx: (id) => tabs.get(id).ctx,
     /** A popup message to the worker. */
     popup(message) {

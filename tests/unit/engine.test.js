@@ -311,6 +311,21 @@ describe('the worker stopped between pages', () => {
   });
 });
 
+describe('a page that never reports', () => {
+  test('is asked again after the page timeout, and the run goes on', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'lost');
+    await settle();
+    rig.drop('PAGE_READY');
+    await settle(4000);
+    expect(served(rig, 'lost')).toEqual([1, 2]);
+    expect((await rig.run()).page).toBe(1);
+    rig.drop();
+    const run = await runUntilEnd(rig, 60000);
+    expect(run).toMatchObject({ reason: 'complete', page: 3 });
+  });
+});
+
 describe('page results', () => {
   test('a repeated or out of order PAGE_RESULT is ignored', async () => {
     const rig = createRig({ site: simpleSite(3) });
