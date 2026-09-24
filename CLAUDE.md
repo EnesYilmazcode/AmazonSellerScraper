@@ -12,14 +12,16 @@ AmazonSellerScraper/
 ├── popup/                     # UI Layer
 │   ├── popup.html            # Popup interface (dashboard + settings)
 │   ├── popup.css             # Popup styling
-│   └── popup.js              # UI logic + API key management
+│   ├── popup.js              # UI logic
+│   └── ai-key.js             # Gemini key field (AI chat settings)
 ├── scripts/
 │   ├── content/
 │   │   ├── scraper.js        # DOM scraping on Amazon pages
 │   │   ├── chatbot.js        # Floating AI chatbot widget (Shadow DOM)
 │   │   └── offer-fetcher.js  # Seller price fetching for spread analysis
 │   ├── lib/
-│   │   └── parsers.js        # Pure search/offer parsing (global Parsers)
+│   │   ├── parsers.js        # Pure search/offer parsing (global Parsers)
+│   │   └── chat.js           # Gemini request builder, run scoping, error text
 │   ├── background/
 │   │   └── service-worker.js # Message routing + Gemini API calls
 │   └── modules/
@@ -81,15 +83,15 @@ AmazonSellerScraper/
 1. `chatbot.js` injects a floating widget (bottom-right) on Amazon pages with product listings
 2. Widget uses Shadow DOM to isolate styles from Amazon's CSS
 3. User types a question (e.g. "What's the best deal under $30?")
-4. `chatbot.js` reads scraped products from `chrome.storage.local`
-5. Sends `CHAT_MESSAGE` to `service-worker.js` with question + product data
-6. Service worker calls Gemini API (`gemini-2.0-flash`, free tier) with product context
-7. Response displayed in chat bubble
+4. `chatbot.js` sends `CHAT_MESSAGE` to `service-worker.js` with the question and the last few turns
+5. The service worker reads the user's key and the current run from `chrome.storage.local`; the content script never sees the key
+6. `scripts/lib/chat.js` builds the request: model id in `GEMINI_MODEL`, key in the `x-goog-api-key` header, titles in a fenced JSON block marked untrusted
+7. Response displayed in chat bubble as text, never HTML
 
 ## Setup
 
 1. Load unpacked extension in `chrome://extensions`
-2. Click the ProScan popup → open Settings → paste your Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
+2. Click the ProScan popup, expand AI chat settings, paste your Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
 3. Navigate to Amazon seller/search page → scrape → export
 4. The AI chatbot button appears in the bottom-right corner on Amazon pages with product listings
 

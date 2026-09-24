@@ -13,7 +13,7 @@
     <img src="https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Web Store">
   </a>
   <img src="https://img.shields.io/badge/Manifest-V3-brightgreen" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/AI-Gemini_2.0_Flash-blue" alt="Gemini AI">
+  <img src="https://img.shields.io/badge/AI-Gemini_Flash-blue" alt="Gemini AI">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
 </p>
 
@@ -28,7 +28,7 @@ ProScan is a Chrome extension that scrapes Amazon product listings across multip
 - **Multi-page scraping** -- Automatically navigates and extracts product data (name, ASIN, price, rating, reviews, Prime status) across paginated Amazon results
 - **Opportunity scoring** -- Proprietary formula identifies high-value arbitrage opportunities based on rating, review velocity, and price positioning
 - **Price spread analysis** -- Fetches competing seller prices for each product and calculates variability (Coefficient of Variation) to identify pricing disagreement -- a strong arbitrage signal
-- **AI chatbot** -- Floating widget on Amazon pages answers questions about scraped products using Gemini 2.0 Flash (e.g., "What's the best deal under $30?")
+- **AI chatbot** -- Floating widget on Amazon pages answers questions about your last scan using Gemini Flash and your own free API key (e.g., "What's the best deal under $30?")
 - **Analytics dashboard** -- Real-time stats, underpriced product detection, and quality distribution analysis
 - **Multi-format export** -- Excel (with styled sheets and charts), CSV, and JSON with full analytics
 - **Shadow DOM isolation** -- Chatbot widget styles are fully isolated from Amazon's CSS
@@ -71,10 +71,10 @@ User clicks "Start Scraping"
 
 ```
 User types question in floating widget
-  → chatbot.js reads products from chrome.storage.local
-  → Sends CHAT_MESSAGE to service-worker.js
-  → Service worker calls Gemini 2.0 Flash API with product context
-  → Response displayed in chat bubble
+  → chatbot.js sends CHAT_MESSAGE (question + last few turns) to service-worker.js
+  → Service worker reads the user's key and the current run from storage
+  → scripts/lib/chat.js builds the Gemini request (model id is GEMINI_MODEL there)
+  → Response displayed in chat bubble as plain text
 ```
 
 ## Analytics Engine
@@ -136,6 +136,8 @@ See [docs/PRICE_SPREAD_ANALYSIS.md](docs/PRICE_SPREAD_ANALYSIS.md) for the full 
 3. Enable **Developer mode** (top-right toggle)
 4. Click **Load unpacked** and select the `dist/` folder. The repo root does not load on its own, because the service worker has to be bundled.
 
+To use the AI chat, open the ProScan popup, expand **AI chat settings** and paste a Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)). The key stays in `chrome.storage.local`; only the service worker reads it and sends it to Google.
+
 For local Firebase work, `npm run build:dev` points the build at the emulators under the `demo-proscan` project.
 
 ## Release checks
@@ -163,7 +165,7 @@ The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, s
 | Extension | Chrome Manifest V3 | Extension framework |
 | Extension | Shadow DOM | Chatbot style isolation |
 | Extension | XLSX.js | Excel generation |
-| AI | Google Gemini 2.0 Flash | Chatbot |
+| AI | Google Gemini Flash (bring your own key) | Chatbot |
 
 ## Chrome APIs Used
 
@@ -187,7 +189,8 @@ AmazonSellerScraper/
 │   │   ├── chatbot.js            # Floating AI chatbot (Shadow DOM)
 │   │   └── offer-fetcher.js      # Seller offer page fetching for spread analysis
 │   ├── lib/
-│   │   └── parsers.js            # Pure search and offer page parsing
+│   │   ├── parsers.js            # Pure search and offer page parsing
+│   │   └── chat.js               # Gemini request builder and run scoping
 │   ├── background/
 │   │   └── service-worker.js     # Message routing + Gemini API
 │   └── modules/
