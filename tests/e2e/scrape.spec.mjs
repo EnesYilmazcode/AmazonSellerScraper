@@ -255,8 +255,7 @@ async function twoRuns(ext, store, done = () => true) {
     (x.results || []).some((r) => r.name.startsWith('yoga mat')) && done(x), { timeout: 30000 });
 }
 
-test('with cloud sync off, two runs queue nothing and keep their deltas (F-26)', async ({ ext }) => {
-  test.skip(Flags.CLOUD_SYNC, 'cloud sync is on in this build');
+test('signed out, two runs queue nothing and keep their deltas (F-26)', async ({ ext }) => {
   await serveAmazon(ext.context, simplePlan(2));
   const store = await extPage(ext);
   const s = await twoRuns(ext, store);
@@ -278,14 +277,33 @@ test('with cloud sync off, the popup shows no sign-in and no Export to ProScan',
   expect(resp.error).toMatch(/not available/);
 });
 
-test('two runs without an export keep their own attribution', async ({ ext }) => {
-  test.skip(!Flags.CLOUD_SYNC, 'F-20: cloud sync is off until 2.3, so nothing is queued to attribute');
+test('with cloud sync on, the popup offers sign-in, sign-up and a password reset', async ({ ext }) => {
+  test.skip(!Flags.CLOUD_SYNC, 'cloud sync is off in this build');
+  const popup = await extPage(ext);
+  await expect(popup.locator('#authForm')).toBeVisible();
+  await expect(popup.locator('#authSignUpLink')).toHaveAttribute('href', /^https:\/\/proscanbot\.web\.app\/dashboard\//);
+  await expect(popup.locator('#authResetBtn')).toBeVisible();
+  await expect(popup.locator('#exportToProScanBtn')).toBeHidden();
+  await popup.click('#authResetBtn');
+  await expect(popup.locator('#authError')).toContainText('Enter your email');
+});
+
+test('two runs without an export keep their own attribution (F-20)', async ({ ext }) => {
+  test.skip(!Flags.CLOUD_SYNC, 'cloud sync is off in this build');
   await serveAmazon(ext.context, simplePlan(2));
   const store = await extPage(ext);
-  const s = await twoRuns(ext, store, (x) => (x.outbox || []).length >= 4);
+  // Signed in as far as the engine knows. Firebase has no user in this
+  // profile, so nothing is sent anywhere and the outbox keeps it all. Seed
+  // after the worker's first auth check, which clears a stale account.
+  await store.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: 'PROSCAN_AUTH_STATE' }, r)));
+  await store.evaluate(() => chrome.storage.local.set({ account: { uid: 'e2e-user' } }));
+  const s = await twoRuns(ext, store, (x) => (x.outbox || []).length >= 6);
 
   const runIds = [...new Set(s.outbox.map((p) => p.runId))];
   expect(runIds).toHaveLength(2);
+  expect(runIds.map((id) => id.replace(/_\d+$/, '')).sort()).toEqual(['k_garden-hose', 'k_yoga-mat']);
+  expect(s.outbox.every((e) => e.uid === 'e2e-user')).toBe(true);
+  expect(s.outbox.map((e) => e.kind)).toEqual(['page', 'page', 'run', 'page', 'page', 'run']);
   for (const runId of runIds) {
     expect(runMetaFor(s, runId)).toBeTruthy();
   }

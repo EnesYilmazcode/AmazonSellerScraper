@@ -59,10 +59,22 @@ test('one router answers every message', () => {
   expect(messageListeners).toHaveLength(1);
 });
 
-test('Export to ProScan is refused while cloud sync is off', async () => {
+test("Export to ProScan flushes the signed-in account's outbox", async () => {
+  flush.mockClear();
   const resp = await send({ type: 'PROSCAN_EXPORT' });
-  expect(resp.error).toMatch(/not available/);
-  expect(flush).not.toHaveBeenCalled();
+  expect(resp).toMatchObject({ ok: true, entries: 0 });
+  expect(flush).toHaveBeenCalledWith('u1');
+});
+
+test('the auth state says who is signed in and what waits to sync', async () => {
+  const st = await send({ type: 'PROSCAN_AUTH_STATE' });
+  expect(st).toMatchObject({ user: { uid: 'u1' }, notice: null, pending: 0, dashboardUrl: expect.stringMatching(/^https:/) });
+});
+
+test('a password reset answers the same whether or not the account exists (F-56)', async () => {
+  const st = await send({ type: 'PROSCAN_RESET_PASSWORD', email: 'nobody@example.test' });
+  expect(st).toEqual({ ok: true, message: 'If an account exists for nobody@example.test, a reset link is on its way.' });
+  expect(await send({ type: 'PROSCAN_RESET_PASSWORD', email: '' })).toMatchObject({ error: expect.any(String) });
 });
 
 test('messages meant for the popup or a tab are left alone', async () => {
