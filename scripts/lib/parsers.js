@@ -33,7 +33,7 @@ const Parsers = (() => {
         ratingText: '[data-cy="reviews-block"] span.a-size-base.a-color-secondary',
 
         // aria-label has the full number; display text may use K/M
-        reviewCount: 'a[aria-label$="ratings"]',
+        reviewCount: 'a[aria-label$="ratings"], a[aria-label$="rating"]',
         reviewCountAlt: '.a-size-mini.puis-normal-weight-text.s-underline-text',
         reviewCountLegacy: '.a-size-base.puis-normal-weight-text.s-underline-text',
 
@@ -71,26 +71,26 @@ const Parsers = (() => {
         return el ? el.innerText.trim() : null;
     }
 
-    /** Display price string such as "$19.99", or "N/A". */
+    /** Display price string such as "$19.99", or null. */
     function extractPrice(element) {
         const priceEl = element.querySelector(SEARCH_SELECTORS.price) ||
                         element.querySelector(SEARCH_SELECTORS.priceAlt);
 
         if (priceEl) {
             const text = priceEl.innerText || priceEl.textContent;
-            return text ? text.trim() : 'N/A';
+            return text && text.trim() ? text.trim() : null;
         }
-        return 'N/A';
+        return null;
     }
 
-    /** "4.7 out of 5 stars" -> 4.7, or 0. */
+    /** "4.7 out of 5 stars" -> 4.7, or null. */
     function parseRatingText(text) {
-        if (!text) return 0;
+        if (!text) return null;
         const match = text.match(/(\d+\.?\d*)/);
-        return match ? parseFloat(match[1]) : 0;
+        return match ? parseFloat(match[1]) : null;
     }
 
-    /** Rating from data-cy, star-mini, star-small, then plain text. 0 if none. */
+    /** Rating from data-cy, star-mini, star-small, then plain text. Null if none. */
     function extractRating(element) {
         const dataCy = element.querySelector(SEARCH_SELECTORS.rating);
         if (dataCy) {
@@ -116,15 +116,15 @@ const Parsers = (() => {
             if (val > 0 && val <= 5) return val;
         }
 
-        return 0;
+        return null;
     }
 
-    /** "(108.3K)" -> 108300, "(1.2M)" -> 1200000, or 0. */
+    /** "(108.3K)" -> 108300, "(1.2M)" -> 1200000, or null. */
     function parseReviewText(text) {
-        if (!text) return 0;
+        if (!text) return null;
         const cleaned = text.replace(/[()]/g, '').trim();
         const match = cleaned.match(/^([\d,.]+)\s*([KMkm])?/);
-        if (!match) return 0;
+        if (!match) return null;
 
         let num = parseFloat(match[1].replace(/,/g, ''));
         const suffix = (match[2] || '').toUpperCase();
@@ -133,7 +133,7 @@ const Parsers = (() => {
         return Math.round(num);
     }
 
-    /** Review count from the aria-label, then the display text. 0 if none. */
+    /** Review count from the aria-label, then the display text. Null if none. */
     function extractReviewCount(element) {
         const ariaLink = element.querySelector(SEARCH_SELECTORS.reviewCount);
         if (ariaLink) {
@@ -157,7 +157,7 @@ const Parsers = (() => {
             if (count > 0) return count;
         }
 
-        return 0;
+        return null;
     }
 
     function hasPrimeBadge(element) {
@@ -169,8 +169,11 @@ const Parsers = (() => {
         const asin = listing.dataset.asin;
         if (!asin) return null;
 
-        const title = getText(listing, SEARCH_SELECTORS.title, SEARCH_SELECTORS.titleAlt) || 'N/A';
-        const price = extractPrice(listing);
+        const title = getText(listing, SEARCH_SELECTORS.title, SEARCH_SELECTORS.titleAlt) || null;
+        const rawPrice = extractPrice(listing);
+        // Only a dollar price counts; anything else keeps its currency and no amount.
+        const priceCents = PriceLib.usdToCents(rawPrice);
+        const price = priceCents === null ? null : rawPrice;
         const rating = extractRating(listing);
         const reviewCount = extractReviewCount(listing);
         const isPrime = hasPrimeBadge(listing);
@@ -184,8 +187,9 @@ const Parsers = (() => {
             name: title,
             asin: asin,
             price: price,
-            // Integer cents for sync and delta math; null when unparseable
-            priceCents: PriceLib.priceToCents(price),
+            // Integer cents for sync and delta math; null when missing or not USD
+            priceCents: priceCents,
+            currency: PriceLib.currencyOf(rawPrice),
             rating: rating,
             reviewCount: reviewCount,
             isPrime: isPrime,
@@ -256,7 +260,7 @@ const Parsers = (() => {
         const share = (ok) => (n ? products.filter(ok).length / n : 0);
         return {
             asin: share((p) => !!p.asin),
-            title: share((p) => !!p.name && p.name !== 'N/A'),
+            title: share((p) => !!p.name),
             price: share((p) => p.priceCents !== null && p.priceCents !== undefined)
         };
     }

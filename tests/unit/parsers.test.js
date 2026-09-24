@@ -65,6 +65,32 @@ describe('Parsers.parseSearchPage', () => {
   });
 });
 
+describe('Parsers.scrapeProduct fields', () => {
+  const one = (html) => parseDoc(page(html), URL_P1).querySelector('[data-asin]');
+
+  test('a price in another currency keeps its currency and no amount', () => {
+    const p = Parsers.scrapeProduct(one(card('B0EUR', '€19,99')));
+    expect(p.price).toBeNull();
+    expect(p.priceCents).toBeNull();
+    expect(p.currency).toBe('€');
+  });
+
+  test('a dollar price is USD', () => {
+    const p = Parsers.scrapeProduct(one(card('B0USD', '$1,299.99')));
+    expect(p).toMatchObject({ price: '$1,299.99', priceCents: 129999, currency: 'USD' });
+  });
+
+  test('a card with a single rating counts it', () => {
+    const html = '<div class="s-result-item" data-asin="B0ONE"><a aria-label="1 rating" href="#r">(1)</a></div>';
+    expect(Parsers.scrapeProduct(one(html)).reviewCount).toBe(1);
+  });
+
+  test('a card with no title, rating or reviews has nulls, not 0 or N/A', () => {
+    const p = Parsers.scrapeProduct(one('<div class="s-result-item" data-asin="B0BARE"></div>'));
+    expect(p).toMatchObject({ name: null, price: null, priceCents: null, rating: null, reviewCount: null });
+  });
+});
+
 describe('Parsers helpers', () => {
   test('getNextPageUrl increments the page', () => {
     expect(Parsers.getNextPageUrl('https://www.amazon.com/s?k=a&page=3')).toBe('https://www.amazon.com/s?k=a&page=4&ref=sr_pg_4');

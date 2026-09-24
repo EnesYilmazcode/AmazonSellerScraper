@@ -66,9 +66,9 @@ describe('scraper.js', () => {
       expect(ctx.extractPrice(item)).toBe('$9.99');
     });
 
-    test('returns "N/A" for product with no price element', () => {
+    test('returns null for product with no price element', () => {
       const item = ctx._document.querySelector('[data-asin="B0TEST003"]');
-      expect(ctx.extractPrice(item)).toBe('N/A');
+      expect(ctx.extractPrice(item)).toBeNull();
     });
   });
 
@@ -82,12 +82,12 @@ describe('scraper.js', () => {
       expect(ctx.parseRatingText('4.5')).toBe(4.5);
     });
 
-    test('returns 0 for null', () => {
-      expect(ctx.parseRatingText(null)).toBe(0);
+    test('returns null for null', () => {
+      expect(ctx.parseRatingText(null)).toBeNull();
     });
 
-    test('returns 0 for non-numeric text', () => {
-      expect(ctx.parseRatingText('no rating')).toBe(0);
+    test('returns null for non-numeric text', () => {
+      expect(ctx.parseRatingText('no rating')).toBeNull();
     });
   });
 
@@ -108,9 +108,9 @@ describe('scraper.js', () => {
       expect(ctx.extractRating(item)).toBe(4.2);
     });
 
-    test('returns 0 for product with no rating elements', () => {
+    test('returns null for product with no rating elements (F-28)', () => {
       const item = ctx._document.querySelector('[data-asin="B0TEST003"]');
-      expect(ctx.extractRating(item)).toBe(0);
+      expect(ctx.extractRating(item)).toBeNull();
     });
   });
 
@@ -132,12 +132,12 @@ describe('scraper.js', () => {
       expect(ctx.parseReviewText('(1.2M)')).toBe(1200000);
     });
 
-    test('returns 0 for null', () => {
-      expect(ctx.parseReviewText(null)).toBe(0);
+    test('returns null for null', () => {
+      expect(ctx.parseReviewText(null)).toBeNull();
     });
 
-    test('returns 0 for empty string', () => {
-      expect(ctx.parseReviewText('')).toBe(0);
+    test('returns null for empty string', () => {
+      expect(ctx.parseReviewText('')).toBeNull();
     });
   });
 
@@ -158,9 +158,9 @@ describe('scraper.js', () => {
       expect(ctx.extractReviewCount(item)).toBe(1500);
     });
 
-    test('returns 0 for product with no review elements', () => {
+    test('returns null for product with no review elements (F-28)', () => {
       const item = ctx._document.querySelector('[data-asin="B0TEST003"]');
-      expect(ctx.extractReviewCount(item)).toBe(0);
+      expect(ctx.extractReviewCount(item)).toBeNull();
     });
   });
 
@@ -216,13 +216,15 @@ describe('scraper.js', () => {
       expect(product.url).toContain('B0TEST001');
     });
 
-    test('handles missing data gracefully', () => {
+    test('stores missing fields as null, not 0 (F-28)', () => {
       const item = ctx._document.querySelector('[data-asin="B0TEST003"]');
       const product = ctx.scrapeProduct(item);
       expect(product).not.toBeNull();
-      expect(product.price).toBe('N/A');
-      expect(product.rating).toBe(0);
-      expect(product.reviewCount).toBe(0);
+      expect(product.price).toBeNull();
+      expect(product.priceCents).toBeNull();
+      expect(product.currency).toBeNull();
+      expect(product.rating).toBeNull();
+      expect(product.reviewCount).toBeNull();
     });
 
     test('scrapedAt is a valid ISO string', () => {

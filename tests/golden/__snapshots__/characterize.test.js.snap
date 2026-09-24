@@ -164,15 +164,15 @@ exports[`current price, rating and review parsers rating and review strings 1`] 
     "analyzerRating": 0,
     "analyzerReviews": 0,
     "input": "",
-    "ratingText": 0,
-    "reviewText": 0,
+    "ratingText": null,
+    "reviewText": null,
   },
   {
     "analyzerRating": 0,
     "analyzerReviews": 0,
     "input": null,
-    "ratingText": 0,
-    "reviewText": 0,
+    "ratingText": null,
+    "reviewText": null,
   },
   {
     "analyzerRating": 0,
@@ -206,15 +206,15 @@ exports[`current price, rating and review parsers rating and review strings 1`] 
     "analyzerRating": 0,
     "analyzerReviews": 0,
     "input": "N/A",
-    "ratingText": 0,
-    "reviewText": 0,
+    "ratingText": null,
+    "reviewText": null,
   },
   {
     "analyzerRating": 0,
     "analyzerReviews": 0,
     "input": "calificaciones",
-    "ratingText": 0,
-    "reviewText": 0,
+    "ratingText": null,
+    "reviewText": null,
   },
 ]
 `;
@@ -272,6 +272,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-lastpage 1`] = `
   "results": [
     {
       "asin": "B0LAST001",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -322,6 +323,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
   "results": [
     {
       "asin": "B0TEST001",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -341,6 +343,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
     },
     {
       "asin": "B0TEST002",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -360,6 +363,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
     },
     {
       "asin": "B0TEST003",
+      "currency": null,
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -369,16 +373,17 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
       "isPrime": false,
       "name": "Mystery Item No Data",
       "pageIndex": 1,
-      "price": "N/A",
+      "price": null,
       "priceCents": null,
-      "rating": 0,
-      "reviewCount": 0,
+      "rating": null,
+      "reviewCount": null,
       "runId": "run-golden",
       "scrapedAt": "string",
       "url": "https://www.amazon.com/dp/B0TEST003/ref=sr_1_3",
     },
     {
       "asin": "B0TEST004",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -506,6 +511,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
   "results": [
     {
       "asin": "B0ONLYONE1",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -517,14 +523,15 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
       "pageIndex": 1,
       "price": "$41.00",
       "priceCents": 4100,
-      "rating": 0,
-      "reviewCount": 0,
+      "rating": null,
+      "reviewCount": null,
       "runId": "run-golden",
       "scrapedAt": "string",
       "url": "https://www.amazon.com/Rare-Widget/dp/B0ONLYONE1/ref=sr_1_1",
     },
     {
       "asin": "B0ONLYONE2",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -536,8 +543,8 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
       "pageIndex": 1,
       "price": "$1,249.00",
       "priceCents": 124900,
-      "rating": 0,
-      "reviewCount": 0,
+      "rating": null,
+      "reviewCount": null,
       "runId": "run-golden",
       "scrapedAt": "string",
       "url": "https://www.amazon.com/Rare-Widget-2/dp/B0ONLYONE2/ref=sr_1_2",
@@ -575,6 +582,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
   "results": [
     {
       "asin": "B0SPONS001",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -594,6 +602,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
     },
     {
       "asin": "B0ORGANIC1",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -613,6 +622,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
     },
     {
       "asin": "B0UNITONLY",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -624,14 +634,15 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
       "pageIndex": 1,
       "price": "$0.35",
       "priceCents": 35,
-      "rating": 0,
-      "reviewCount": 0,
+      "rating": null,
+      "reviewCount": null,
       "runId": "run-golden",
       "scrapedAt": "string",
       "url": "https://www.amazon.com/Bulk-Pack/dp/B0UNITONLY/ref=sr_1_3",
     },
     {
       "asin": "B0SPONS001",
+      "currency": "USD",
       "delta": {
         "dPriceCents": 0,
         "dRating": 0,
@@ -681,6 +692,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
   "results": [
     {
       "asin": "B07H9PZ6MH",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -700,6 +712,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B091FX694F",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -719,6 +732,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0H25VF5Y1",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -738,6 +752,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B092Y9XX85",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -757,6 +772,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B07H4G664R",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -776,6 +792,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0FNX94PPX",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -795,6 +812,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0HC3HNW26",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -814,6 +832,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B091FX694F",
+      "currency": "USD",
       "delta": {
         "dPriceCents": 0,
         "dRating": 0,
@@ -833,6 +852,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B092XTMNCC",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -852,6 +872,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B09M8D4JMD",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -871,6 +892,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GJSKH1GN",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -890,6 +912,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GNWFRM3X",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -909,6 +932,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B01LP0UX9G",
+      "currency": null,
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -918,7 +942,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "isPrime": false,
       "name": "Amazon Basics Extra Thick Exercise Yoga Mat with Carrying Strap",
       "pageIndex": 1,
-      "price": "N/A",
+      "price": null,
       "priceCents": null,
       "rating": 4.6,
       "reviewCount": 70632,
@@ -928,6 +952,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B07H9PZDQW",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -947,6 +972,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B07H9KV2YN",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -966,6 +992,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0H28L9MPP",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -985,6 +1012,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B09M8D4JMD",
+      "currency": "USD",
       "delta": {
         "dPriceCents": 0,
         "dRating": 0,
@@ -1004,6 +1032,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GG8RY26S",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1023,6 +1052,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0DFBSMMZS",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1042,6 +1072,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0HGFH7QVH",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1061,6 +1092,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B07JQCVBBZ",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1080,6 +1112,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B09WF85T8M",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1099,6 +1132,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B091FX694F",
+      "currency": "USD",
       "delta": {
         "dPriceCents": 0,
         "dRating": 0,
@@ -1118,6 +1152,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GNWFRM3X",
+      "currency": "USD",
       "delta": {
         "dPriceCents": 0,
         "dRating": 0,
@@ -1137,6 +1172,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0FHGMLGVG",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1156,6 +1192,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0DRJ8VH3Q",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1175,6 +1212,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GJSKH1GN",
+      "currency": "USD",
       "delta": {
         "dPriceCents": 0,
         "dRating": 0,
@@ -1194,6 +1232,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0C7SFV8RH",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1213,6 +1252,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0FQKYGYGX",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1232,6 +1272,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0B74MRJS3",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1251,6 +1292,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GLQH4453",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1270,6 +1312,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B092XNCFF7",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1289,6 +1332,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0D9MWTQ9K",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1308,6 +1352,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0FNXCBRGL",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1327,6 +1372,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0FX3RZ2YN",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1346,6 +1392,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B01IZDFWPG",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1365,6 +1412,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0C359D7JX",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1384,6 +1432,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0BYFFX51Z",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1403,6 +1452,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B09WF4GPPC",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1422,6 +1472,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0DG3WYD54",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1441,6 +1492,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B091FZL25K",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1460,6 +1512,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GFZ72SJR",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1479,6 +1532,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B01MY5MZSQ",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1498,6 +1552,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B005NZ7PEQ",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1517,6 +1572,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0CJ39LHNX",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1536,6 +1592,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0CP47T6ZP",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1555,6 +1612,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0CL9CR6FJ",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1574,6 +1632,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B087F16GKW",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1593,6 +1652,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0F6426TRG",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1612,6 +1672,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B01LP0U5X0",
+      "currency": null,
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1621,7 +1682,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "isPrime": false,
       "name": "Amazon Basics Extra Thick Exercise Yoga Mat with Carrying Strap",
       "pageIndex": 1,
-      "price": "N/A",
+      "price": null,
       "priceCents": null,
       "rating": 4.6,
       "reviewCount": 70632,
@@ -1631,6 +1692,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0DQC2WV8Y",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1650,6 +1712,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B01I5CFUHM",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1669,6 +1732,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B07H9KV1GG",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1688,6 +1752,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0BPC5YDDV",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1707,6 +1772,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0DSR7K8CL",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1726,6 +1792,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0D4MFT49T",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1745,6 +1812,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0F7YCXYHV",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1764,6 +1832,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0FNN64N3C",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1783,6 +1852,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0DM6JN33F",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1802,6 +1872,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0876QTBKZ",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1821,6 +1892,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0C35Q9B95",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1840,6 +1912,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B08R5ZG89X",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1859,6 +1932,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B07664K1CW",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1878,6 +1952,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B07234M1LY",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1897,6 +1972,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0CF64T5JY",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1916,6 +1992,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B092XMWXK7",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1935,6 +2012,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0GNTSW3GY",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1954,6 +2032,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B00DJQFAV6",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -1973,6 +2052,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0DFBSMMZS",
+      "currency": "USD",
       "delta": {
         "dPriceCents": 0,
         "dRating": 0,
@@ -1992,6 +2072,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
     },
     {
       "asin": "B0HF4FK2QS",
+      "currency": "USD",
       "delta": {
         "dPriceCents": null,
         "dRating": null,
