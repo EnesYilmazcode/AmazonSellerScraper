@@ -71,3 +71,13 @@ test('only worker messages can be registered, once each', () => {
   r.on('GET_STATE', () => {});
   expect(() => r.on('GET_STATE', () => {})).toThrow(/already/);
 });
+
+test('the popup open in a tab is still a page, not a content script', async () => {
+  const r = createRouter({ extensionId: 'ext', log: quiet });
+  r.on('START_RUN', () => ({ ok: true }));
+  r.on('PAGE_READY', () => ({ idle: true }));
+  const popupTab = { id: 'ext', tab: { id: 9 }, url: 'chrome-extension://ext/popup/popup.html' };
+  expect(await call(r, { type: 'START_RUN' }, popupTab)).toEqual({ ok: true });
+  expect(await call(r, { type: 'PAGE_READY' }, popupTab)).toBe('no answer');
+  expect(await call(r, { type: 'PAGE_READY' }, { id: 'ext', tab: { id: 9 }, url: 'https://www.amazon.com/s?k=a' })).toEqual({ idle: true });
+});

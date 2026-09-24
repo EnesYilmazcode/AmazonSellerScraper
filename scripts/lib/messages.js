@@ -60,16 +60,20 @@ const Msg = (() => {
     }
 
     /**
-     * Whether `sender` may send a worker message with this spec. A content
-     * script sender always has a tab; an extension page never does.
+     * Whether `sender` may send a worker message with this spec. An
+     * extension page has the extension's own URL, even when it is open in a
+     * tab; a content script is in a tab with a web page URL.
      */
     function senderAllowed(entry, sender, extensionId) {
         if (!entry || entry.to !== 'worker') return false;
-        const fromTab = !!(sender && sender.tab && typeof sender.tab.id === 'number');
-        const ours = !sender || !sender.id || !extensionId || sender.id === extensionId;
-        if (!ours) return false;
-        if (entry.from === 'tab') return fromTab;
-        if (entry.from === 'page') return !fromTab;
+        const s = sender || {};
+        if (s.id && extensionId && s.id !== extensionId) return false;
+        const url = typeof s.url === 'string' ? s.url : '';
+        const page = extensionId ? url.startsWith(`chrome-extension://${extensionId}/`) : url.startsWith('chrome-extension://');
+        const inTab = !!(s.tab && typeof s.tab.id === 'number');
+        const content = inTab && !page;
+        if (entry.from === 'tab') return content;
+        if (entry.from === 'page') return page || (!inTab && !url);
         return true;
     }
 
