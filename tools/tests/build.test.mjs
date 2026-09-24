@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildExtension, manifestForEnv } from '../build.mjs';
+import { buildExtension, manifestForEnv, htmlReferencesMissing } from '../build.mjs';
 import { checkPermissionLock, LIVE_MANIFEST } from '../permission-lock.mjs';
 
 const live = JSON.parse(fs.readFileSync(LIVE_MANIFEST, 'utf8'));
@@ -47,4 +47,19 @@ test('the prod overlay refuses a manifest that mentions a local host', () => {
   const m = structuredClone(live);
   m.host_permissions.push('http://localhost/*');
   assert.throws(() => manifestForEnv(m, 'prod'), /local host/);
+});
+
+test('HTML closure catches a missing popup script', () => {
+  const dir = tmp('html');
+  try {
+    fs.mkdirSync(path.join(dir, 'popup'));
+    fs.writeFileSync(path.join(dir, 'popup/ok.js'), '');
+    fs.writeFileSync(
+      path.join(dir, 'popup/popup.html'),
+      '<link rel="stylesheet" href="https://cdn.example/x.css"><script src="ok.js"></script><script src="../gone.js"></script>'
+    );
+    assert.deepEqual(htmlReferencesMissing(dir), ['popup/popup.html -> ../gone.js']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -8,7 +8,7 @@
 // - Popup files and scripts/modules/* are deliberately NOT bundled:
 //   popup.html loads them as plain <script> tags communicating via globals,
 //   and bundling would break that contract.
-// - Ends with a manifest-closure sanity gate: every path manifest.json
+// - Ends with closure gates: every path manifest.json or a built HTML page
 //   references must exist in dist/, else exit nonzero.
 
 import { build } from 'esbuild';
@@ -107,12 +107,30 @@ export async function buildExtension({ env = 'prod', outDir = DIST } = {}) {
   }
   fs.writeFileSync(path.join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 4) + '\n');
 
-  // 4. Manifest-closure gate.
-  const missing = manifestClosureMissing(outDir);
+  // 4. Closure gates: everything the manifest and the HTML pages load must exist.
+  const missing = [...manifestClosureMissing(outDir), ...htmlReferencesMissing(outDir)];
   if (missing.length > 0) {
     throw new Error(`references missing from the build:\n  - ${missing.join('\n  - ')}`);
   }
   return { env, outDir, fileCount: listFilesRecursive(outDir).length };
+}
+
+/**
+ * Returns local script/stylesheet/image references in every built HTML page
+ * that do not resolve to a file. Remote URLs are skipped.
+ */
+export function htmlReferencesMissing(baseDir) {
+  const missing = [];
+  for (const rel of listFilesRecursive(baseDir).filter((p) => p.endsWith('.html'))) {
+    const html = fs.readFileSync(path.join(baseDir, rel), 'utf8');
+    for (const m of html.matchAll(/<(?:script|link|img)\b[^>]*?\s(?:src|href)\s*=\s*["']([^"']+)["']/gi)) {
+      const ref = m[1];
+      if (/^(?:[a-z]+:)?\/\//i.test(ref) || /^(?:data|#)/i.test(ref)) continue;
+      const target = path.join(baseDir, path.dirname(rel), ref.split(/[?#]/)[0]);
+      if (!fs.existsSync(target)) missing.push(`${rel} -> ${ref}`);
+    }
+  }
+  return missing;
 }
 
 async function main() {
