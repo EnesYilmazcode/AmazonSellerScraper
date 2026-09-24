@@ -112,6 +112,7 @@ global.chrome = {
       if (cb) cb({});
     },
     update: async function(tabId, props) { return { id: tabId, ...props }; },
+    get: async function(tabId) { return { id: tabId, url: 'https://www.amazon.com/s?k=test' }; },
     onRemoved: { addListener() {} },
     onUpdated: { addListener() {} }
   },

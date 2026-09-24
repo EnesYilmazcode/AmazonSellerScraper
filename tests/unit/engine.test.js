@@ -31,6 +31,7 @@ const pageNo = (url) => Number(new URL(url).searchParams.get('page') || 1);
 function simpleSite(pages, { captchaAt = null } = {}) {
   return (url) => {
     const u = new URL(url);
+    if (u.hostname !== 'www.amazon.com') return null;
     if (u.pathname.startsWith('/dp/')) return PRODUCT;
     const k = u.searchParams.get('k');
     const p = pageNo(url);
@@ -322,6 +323,33 @@ describe('a page that never reports', () => {
     expect((await rig.run()).page).toBe(1);
     rig.drop();
     const run = await runUntilEnd(rig, 60000);
+    expect(run).toMatchObject({ reason: 'complete', page: 3 });
+  });
+});
+
+describe('a page that never reports, continued', () => {
+  test('when the tab is no longer on Amazon, the run ends as interrupted', async () => {
+    const site = simpleSite(3);
+    const rig = createRig({ site: (url) => (pageNo(url) === 2 ? null : site(url)) });
+    await startIn(rig, 'away');
+    await settle(4000);
+    expect(served(rig, 'away')).toEqual([1, 2]);
+    rig.goTo((await rig.run()).tabId, 'https://example.com/');
+    const run = await runUntilEnd(rig, 60000);
+    expect(run).toMatchObject({ reason: 'interrupted', page: 1 });
+  });
+
+  test('a slow page still on Amazon is waited for', async () => {
+    const site = simpleSite(3);
+    let slow = true;
+    const rig = createRig({ site: (url) => (pageNo(url) === 2 && slow ? null : site(url)) });
+    const { tab } = await startIn(rig, 'slowly');
+    await settle(4000);
+    await settle(25000);
+    expect(await rig.run()).toMatchObject({ state: 'running', awaiting: true });
+    slow = false;
+    rig.goTo(tab, searchUrl('slowly', 2));
+    const run = await runUntilEnd(rig);
     expect(run).toMatchObject({ reason: 'complete', page: 3 });
   });
 });

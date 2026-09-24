@@ -81,6 +81,12 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
           if (!held && !answered) withError('The message port closed before a response was received.', () => cb());
         });
       },
+      /** Without the tabs permission Chrome shows the URL of Amazon tabs only. */
+      async get(tabId) {
+        const tab = tabs.get(tabId);
+        if (!tab) throw new Error(`No tab with id: ${tabId}.`);
+        return { id: tabId, url: /^https:\/\/www\.amazon\.com\//.test(tab.url) ? tab.url : undefined };
+      },
       async update(tabId, { url }) {
         if (!tabs.has(tabId)) throw new Error(`No tab with id: ${tabId}.`);
         setImmediate(() => navigate(tabId, url));

@@ -333,7 +333,12 @@ function createEngine({
             }
             if (run.awaiting && t - (run.navigatedAt || 0) > PAGE_TIMEOUT_MS) {
                 await saveRun({ ...run, navigatedAt: t });
-                sendToTab(run.tabId, { type: Msg.T.PARSE_PAGE, runId: run.runId, page: run.page + 1 });
+                schedule(PAGE_TIMEOUT_MS + 1000);
+                const ack = await sendToTab(run.tabId, { type: Msg.T.PARSE_PAGE, runId: run.runId, page: run.page + 1 });
+                if (ack) return;
+                // No script answers. Still on Amazon means still loading; a hidden URL means the tab left.
+                const tab = await chrome.tabs.get(run.tabId).catch(() => null);
+                if (!tab || !tab.url) await end(run, 'interrupted');
             }
         });
     }
