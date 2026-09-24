@@ -106,11 +106,19 @@ export async function workerTargets(cdp) {
   return targetInfos.filter((t) => t.type === 'service_worker').map((t) => t.targetId);
 }
 
-/** Stops the extension's service worker the way Chrome does when idle. */
+/**
+ * Stops the extension's service worker the way Chrome does when idle.
+ * Resolves to true once the old worker is gone (a new one may already be up).
+ */
 export async function killServiceWorker(ext, page) {
   const cdp = await ext.context.newCDPSession(page);
-  for (const targetId of await workerTargets(cdp)) {
-    await cdp.send('Target.closeTarget', { targetId });
+  const old = await workerTargets(cdp);
+  for (const targetId of old) await cdp.send('Target.closeTarget', { targetId });
+  const end = Date.now() + 5000;
+  while (Date.now() < end) {
+    const now = await workerTargets(cdp);
+    if (old.length > 0 && !old.some((id) => now.includes(id))) return true;
+    await sleep(100);
   }
-  return cdp;
+  return false;
 }

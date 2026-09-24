@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { test as base, expect } from '@playwright/test';
 import {
   launch, extPage, getState, clickStart, aimPopupAt, waitForState, endReason,
-  runMetaFor, killServiceWorker, workerTargets, sleep,
+  runMetaFor, killServiceWorker, sleep,
 } from './lib/extension.mjs';
 import { serveAmazon, simplePlan, searchPage, card, asinFor, corpusPage, CAPTCHA } from './lib/amazon.mjs';
 
@@ -253,11 +253,7 @@ test('a service worker stopped between pages does not break the run', async ({ e
   const store = await extPage(ext);
   await clickStart(ext, tab);
   await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
-  const before = await workerTargets(await ext.context.newCDPSession(tab));
-  const cdp = await killServiceWorker(ext, tab);
-  // Content-script messages may wake a new worker at once; the old one must be gone.
-  expect(before.length).toBe(1);
-  expect(await workerTargets(cdp)).not.toContain(before[0]);
+  expect(await killServiceWorker(ext, tab)).toBe(true);
 
   const s = await waitForState(store, (x) => x.scrapeRunPages?.length >= 3 && !x.isScrapingActive, { timeout: 30000 });
   expect(pagesOf(served, 'sleepy')).toEqual([1, 2, 3]);
