@@ -48,13 +48,13 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-async function scrapeTwoPages(lastValues) {
+async function scrapeTwoPages(lastValues, flags = { CLOUD_SYNC: true }) {
   const run = Run.create({ runId: 'r1', tabId: 5 });
   chrome.storage.local.set({ run, scrapeRunId: 'r1', scrapeRunPageIndex: 0, isScrapingActive: true, lastValues });
-  loadContentScript('scripts/content/scraper.js', PAGE1, URL1);
+  loadContentScript('scripts/content/scraper.js', PAGE1, URL1, { flags });
   await settle();
   jest.clearAllTimers();
-  loadContentScript('scripts/content/scraper.js', PAGE2, URL2);
+  loadContentScript('scripts/content/scraper.js', PAGE2, URL2, { flags });
   await settle();
   return chrome.storage.local._getStore();
 }
@@ -80,6 +80,19 @@ test('each ASIN is stored once per run, with every placement', async () => {
 
   expect(store.results[2]).toMatchObject({ asin: 'B0C', organicRank: 3, sponsored: false });
   expect(store.scrapeRunPages.map((p) => [p.count, p.placements])).toEqual([[2, 3], [1, 3]]);
+});
+
+test('with cloud sync off (2.1) nothing is queued (F-26)', async () => {
+  const store = await scrapeTwoPages({}, { CLOUD_SYNC: false });
+  expect(store.results.map((r) => r.asin)).toEqual(['B0A', 'B0B', 'B0C']);
+  expect(store.results[0].placements).toHaveLength(3);
+  expect(store).not.toHaveProperty('syncQueue');
+});
+
+test('a queue left by an older build is not grown while sync is off', async () => {
+  chrome.storage.local.set({ syncQueue: [{ asin: 'B0OLD', runId: 'r0' }] });
+  const store = await scrapeTwoPages({}, { CLOUD_SYNC: false });
+  expect(store.syncQueue).toEqual([{ asin: 'B0OLD', runId: 'r0' }]);
 });
 
 test('a repeat in the same run keeps the delta against the last run', async () => {

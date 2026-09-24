@@ -116,8 +116,10 @@ function scrapeCurrentPage(runId) {
     const results = page.products;
     console.log(`[ProScan] Page kind ${page.kind}, ${results.length} product listings`);
 
+    const syncing = Flags.CLOUD_SYNC;
+    const keys = [Run.KEY, 'currentItemCount', 'results', 'scrapeRunId', 'scrapeRunPageIndex', 'lastValues', 'scrapeRunPages'];
     chrome.storage.local.get(
-        [Run.KEY, 'currentItemCount', 'results', 'scrapeRunId', 'scrapeRunPageIndex', 'lastValues', 'syncQueue', 'scrapeRunPages'],
+        syncing ? [...keys, 'syncQueue'] : keys,
         (data) => {
             const run = data[Run.KEY];
             if (!run || run.runId !== runId || !Run.isActive(run)) return;
@@ -134,7 +136,8 @@ function scrapeCurrentPage(runId) {
 
             const runKey = data.scrapeRunId || runId;
             const runResults = data.results || [];
-            const syncQueue = data.syncQueue || [];
+            // With sync off nothing is queued, so the queue cannot grow.
+            const syncQueue = syncing ? (data.syncQueue || []) : [];
             const fresh = mergeRepeats(results, pageIndex, runKey, runResults, syncQueue);
 
             chrome.runtime.sendMessage({
@@ -156,7 +159,7 @@ function scrapeCurrentPage(runId) {
             });
 
             const newCount = previousCount + fresh.length;
-            syncQueue.push(...fresh);
+            if (syncing) syncQueue.push(...fresh);
             const runPages = data.scrapeRunPages || [];
             runPages.push({
                 runId: runKey, pageIndex, count: fresh.length, placements: page.placements,
@@ -167,22 +170,23 @@ function scrapeCurrentPage(runId) {
             let nextRun = { ...run, page: pageIndex, heartbeat: now, lastUrl: location.href, nextHref: page.nextHref };
             if (ending) nextRun = Run.finish(nextRun, ending, now);
 
-            chrome.storage.local.set({
+            const save = {
                 results: [...runResults, ...fresh],
                 currentItemCount: newCount,
                 scrapeRunPageIndex: pageIndex,
                 lastValues: lastValues,
-                syncQueue: syncQueue,
                 scrapeRunPages: runPages,
                 [Run.KEY]: nextRun,
                 isScrapingActive: !ending
-            }, () => {
+            };
+            if (syncing) save.syncQueue = syncQueue;
+            chrome.storage.local.set(save, () => {
                 if (chrome.runtime.lastError) {
                     console.warn('[ProScan] Could not save the page:', chrome.runtime.lastError.message);
                     finishRun(runId, 'storage_full');
                     return;
                 }
-                chrome.runtime.sendMessage({ type: 'ENQUEUE_SYNC', runId: data.scrapeRunId || runId, pageIndex: pageIndex });
+                if (syncing) chrome.runtime.sendMessage({ type: 'ENQUEUE_SYNC', runId: runKey, pageIndex: pageIndex });
 
                 // Stop landed between the read and this write, which put the run back.
                 if (!ending && stoppedRuns.has(runId)) {

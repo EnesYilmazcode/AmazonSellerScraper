@@ -312,7 +312,6 @@ exports[`current scraper behavior on the corpus 2026-02/search-lastpage 1`] = `
   "runStatus": "complete",
   "sent": [
     "UPDATE_PROGRESS",
-    "ENQUEUE_SYNC",
     "SCRAPING_COMPLETE",
   ],
 }
@@ -463,7 +462,6 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
   "runStatus": "running",
   "sent": [
     "UPDATE_PROGRESS",
-    "ENQUEUE_SYNC",
   ],
 }
 `;
@@ -631,7 +629,6 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
   "runStatus": "complete",
   "sent": [
     "UPDATE_PROGRESS",
-    "ENQUEUE_SYNC",
     "SCRAPING_COMPLETE",
   ],
 }
@@ -758,7 +755,6 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
   "runStatus": "running",
   "sent": [
     "UPDATE_PROGRESS",
-    "ENQUEUE_SYNC",
   ],
 }
 `;
@@ -2564,7 +2560,6 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
   "runStatus": "running",
   "sent": [
     "UPDATE_PROGRESS",
-    "ENQUEUE_SYNC",
   ],
 }
 `;
