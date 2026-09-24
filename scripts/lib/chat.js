@@ -34,7 +34,9 @@ const Chat = (() => {
     const MAX_TITLE = 120;
     const MAX_QUESTION = 500;
     const MAX_HISTORY_TURNS = 6;
-    const MAX_OUTPUT_TOKENS = 512;
+    // Thinking tokens count against this cap, so keep thinking low.
+    const MAX_OUTPUT_TOKENS = 2048;
+    const THINKING_LEVEL = 'low';
     const TIMEOUT_MS = 30000;
 
     const SYSTEM_INSTRUCTION = [
@@ -169,7 +171,10 @@ const Chat = (() => {
         const body = {
             systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
             contents: [...sanitizeHistory(history), { role: 'user', parts: [{ text: turn }] }],
-            generationConfig: { maxOutputTokens: MAX_OUTPUT_TOKENS, temperature: 0.2 },
+            generationConfig: {
+                maxOutputTokens: MAX_OUTPUT_TOKENS,
+                thinkingConfig: { thinkingLevel: THINKING_LEVEL },
+            },
         };
         return {
             url: endpoint(),

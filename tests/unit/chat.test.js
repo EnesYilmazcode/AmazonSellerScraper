@@ -81,6 +81,7 @@ describe('buildRequest', () => {
         const body = JSON.parse(init.body);
         expect(body.systemInstruction.parts[0].text).toMatch(/untrusted/);
         expect(body.generationConfig.maxOutputTokens).toBeGreaterThan(0);
+        expect(body.generationConfig.thinkingConfig.thinkingLevel).toBe('low');
         const turn = body.contents[body.contents.length - 1];
         expect(turn.role).toBe('user');
         const text = turn.parts[0].text;
