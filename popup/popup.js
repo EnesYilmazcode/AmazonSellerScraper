@@ -509,7 +509,7 @@ function showSignedIn(user) {
     elements.authAccount.classList.remove('hidden');
     elements.authError.classList.add('hidden');
     elements.authError.textContent = '';
-    elements.exportToProScanBtn.classList.remove('hidden');
+    elements.exportToProScanBtn.classList.toggle('hidden', !Flags.CLOUD_SYNC);
 }
 
 /**
@@ -551,6 +551,9 @@ function resetSignInButton() {
  * @async
  */
 async function initializeAuthUI() {
+    // Sign-in only serves the cloud export, which is off in this build.
+    if (!Flags.CLOUD_SYNC) return;
+    document.getElementById('authPanel').classList.remove('hidden');
     const response = await sendToWorker({ type: 'PROSCAN_AUTH_STATE' });
     if (response && response.user) {
         showSignedIn(response.user);

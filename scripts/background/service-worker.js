@@ -7,6 +7,7 @@ import {
 import { syncToCloud } from './sync.js';
 import Chat from '../lib/chat.js';
 import Run from '../lib/run.js';
+import Flags from '../lib/flags.js';
 
 /**
  * @fileoverview Background Service Worker
@@ -173,6 +174,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.type === 'PROSCAN_EXPORT') {
+        if (!Flags.CLOUD_SYNC) {
+            sendResponse({ error: 'Export to ProScan is not available in this version.' });
+            return false;
+        }
         (async () => {
             const user = await currentUser();
             if (!user) return sendResponse({ error: 'Sign in to ProScan first.' });
