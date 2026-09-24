@@ -101,3 +101,15 @@ test('a card with no rating gives a null delta, not a fake drop (F-28)', async (
   expect(store.results[0]).toMatchObject({ rating: null, reviewCount: null });
   expect(store.results[0].delta).toEqual({ isNew: false, dPriceCents: 0, dRating: null, dReviews: null });
 });
+
+test('organic ranks start at 1 even when an older run is still stored', async () => {
+  const old = { asin: 'B0Z', runId: 'r0', placements: [{ page: 1, position: 1, sponsored: false, rank: 1 }] };
+  const run = Run.create({ runId: 'r1', tabId: 5 });
+  chrome.storage.local.set({ run, scrapeRunId: 'r1', scrapeRunPageIndex: 0, isScrapingActive: true, results: [old] });
+  loadContentScript('scripts/content/scraper.js', page(card('B0B', '$2.00') + card('B0Z', '$1.00'), null), URL1);
+  await settle();
+  const store = chrome.storage.local._getStore();
+  expect(store.results.map((r) => [r.asin, r.runId, r.organicRank])).toEqual([
+    ['B0Z', 'r0', undefined], ['B0B', 'r1', 1], ['B0Z', 'r1', 2],
+  ]);
+});

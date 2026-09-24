@@ -204,10 +204,10 @@ function scrapeCurrentPage(runId) {
  * returned as new.
  */
 function mergeRepeats(products, pageIndex, runKey, runResults, syncQueue) {
-    const organicBefore = runResults.reduce(
+    const thisRun = runResults.filter(r => r.runId === runKey);
+    const organicBefore = thisRun.reduce(
         (n, r) => n + (r.placements || []).filter(pl => !pl.sponsored).length, 0);
-    const known = new Map();
-    runResults.forEach(r => { if (r.runId === runKey) known.set(r.asin, r); });
+    const known = new Map(thisRun.map(r => [r.asin, r]));
 
     const fresh = [];
     products.forEach(product => {
