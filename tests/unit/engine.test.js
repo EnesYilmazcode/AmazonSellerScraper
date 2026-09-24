@@ -439,8 +439,8 @@ describe('products across pages (F-27, F-28)', () => {
   const PAGE2 = page(card('B0C', '$3.00') + card('B0A', '$5.00') + card('B0B', '$2.00', { rating: false }), null);
   const site = (url) => (pageNo(url) === 1 ? PAGE1 : PAGE2);
 
-  async function twoPages({ lastValues = [], flags } = {}) {
-    const rig = createRig({ site, flags });
+  async function twoPages({ lastValues = [], flags, local } = {}) {
+    const rig = createRig({ site, flags, local });
     const db = await rig.db();
     await db.write(lastValues.map((v) => ({ store: 'lastValues', put: v })));
     db.close();
@@ -487,15 +487,50 @@ describe('products across pages (F-27, F-28)', () => {
     after.close();
   });
 
-  test('with cloud sync on each page is queued once, and the bundle has the products as they are now', async () => {
+  test('with cloud sync on but nobody signed in nothing is queued (F-26)', async () => {
     const rig = await twoPages({ flags: { CLOUD_SYNC: true } });
-    const { bundle, seqs } = await rig.engine().outboxBundle();
-    expect(seqs).toHaveLength(2);
-    expect(bundle.syncQueue.map((p) => p.asin)).toEqual(['B0A', 'B0B', 'B0C']);
-    expect(bundle.syncQueue[0].placements).toHaveLength(3);
-    expect(bundle.scrapeRunMeta).toMatchObject({ keyword: 'w' });
-    await rig.engine().clearOutbox(seqs);
-    expect((await rig.engine().outboxBundle()).seqs).toEqual([]);
+    const db = await rig.db();
+    expect(await db.count('outbox')).toBe(0);
+    db.close();
+  });
+
+  test('signed in, each page is queued once for that account, then the run (F-20, F-29e)', async () => {
+    const rig = await twoPages({ flags: { CLOUD_SYNC: true }, local: { account: { uid: 'u1', email: 'a@b.c' } } });
+    const run = await rig.run();
+    const db = await rig.db();
+    const entries = await db.getAll('outbox');
+    expect(entries.map((e) => [e.kind, e.pageIndex, e.uid, e.runId])).toEqual([
+      ['page', 1, 'u1', run.runId],
+      ['page', 2, 'u1', run.runId],
+      ['run', undefined, 'u1', run.runId],
+    ]);
+    db.close();
+  });
+
+  test('the run id is minted once as {sourceId}_{startMs}, with the local day key (F-20, F-29d)', async () => {
+    const rig = await twoPages();
+    const run = await rig.run();
+    expect(run.runId).toBe(`k_w_${run.startedAt}`);
+    expect(run.sourceId).toBe('k_w');
+    expect(run.source).toMatchObject({ type: 'keyword', keyword: 'w', sourceId: 'k_w' });
+    expect(run.dayKey).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const db = await rig.db();
+    expect((await db.runPages(run.runId)).map((p) => p.pageIndex)).toEqual([1, 2]);
+    db.close();
+  });
+
+  test("another account's last values give no delta, and new ones carry the uid (F-29e)", async () => {
+    const theirs = { ...prevRun('B0A', 600), uid: 'someone-else' };
+    const anon = prevRun('B0B', 250);
+    const rig = await twoPages({ lastValues: [theirs, anon], local: { account: { uid: 'u1' } } });
+    const [a, b] = await results(rig);
+    expect(a.delta).toMatchObject({ isNew: true });
+    expect(a.prev).toBeNull();
+    expect(b.delta).toMatchObject({ isNew: false, dPriceCents: -50 });
+    expect(b.prev).toMatchObject({ priceCents: 250, rating: 4.5, reviewCount: 900, uid: null });
+    const db = await rig.db();
+    expect(await db.get('lastValues', 'B0A')).toMatchObject({ priceCents: 500, uid: 'u1' });
+    db.close();
   });
 
   test('each page drops lastValues older than the age limit (F-26)', async () => {
