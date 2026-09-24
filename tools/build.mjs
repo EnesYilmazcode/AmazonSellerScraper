@@ -134,7 +134,8 @@ export function htmlReferencesMissing(baseDir) {
 }
 
 async function main() {
-  const env = process.env.PROSCAN_ENV === 'dev' ? 'dev' : 'prod';
+  const dev = process.env.PROSCAN_ENV === 'dev' || process.argv.includes('--dev');
+  const env = dev ? 'dev' : 'prod';
   try {
     const { fileCount } = await buildExtension({ env });
     console.log(`[build] OK: ${env} dist/ built (${fileCount} files), closure verified.`);
