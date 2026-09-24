@@ -95,7 +95,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Neither listener needs the tabs permission.
 chrome.tabs.onRemoved.addListener((tabId) => { thenFlush(engine.tabRemoved(tabId)); });
-chrome.tabs.onUpdated.addListener((tabId, info, tab) => { engine.tabUpdated(tabId, info, tab); });
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => { thenFlush(engine.tabUpdated(tabId, info, tab)); });
 
 // ── ProScan account and cloud sync ──────────────────────────────────────────
 // The popup is a plain page; it signs in and exports through these messages,

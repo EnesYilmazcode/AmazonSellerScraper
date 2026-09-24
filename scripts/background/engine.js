@@ -493,7 +493,8 @@ function createEngine({
             const latest = await store.getMeta('latestRunId');
             const rec = latest ? await store.get('runs', latest) : null;
             if (Run.isActive(rec)) {
-                await store.write([{ store: 'runs', put: durable(Run.finish(rec, reason, now())) }]);
+                const queued = rec.page > 0 ? await outbox(rec.runId, 'run') : [];
+                await store.write([{ store: 'runs', put: durable(Run.finish(rec, reason, now())) }, ...queued]);
             }
         });
     }

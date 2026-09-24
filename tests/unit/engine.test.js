@@ -310,6 +310,18 @@ describe('the worker stopped between pages', () => {
     expect(st.run).toMatchObject({ state: 'failed', reason: 'interrupted' });
     expect(st.results).toHaveLength(4);
   });
+
+  test('a run ended after a restart queues its final header for the signed-in account', async () => {
+    const rig = createRig({ site: simpleSite(3), flags: { CLOUD_SYNC: true }, local: { account: { uid: 'u1' } } });
+    await startIn(rig, 'restart');
+    await settle();
+    await rig.session.remove('run');
+    rig.killWorker();
+    await rig.engine().recover();
+    const db = await rig.db();
+    expect((await db.getAll('outbox')).map((e) => e.kind)).toEqual(['page', 'run']);
+    db.close();
+  });
 });
 
 describe('a page that never reports', () => {
