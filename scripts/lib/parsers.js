@@ -221,12 +221,12 @@ const Parsers = (() => {
         };
     }
 
-    /** Result count from the header ("1-48 of 523 results"), or 0. */
+    /** Result count from the header ("1-48 of 523 results", "of over 10,000 results"), or 0. */
     function getTotalResults(doc) {
         const resultsEl = doc.querySelector(SEARCH_SELECTORS.resultsText);
         if (resultsEl) {
             const text = resultsEl.innerText;
-            const match = text.match(/of (\d+[\d,]*) results/);
+            const match = text.match(/of (?:over )?(\d+[\d,]*) results/);
             if (match) {
                 return parseInt(match[1].replace(/,/g, ''));
             }

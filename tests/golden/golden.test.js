@@ -20,7 +20,6 @@ const KNOWN = {
     'each ASIN once': 'F-27',
     'only search-result cards': 'F-27',
     'sponsored count': 'F-16',
-    'total results': 'NEW-PARSE-1',
   },
   '2026-09/search-title-recipe-synthetic': {
     'each ASIN once': 'F-27',
