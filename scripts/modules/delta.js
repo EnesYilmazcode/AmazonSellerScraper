@@ -61,18 +61,31 @@ const Delta = {
      * observed the values. Missing numeric fields become null (not 0) to
      * preserve the "unknown vs zero" distinction.
      *
+     * A field this scrape could not read keeps the previous snapshot's value,
+     * so one failed parse does not wipe the baseline. `carried` then maps the
+     * field to when that value was last actually seen.
+     *
      * @param {Object} product - Scraped product
-     * @returns {{priceCents: number|null, rating: number|null, reviewCount: number|null, runId: string|null, scrapedAt: string|null}}
+     * @param {Object|null} [prev] - The snapshot this one replaces
+     * @returns {{priceCents: number|null, rating: number|null, reviewCount: number|null, runId: string|null, scrapedAt: string|null, carried?: Object}}
      */
-    snapshot(product) {
+    snapshot(product, prev = null) {
         const numOrNull = (v) => (typeof v === 'number' ? v : null);
-        return {
+        const snap = {
             priceCents: numOrNull(product.priceCents),
             rating: numOrNull(product.rating),
             reviewCount: numOrNull(product.reviewCount),
             runId: typeof product.runId === 'string' ? product.runId : null,
             scrapedAt: typeof product.scrapedAt === 'string' ? product.scrapedAt : null
         };
+        const carried = {};
+        for (const field of ['priceCents', 'rating', 'reviewCount']) {
+            if (snap[field] !== null || !prev || numOrNull(prev[field]) === null) continue;
+            snap[field] = prev[field];
+            carried[field] = (prev.carried && prev.carried[field]) || prev.scrapedAt || null;
+        }
+        if (Object.keys(carried).length) snap.carried = carried;
+        return snap;
     }
 };
 

@@ -55,5 +55,19 @@ describe('delta.js', () => {
       expect(snap.priceCents).toBeNull();
       expect(snap.runId).toBeNull();
     });
+
+    test('a field that failed to parse keeps the last good value and when it was seen (F-29)', () => {
+      const first = Delta.snapshot({ priceCents: 2999, rating: 4.2, reviewCount: 50, runId: 'r1', scrapedAt: 'T1' });
+      const second = Delta.snapshot({ priceCents: null, rating: 4.3, reviewCount: 51, runId: 'r2', scrapedAt: 'T2' }, first);
+      expect(second).toEqual({
+        priceCents: 2999, rating: 4.3, reviewCount: 51, runId: 'r2', scrapedAt: 'T2',
+        carried: { priceCents: 'T1' }
+      });
+      const third = Delta.snapshot({ priceCents: null, rating: 4.3, reviewCount: 52, runId: 'r3', scrapedAt: 'T3' }, second);
+      expect(third.carried).toEqual({ priceCents: 'T1' });
+      const fourth = Delta.snapshot({ priceCents: 2799, rating: 4.3, reviewCount: 52, runId: 'r4', scrapedAt: 'T4' }, third);
+      expect(fourth.priceCents).toBe(2799);
+      expect(fourth.carried).toBeUndefined();
+    });
   });
 });

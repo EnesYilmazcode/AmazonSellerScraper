@@ -150,8 +150,9 @@ function scrapeCurrentPage(runId) {
             fresh.forEach(product => {
                 product.runId = runKey;
                 product.pageIndex = pageIndex;
-                product.delta = Delta.computeDeltas(product, lastValues[product.asin] || null);
-                lastValues[product.asin] = Delta.snapshot(product);
+                const prev = lastValues[product.asin] || null;
+                product.delta = Delta.computeDeltas(product, prev);
+                lastValues[product.asin] = Delta.snapshot(product, prev);
             });
 
             const newCount = previousCount + fresh.length;
