@@ -125,14 +125,22 @@ See [docs/PRICE_SPREAD_ANALYSIS.md](docs/PRICE_SPREAD_ANALYSIS.md) for the full 
 
 ## Installation
 
-1. Clone the repository:
+1. Clone the repository and build it:
    ```bash
-   git clone https://github.com/enesyilmaz7/AmazonSellerScraper.git
+   git clone https://github.com/EnesYilmazcode/AmazonSellerScraper.git
+   cd AmazonSellerScraper
+   npm ci
+   npm run build
    ```
 2. Open Chrome and navigate to `chrome://extensions/`
 3. Enable **Developer mode** (top-right toggle)
-4. Click **Load unpacked** and select the project folder
-5. Click the ProScan extension icon → **Settings** → paste your [Gemini API key](https://aistudio.google.com/apikey) (free)
+4. Click **Load unpacked** and select the `dist/` folder. The repo root does not load on its own, because the service worker has to be bundled.
+
+For local Firebase work, `npm run build:dev` points the build at the emulators under the `demo-proscan` project.
+
+## Release checks
+
+`npm test` runs the Jest suite and the tool tests. `npm run check` builds, then runs the permission lock (nothing may be added over `tools/live-manifest.json`, the published v2.0 manifest), the version gate and the secret scan. `npm run zip` writes the store package to `dist-zips/` and refuses a dev build, a stray file, or any gate failure. CI runs all of these.
 
 ## Usage
 
