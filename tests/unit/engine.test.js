@@ -705,3 +705,30 @@ describe('old runs', () => {
     db.close();
   });
 });
+
+describe('the end of a synced run (EXT9-5)', () => {
+  test('signed out mid-run, the final header still goes to the account its pages went to', async () => {
+    const rig = createRig({ site: simpleSite(3), flags: { CLOUD_SYNC: true }, local: { account: { uid: 'u1' } } });
+    await startIn(rig, 'leave');
+    await settle();
+    await rig.local.remove('account');
+    expect(await rig.popup({ type: 'STOP_RUN' })).toMatchObject({ stopped: true });
+    const db = await rig.db();
+    const outbox = await db.getAll('outbox');
+    db.close();
+    expect(outbox.map((e) => [e.kind, e.uid])).toEqual([['page', 'u1'], ['run', 'u1']]);
+  });
+
+  test('a run left live only in IndexedDB queues its final header when it is ended', async () => {
+    const rig = createRig({ site: simpleSite(3), flags: { CLOUD_SYNC: true }, local: { account: { uid: 'u1' } } });
+    await startIn(rig, 'gone');
+    await settle(1000);
+    await rig.session.remove('run');
+    rig.killWorker();
+    await rig.popup({ type: 'GET_STATE' });
+    const db = await rig.db();
+    const kinds = (await db.getAll('outbox')).map((e) => e.kind);
+    db.close();
+    expect(kinds).toContain('run');
+  });
+});

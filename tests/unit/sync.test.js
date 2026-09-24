@@ -9,7 +9,7 @@ jest.mock('firebase/firestore', () => ({}));
 
 require('fake-indexeddb/auto');
 const DB = require('../../scripts/background/db');
-const { createSync, isAuthError } = require('../../scripts/background/sync.js');
+const { createSync, isAuthError, isRefusal } = require('../../scripts/background/sync.js');
 
 const START = Date.parse('2026-06-21T10:00:00.000Z');
 const RUN_ID = `k_wireless-mouse_${START}`;
@@ -33,17 +33,38 @@ function fakeFirestore({ failCommit = () => false } = {}) {
     getDoc: async (ref) => ({ exists: () => docs.has(ref.path) }),
     Timestamp: { fromMillis: (ms) => ({ toMillis: () => ms, ms }) },
     arrayUnion: (...vals) => ({ __union: vals }),
+    deleteField: () => ({ __delete: true }),
     FieldPath,
     writeBatch: () => {
       const ops = [];
       return {
         set(ref, data, opts) { ops.push({ ref, data, opts }); },
         async commit() {
-          if (failCommit(ops)) throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+          const fail = failCommit(ops);
+          if (fail) {
+            const code = fail === true ? 'unavailable' : fail;
+            throw Object.assign(new Error(code), { code });
+          }
           commits++;
           for (const { ref, data, opts } of ops) {
             if (!opts) { docs.set(ref.path, copy(data)); continue; }
             const cur = docs.get(ref.path) || {};
+            if (opts.merge) {
+              // Deep merge, as Firestore does: maps key by key, deletes remove.
+              const merge = (into, from) => {
+                for (const [k, v] of Object.entries(from)) {
+                  if (v && v.__delete) delete into[k];
+                  else if (v && v.__union) into[k] = [...new Set([...(into[k] || []), ...resolve(v)])];
+                  else if (v && typeof v === 'object' && !Array.isArray(v) && !v.toMillis) {
+                    into[k] = into[k] && typeof into[k] === 'object' ? into[k] : {};
+                    merge(into[k], v);
+                  } else into[k] = copy(v);
+                }
+              };
+              merge(cur, data);
+              docs.set(ref.path, cur);
+              continue;
+            }
             for (const f of opts.mergeFields) {
               const segs = f instanceof FieldPath ? f.segs : [f];
               let v = getPath(data, segs);
@@ -99,8 +120,8 @@ test('a flush writes every queued page and empties the outbox', async () => {
   const cloud = fakeFirestore();
   const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
   const totals = await sync.flush('u1');
-  // page 1: chunk + 2x2 + run + source; page 2: chunk + 1x2 + run + source; end: run + source
-  expect(totals).toEqual({ entries: 3, pages: 2, runs: 1, products: 3, writes: 7 + 5 + 2 });
+  // page 1: chunk + 2x2; page 2: chunk + 2x1; the header and source once, with the end
+  expect(totals).toEqual({ entries: 3, pages: 2, runs: 1, products: 3, writes: 5 + 3 + 2, failed: 0 });
   expect(await store.count('outbox')).toBe(0);
   const run = cloud.docs.get(`workspaces/u1/runs/${RUN_ID}`);
   expect(run).toMatchObject({ status: 'complete', pagesDone: 2, pagesPlanned: 2, counters: { uniqueAsins: 3 } });
@@ -215,4 +236,59 @@ test('auth errors are told apart from network and rules errors', () => {
   expect(isAuthError({ code: 'auth/user-token-expired' })).toBe(true);
   expect(isAuthError({ code: 'unavailable' })).toBe(false);
   expect(isAuthError(null)).toBe(false);
+});
+
+test('a product seen by two sources lists both (NEW-SYNC-1)', async () => {
+  const store = await storeWith({ products: 1, perPage: 1, state: 'done' });
+  const cloud = fakeFirestore();
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  await sync.flush('u1');
+  // The same ASIN in a storefront run.
+  const RUN2 = `s_A3K9XELT4QZ6M2_${START + 5000}`;
+  await store.write([
+    { store: 'runs', put: { runId: RUN2, sourceId: 's_A3K9XELT4QZ6M2', dayKey: '2026-06-21', state: 'done', reason: 'complete', source: { type: 'storefront', sellerId: 'A3K9XELT4QZ6M2', keyword: null, url: 'https://www.amazon.com/s?me=A3K9XELT4QZ6M2' }, startedAt: START + 5000, finishedAt: START + 6000, page: 1, maxPages: 20 } },
+    { store: 'products', put: { runId: RUN2, n: 0, pageIndex: 1, asin: 'B000000000', name: 'Mouse 0', priceCents: 999, rating: 4.5, reviewCount: 10, isPrime: true, sponsored: false, organicRank: 1, scrapedAt: new Date(START + 5000).toISOString(), placements: [{ page: 1, position: 1, sponsored: false, rank: 1 }], delta: { isNew: false }, prev: null } },
+    { store: 'placements', put: { runId: RUN2, pageIndex: 1, count: 1, placements: 1, kind: 'last', scrapedAt: new Date(START + 5000).toISOString() } },
+    { store: 'outbox', put: { runId: RUN2, kind: 'page', pageIndex: 1, uid: 'u1', queuedAt: START } },
+    { store: 'outbox', put: { runId: RUN2, kind: 'run', uid: 'u1', queuedAt: START } },
+  ]);
+  await sync.flush('u1');
+  expect(cloud.docs.get('workspaces/u1/products/B000000000').sourceIds.sort()).toEqual(['k_wireless-mouse', 's_A3K9XELT4QZ6M2']);
+  expect(cloud.docs.get('workspaces/u1/products/B000000000').latest.p).toBe(999);
+});
+
+test('an entry the rules refuse is marked failed and the entries behind it still sync (EXT9-1)', async () => {
+  const store = await storeWith({ products: 4, perPage: 2, state: 'done' });
+  // The rules refuse page 1 of the run, every time.
+  const cloud = fakeFirestore({ failCommit: (ops) => ops.some((o) => o.ref.path.endsWith('/pages/p0001')) && 'permission-denied' });
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  const totals = await sync.flush('u1');
+  expect(totals).toMatchObject({ entries: 2, pages: 1, failed: 1 });
+  expect(cloud.docs.has(`workspaces/u1/runs/${RUN_ID}/pages/p0002`)).toBe(true);
+  expect(cloud.docs.get(`workspaces/u1/runs/${RUN_ID}`)).toMatchObject({ status: 'complete' });
+  const left = await store.getAll('outbox');
+  expect(left).toHaveLength(1);
+  expect(left[0]).toMatchObject({ pageIndex: 1, failed: { code: 'permission-denied' } });
+  expect(await sync.pending('u1')).toBe(0);
+  expect(await sync.failed('u1')).toBe(1);
+
+  // An automatic flush leaves it alone; Export tries it again.
+  expect(await sync.flush('u1')).toMatchObject({ entries: 0, failed: 0 });
+  expect(await sync.flush('u1', { retryFailed: true })).toMatchObject({ entries: 0, failed: 1 });
+});
+
+test('when every entry is refused nothing is marked and the error goes to the caller', async () => {
+  const store = await storeWith({ products: 2, perPage: 1 });
+  const cloud = fakeFirestore({ failCommit: () => 'permission-denied' });
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  await expect(sync.flush('u1')).rejects.toMatchObject({ code: 'permission-denied' });
+  expect(await sync.pending('u1')).toBe(2);
+  expect(await sync.failed('u1')).toBe(0);
+});
+
+test('refusals are told apart from errors worth retrying', () => {
+  expect(isRefusal({ code: 'permission-denied' })).toBe(true);
+  expect(isRefusal({ code: 'invalid-argument' })).toBe(true);
+  expect(isRefusal({ code: 'unavailable' })).toBe(false);
+  expect(isRefusal({ code: 'resource-exhausted' })).toBe(false);
 });

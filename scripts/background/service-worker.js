@@ -42,6 +42,8 @@ const chatDeps = {
 // The run
 // Saved pages and ended runs wake the sync; see scheduleFlush below.
 const thenFlush = (p) => p.then((out) => { scheduleFlush(); return out; });
+// A tab event wakes it only when it ended the run.
+const flushIfEnded = (p) => p.then((ended) => { if (ended) scheduleFlush(); return ended; });
 
 router.on(Msg.T.START_RUN, (m) => engine.start(m));
 router.on(Msg.T.STOP_RUN, () => thenFlush(engine.stop()));
@@ -94,8 +96,8 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 // Neither listener needs the tabs permission.
-chrome.tabs.onRemoved.addListener((tabId) => { thenFlush(engine.tabRemoved(tabId)); });
-chrome.tabs.onUpdated.addListener((tabId, info, tab) => { thenFlush(engine.tabUpdated(tabId, info, tab)); });
+chrome.tabs.onRemoved.addListener((tabId) => { flushIfEnded(engine.tabRemoved(tabId)); });
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => { flushIfEnded(engine.tabUpdated(tabId, info, tab)); });
 
 // ── ProScan account and cloud sync ──────────────────────────────────────────
 // The popup is a plain page; it signs in and exports through these messages,
@@ -108,6 +110,16 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => { thenFlush(engine.tabUp
 const DASHBOARD_URL = 'https://proscanbot.web.app/dashboard/';
 const FLUSH_DELAY_MS = 3000;
 let flushTimer = null;
+
+/**
+ * After a failed automatic flush the next one waits 30 s, doubling per
+ * failure up to an hour, so a refused or throttled entry is not replayed
+ * (with its product reads) on every page load. Export ignores the wait.
+ */
+function retryDelayMs(failures) {
+  if (!failures) return 0;
+  return Math.min(30000 * 2 ** (failures - 1), 60 * 60 * 1000);
+}
 
 const sync = createSync({ db: firestore, openStore: () => engine.db() });
 
@@ -160,17 +172,27 @@ async function expireSession() {
   await signOut(auth).catch(() => {});
 }
 
-/** Writes the outbox for the signed-in account now. */
-async function flushNow() {
+/**
+ * Writes the outbox for the signed-in account now. `manual` (Export) also
+ * retries entries the rules refused and skips the backoff.
+ */
+async function flushNow({ manual = false } = {}) {
   if (!Flags.CLOUD_SYNC) return { skipped: true };
   const user = await currentUser();
   if (!user) return { skipped: true };
+  const { lastSync } = await chrome.storage.local.get('lastSync');
+  const failures = (lastSync && lastSync.error && lastSync.failures) || 0;
+  if (!manual && lastSync && lastSync.error && Date.now() < lastSync.at + retryDelayMs(failures)) {
+    return { skipped: true, backoff: true };
+  }
   try {
-    const out = await sync.flush(user.uid);
-    await chrome.storage.local.set({ lastSync: { at: Date.now(), error: null } });
+    const out = await sync.flush(user.uid, { retryFailed: manual });
+    await chrome.storage.local.set({ lastSync: { at: Date.now(), error: null, failures: 0 } });
     return out;
   } catch (err) {
-    await chrome.storage.local.set({ lastSync: { at: Date.now(), error: (err && err.code) || 'unknown' } });
+    await chrome.storage.local.set({
+      lastSync: { at: Date.now(), error: (err && err.code) || 'unknown', failures: failures + 1 },
+    });
     if (isAuthError(err)) await expireSession();
     throw err;
   }
@@ -219,6 +241,7 @@ router.on(Msg.T.PROSCAN_AUTH_STATE, async () => {
     user: publicUser(user),
     notice: user ? null : authNotice || null,
     pending: user ? await sync.pending(user.uid).catch(() => 0) : 0,
+    failed: user ? await sync.failed(user.uid).catch(() => 0) : 0,
     lastSync: lastSync || null,
     dashboardUrl: DASHBOARD_URL,
   };
@@ -264,7 +287,8 @@ router.on(Msg.T.PROSCAN_EXPORT, async () => {
   const user = await currentUser();
   if (!user) return { error: 'Sign in to ProScan first.' };
   try {
-    return { ok: true, ...(await flushNow()) };
+    const out = await flushNow({ manual: true });
+    return { ok: true, ...out, failed: await sync.failed(user.uid).catch(() => out.failed || 0) };
   } catch (err) {
     if (isAuthError(err)) return { error: 'Your session expired. Sign in again to keep syncing.', expired: true };
     return { error: 'Could not reach ProScan. Your scans are kept and will sync later.' };

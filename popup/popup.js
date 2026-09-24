@@ -478,17 +478,21 @@ function showSignedIn(user) {
 /**
  * The sync line under the account: what is waiting, or when it last synced.
  *
- * @param {{pending?: number, lastSync?: ?{at:number, error:?string}}} state
+ * @param {{pending?: number, failed?: number, lastSync?: ?{at:number, error:?string}}} state
  */
 function showSyncState(state) {
     const pending = (state && state.pending) || 0;
+    const failed = (state && state.failed) || 0;
     const last = state && state.lastSync;
     let text = 'Scans sync to your ProScan dashboard automatically.';
     if (pending > 0) {
         text = `${pending} page${pending === 1 ? '' : 's'} waiting to sync.`;
-        if (last && last.error) text += ' The last try failed; it will retry.';
+        if (last && last.error) text += ' The last try failed; it will try again in a while, or now with Export to ProScan.';
     } else if (last && !last.error) {
         text = 'Everything is synced.';
+    }
+    if (failed > 0) {
+        text += ` ${failed} page${failed === 1 ? '' : 's'} could not sync: ProScan refused ${failed === 1 ? 'it' : 'them'}. Export to ProScan tries again.`;
     }
     elements.authSync.textContent = text;
     elements.authSync.classList.remove('hidden');
@@ -647,12 +651,15 @@ async function handleExportToProScan() {
 
     if (response && response.ok) {
         const count = response.products || 0;
-        if (!response.entries) {
+        const failed = response.failed || 0;
+        if (failed > 0) {
+            updateStatus(`Synced ${count} product${count === 1 ? '' : 's'}; ${failed} page${failed === 1 ? '' : 's'} could not sync.`, 'warning');
+        } else if (!response.entries) {
             updateStatus('Everything is already synced.', 'info');
         } else {
             updateStatus(`Synced ${count} product${count === 1 ? '' : 's'} to ProScan`, 'success');
         }
-        showSyncState({ pending: 0, lastSync: { at: Date.now(), error: null } });
+        showSyncState({ pending: 0, failed, lastSync: { at: Date.now(), error: null } });
     } else if (response && response.expired) {
         showSignInForm('expired');
         updateStatus(response.error, 'warning');

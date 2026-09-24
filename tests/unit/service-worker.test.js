@@ -24,7 +24,7 @@ jest.mock('firebase/auth/web-extension', () => {
 }, { virtual: true });
 jest.mock('../../scripts/background/sync.js', () => {
   const flush = jest.fn(async () => ({ entries: 0, pages: 0, runs: 0, products: 0, writes: 0 }));
-  return { createSync: () => ({ flush, pending: async () => 0 }), isAuthError: () => false, __flush: flush };
+  return { createSync: () => ({ flush, pending: async () => 0, failed: async () => 0 }), isAuthError: () => false, __flush: flush };
 });
 
 require('fake-indexeddb/auto');
@@ -38,12 +38,14 @@ const V20 = JSON.parse(fs.readFileSync(path.join(__dirname, '../fixtures/v2.0-st
 const messageListeners = [];
 const installedListeners = [];
 const startupListeners = [];
+const tabUpdatedListeners = [];
 
 beforeAll(() => {
   chrome.runtime.id = 'test-extension';
   chrome.runtime.onMessage.addListener = (fn) => messageListeners.push(fn);
   chrome.runtime.onInstalled = { addListener: (fn) => installedListeners.push(fn) };
   chrome.runtime.onStartup = { addListener: (fn) => startupListeners.push(fn) };
+  chrome.tabs.onUpdated = { addListener: (fn) => tabUpdatedListeners.push(fn) };
   require('../../scripts/background/service-worker.js');
 });
 
@@ -71,12 +73,13 @@ test("Export to ProScan flushes the signed-in account's outbox", async () => {
   flush.mockClear();
   const resp = await send({ type: 'PROSCAN_EXPORT' });
   expect(resp).toMatchObject({ ok: true, entries: 0 });
-  expect(flush).toHaveBeenCalledWith('u1');
+  // Export also retries entries the rules refused before.
+  expect(flush).toHaveBeenCalledWith('u1', { retryFailed: true });
 });
 
 test('the auth state says who is signed in and what waits to sync', async () => {
   const st = await send({ type: 'PROSCAN_AUTH_STATE' });
-  expect(st).toMatchObject({ user: { uid: 'u1' }, notice: null, pending: 0, dashboardUrl: expect.stringMatching(/^https:/) });
+  expect(st).toMatchObject({ user: { uid: 'u1' }, notice: null, pending: 0, failed: 0, dashboardUrl: expect.stringMatching(/^https:/) });
 });
 
 test('a password reset answers the same whether or not the account exists (F-56)', async () => {
@@ -145,4 +148,41 @@ test('signing out on purpose clears the account without an expired notice', asyn
   expect(await send({ type: 'PROSCAN_SIGN_OUT' })).toEqual({ ok: true });
   expect(chrome.storage.local._getStore()).not.toHaveProperty('account');
   expect(chrome.storage.local._getStore()).not.toHaveProperty('authNotice');
+});
+
+describe('automatic flushes (EXT9-2)', () => {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  test('a page load in some tab with no run does not flush', async () => {
+    // Let flushes asked for before this test go out first.
+    await wait(3200);
+    await settle();
+    flush.mockClear();
+    tabUpdatedListeners.forEach((fn) => fn(42, { status: 'loading', url: 'https://www.amazon.com/s?k=x' }, { id: 42 }));
+    await settle();
+    await wait(3200);
+    expect(flush).not.toHaveBeenCalled();
+  }, 15000);
+
+  test('after a failed flush the automatic one waits, and Export does not', async () => {
+    await chrome.storage.local.set({ lastSync: { at: Date.now(), error: 'unavailable', failures: 2 } });
+    flush.mockClear();
+    // Opening the popup asks for a flush right away.
+    await send({ type: 'PROSCAN_AUTH_STATE' });
+    await wait(50);
+    await settle();
+    expect(flush).not.toHaveBeenCalled();
+    await send({ type: 'PROSCAN_EXPORT' });
+    expect(flush).toHaveBeenCalledWith('u1', { retryFailed: true });
+    expect(chrome.storage.local._getStore().lastSync).toMatchObject({ error: null, failures: 0 });
+  });
+
+  test('without a recent failure the popup flush goes out', async () => {
+    await chrome.storage.local.set({ lastSync: { at: Date.now() - 2 * 60 * 60 * 1000, error: 'unavailable', failures: 9 } });
+    flush.mockClear();
+    await send({ type: 'PROSCAN_AUTH_STATE' });
+    await wait(50);
+    await settle();
+    expect(flush).toHaveBeenCalledWith('u1', { retryFailed: false });
+  });
 });

@@ -114,16 +114,24 @@ storage_error, interrupted or updated.
    queues `{kind:'page', pageIndex, uid}` per saved page and `{kind:'run', uid}` when a run ends,
    only when an account is signed in
 3. `lastValues` snapshots carry the uid that took them; another account's snapshot gives no delta
-4. `scheduleFlush()` runs a few seconds after PAGE_RESULT, STOP_RUN, a tab change, popup open,
-   sign-in, browser start and update. No alarms
+4. `scheduleFlush()` runs a few seconds after PAGE_RESULT, STOP_RUN, a tab change that ended the
+   run, popup open, sign-in, browser start and update. No alarms. After a failed flush the
+   automatic ones back off (30 s, doubling to 1 h, `lastSync.failures`); Export does not wait
 5. `sync.js` drains the outbox for the signed-in uid, oldest first. `sync-plan.js` turns an entry
-   into writes; each is `set` with `mergeFields`, so `latest`, `prev` and `delta` are replaced whole.
+   into writes; most are `set` with `mergeFields`, each field replaced whole.
+   A product document is a `merge: true` write instead, so the `sourceIds` arrayUnion keeps earlier
+   sources; the keys its `latest`, `prev` and `delta` lack are sent as deletes.
+   The run header and source go on each run's last entry in a flush round.
    `firstSeenAt` is written only when a read shows the product document does not exist
 6. An entry is deleted after its own commit. Entries of another uid are left alone. An entry
-   that fails schema validation is dropped, since retrying it would fail the same way
+   that fails schema validation or a rules cap (`RULE_CAPS` in sync-plan.js) is dropped, since
+   retrying it would fail the same way. The run's end entry goes to `run.syncUid`, the account its
+   pages were queued for
 7. An expired or invalid token signs out and sets `authNotice: 'expired'`; the popup shows
-   "Your session expired". A `permission-denied` (the rules refusing a write) is not a sign-out;
-   the entry stays queued and `lastSync.error` records it
+   "Your session expired". A `permission-denied` or `invalid-argument` (the rules refusing a
+   write) is not a sign-out: the entry is marked `failed` and skipped so the rest go on, and
+   Export retries it. If every entry of a flush is refused, nothing is marked and the error is
+   thrown, since the account or the rules are the problem
 
 Cloud paths and shapes: `packages/schema/index.js` (keep the dashboard's copy identical, bump `SV`
 on a shape change). Run id `{sourceId}_{startMs}`, minted once in `engine.start`; page id `p0001`;

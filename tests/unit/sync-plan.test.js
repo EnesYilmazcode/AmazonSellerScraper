@@ -3,7 +3,7 @@
  *
  * The pure sync plan: outbox entry and IndexedDB records in, cloud writes out.
  */
-const { planEntry, firstSeenCandidates, runKeys } = require('../../scripts/background/sync-plan.js');
+const { planEntry, firstSeenCandidates, runKeys, checkRuleCaps, RULE_CAPS, DELETE } = require('../../scripts/background/sync-plan.js');
 const S = require('../../packages/schema/index.js');
 
 const START = Date.parse('2026-06-09T14:02:11Z');
@@ -49,6 +49,11 @@ const products = [
 
 const entry = (patch) => ({ seq: 1, runId: RUN_ID, uid: 'u1', ...patch });
 const byPath = (writes) => Object.fromEntries(writes.map((w) => [w.path.join('/'), w]));
+/** A merge write's data without the deletes that clear stale keys. */
+const kept = (data) => Object.fromEntries(Object.entries(data)
+  .filter(([, v]) => v !== DELETE)
+  .map(([k, v]) => [k, v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).includes(DELETE)
+    ? Object.fromEntries(Object.entries(v).filter(([, x]) => x !== DELETE)) : v]));
 
 describe('a page entry', () => {
   const writes = planEntry({ entry: entry({ kind: 'page', pageIndex: 1 }), run: run(), products, pages });
@@ -78,15 +83,21 @@ describe('a page entry', () => {
 
   test('latest, prev and delta are replaced whole, and a failed price leaves no stale value (F-21)', () => {
     const doc = w['workspaces/u1/products/B0AAAAAAA2'];
-    expect(doc.fields).toEqual(expect.arrayContaining(['latest', 'prev', 'delta', 'sourceIds']));
-    expect(doc.data.latest).toEqual({ r: 4.5, v: 100, pr: 1, rk: 1, at: Date.parse('2026-06-09T14:03:00.000Z'), runId: RUN_ID, dayKey: '2026-06-09' });
-    expect(doc.data.prev).toEqual({ p: 2100, r: 4.5, v: 95, at: Date.parse('2026-06-02T14:00:00.000Z') });
+    // A merge write, so sourceIds accumulates (NEW-SYNC-1); every key a map lacks is deleted.
+    expect(doc.merge).toBe(true);
+    expect(doc.data.latest.p).toBe(DELETE);
+    expect(doc.data.delta.p).toBe(DELETE);
+    expect(doc.data.delta.pPct).toBe(DELETE);
+    expect(doc.data.sourceIds).toEqual(['k_mug']);
+    const d = kept(doc.data);
+    expect(d.latest).toEqual({ r: 4.5, v: 100, pr: 1, rk: 1, at: Date.parse('2026-06-09T14:03:00.000Z'), runId: RUN_ID, dayKey: '2026-06-09' });
+    expect(d.prev).toEqual({ p: 2100, r: 4.5, v: 95, at: Date.parse('2026-06-02T14:00:00.000Z') });
     // No price this run, so no price delta; the rest compares
-    expect(doc.data.delta).toEqual({ r: 0, v: 5, days: 7 });
+    expect(d.delta).toEqual({ r: 0, v: 5, days: 7 });
   });
 
   test('a product seen for the first time has a null delta and no prev', () => {
-    const doc = w['workspaces/u1/products/B0AAAAAAA1'].data;
+    const doc = kept(w['workspaces/u1/products/B0AAAAAAA1'].data);
     expect(doc.delta).toBeNull();
     expect(doc.prev).toBeNull();
     expect(doc.latest.rk).toBe(3);
@@ -128,8 +139,7 @@ test('firstSeenAt goes only on documents the caller found missing (F-29b)', () =
   const writes = planEntry({ entry: entry({ kind: 'page', pageIndex: 1 }), run: run(), products, pages, missing: new Set(['B0AAAAAAA1']) });
   const w = byPath(writes);
   expect(w['workspaces/u1/products/B0AAAAAAA1'].data).toMatchObject({ firstSeenAt: Date.parse('2026-06-09T14:03:00.000Z'), firstRunId: RUN_ID });
-  expect(w['workspaces/u1/products/B0AAAAAAA1'].fields).toEqual(expect.arrayContaining(['firstSeenAt', 'firstRunId']));
-  expect(w['workspaces/u1/products/B0AAAAAAA2'].fields).not.toContain('firstSeenAt');
+  expect(w['workspaces/u1/products/B0AAAAAAA2'].data).not.toHaveProperty('firstSeenAt');
 });
 
 test('first-seen candidates: new here, or last seen by nobody signed in to this account', () => {
@@ -166,4 +176,32 @@ test('a run from before 2.3 still gets its source id and day key', () => {
   const old = { runId: '1749477731000-abc', source: { type: 'storefront', sellerId: 'A3K9XELT4QZ6M2', url: 'https://www.amazon.com/s?me=A3K9XELT4QZ6M2' }, startedAt: START };
   expect(runKeys(old)).toMatchObject({ sourceId: 's_A3K9XELT4QZ6M2', source: { type: 'storefront', sellerId: 'A3K9XELT4QZ6M2' } });
   expect(runKeys(old).dayKey).toBe(S.dayKeyOf(START, new Date(START).getTimezoneOffset()));
+});
+
+test('with header false a page entry leaves out the run header and the source; a run entry keeps them', () => {
+  const page = planEntry({ entry: entry({ kind: 'page', pageIndex: 1 }), run: run(), products, pages, header: false });
+  expect(page.map((x) => x.path.slice(2).join('/'))).not.toContain(`runs/${RUN_ID}`);
+  expect(page.map((x) => x.path.slice(2).join('/'))).not.toContain('sources/k_mug');
+  const end = planEntry({ entry: entry({ kind: 'run' }), run: run({ state: 'done', reason: 'complete', finishedAt: START + 1 }), products, pages, header: false });
+  expect(end.map((x) => x.path.slice(2).join('/'))).toEqual([`runs/${RUN_ID}`, 'sources/k_mug']);
+});
+
+describe('rules caps (EXT9-1)', () => {
+  test('a keyword or URL longer than the rules allow is cut to the cap', () => {
+    const long = 'a'.repeat(310);
+    const r = run({ source: { type: 'keyword', sellerId: null, keyword: long, url: `https://www.amazon.com/s?k=${long}`, sourceId: 'k_mug' } });
+    const src = byPath(planEntry({ entry: entry({ kind: 'run' }), run: r, products, pages }))['workspaces/u1/sources/k_mug'].data;
+    expect(src.keyword.length).toBeLessThanOrEqual(RULE_CAPS.keyword);
+    expect(src.url.length).toBeLessThanOrEqual(RULE_CAPS.url);
+  });
+
+  test('a product the rules would refuse fails planning', () => {
+    const big = [product('B0AAAAAAA1', { name: 'n'.repeat(RULE_CAPS.name + 1) })];
+    expect(() => planEntry({ entry: entry({ kind: 'page', pageIndex: 1 }), run: run(), products: big, pages })).toThrow(/rules cap/);
+  });
+
+  test('checkRuleCaps passes documents inside the caps', () => {
+    expect(() => checkRuleCaps('source', { sourceId: 'k_mug', keyword: 'mug', url: 'u', sellerId: null, lastRunId: RUN_ID })).not.toThrow();
+    expect(() => checkRuleCaps('run', { reason: 'r'.repeat(101), maxPages: 5 })).toThrow(/reason/);
+  });
 });

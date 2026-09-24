@@ -174,6 +174,18 @@ function createEngine({
         return [{ store: 'outbox', put: { runId, kind, uid, queuedAt: now(), ...extra } }];
     }
 
+    /**
+     * The end-of-run entry for `run`. It goes to the account its pages were
+     * queued for (run.syncUid), even if that account signed out mid-run, so
+     * the cloud header does not stay active forever.
+     */
+    async function endEntry(run) {
+        if (!flags.CLOUD_SYNC || !(run.page > 0)) return [];
+        const uid = run.syncUid || await owner();
+        if (!uid) return [];
+        return [{ store: 'outbox', put: { runId: run.runId, kind: 'run', uid, queuedAt: now() } }];
+    }
+
     /** Ends `run` for `reason` and tells its tab. Returns the ended run. */
     async function end(run, reason) {
         const ended = Run.finish(run, reason, now());
@@ -181,7 +193,7 @@ function createEngine({
         await saveRun(ended);
         try {
             // A run with saved pages sends its final header to the cloud.
-            const queued = ended.page > 0 ? await outbox(ended.runId, 'run') : [];
+            const queued = await endEntry(ended);
             await (await db()).write([{ store: 'runs', put: durable(ended) }, ...queued]);
         } catch (err) {
             log.warn('[ProScan] Could not record the end of the run:', err.message);
@@ -292,7 +304,7 @@ function createEngine({
         const rec = latestId ? await store.get('runs', latestId) : null;
         if (!Run.isActive(rec)) return null;
         const ended = Run.finish(rec, reason, now());
-        await store.write([{ store: 'runs', put: durable(ended) }]);
+        await store.write([{ store: 'runs', put: durable(ended) }, ...await endEntry(ended)]);
         return ended;
     }
 
@@ -379,15 +391,17 @@ function createEngine({
                         total: Number.isInteger(result.total) && result.total > 0 ? result.total : null
                     }
                 });
-                ops.push(...await outbox(runId, 'page', { pageIndex: page }));
+                const queuedPage = await outbox(runId, 'page', { pageIndex: page });
+                ops.push(...queuedPage);
 
                 next = {
                     ...run, page, itemCount: run.itemCount + fresh.length, heartbeat: t,
                     lastUrl: url, nextHref: result.nextHref || null, awaiting: false
                 };
+                if (queuedPage.length && !next.syncUid) next.syncUid = queuedPage[0].put.uid;
                 if (ending) {
                     next = Run.finish(next, ending, t);
-                    ops.push(...await outbox(runId, 'run'));
+                    ops.push(...await endEntry(next));
                 } else {
                     next.navAt = t + Run.pageDelay(random());
                 }
@@ -458,10 +472,13 @@ function createEngine({
         }).then((out) => { tick(); return out; });
     }
 
+    /** Resolves true when this ended the run. */
     function tabRemoved(tabId) {
         return serial(async () => {
             const run = await getRun();
-            if (Run.isActive(run) && run.tabId === tabId) await end(run, 'interrupted');
+            if (!Run.isActive(run) || run.tabId !== tabId) return false;
+            await end(run, 'interrupted');
+            return true;
         });
     }
 
@@ -471,13 +488,14 @@ function createEngine({
      * the tabs permission a non-Amazon URL is hidden, which also counts.
      */
     function tabUpdated(tabId, info, tab) {
-        if (!info || info.status !== 'loading') return Promise.resolve();
+        if (!info || info.status !== 'loading') return Promise.resolve(false);
         return serial(async () => {
             const run = await getRun();
-            if (!Run.owns(run, tabId) || run.state !== 'running' || run.awaiting) return;
+            if (!Run.owns(run, tabId) || run.state !== 'running' || run.awaiting) return false;
             const url = info.url || (tab && tab.url);
-            if (url && url === run.lastUrl) return;
+            if (url && url === run.lastUrl) return false;
             await end(run, 'interrupted');
+            return true;
         });
     }
 
@@ -493,7 +511,7 @@ function createEngine({
             const latest = await store.getMeta('latestRunId');
             const rec = latest ? await store.get('runs', latest) : null;
             if (Run.isActive(rec)) {
-                const queued = rec.page > 0 ? await outbox(rec.runId, 'run') : [];
+                const queued = await endEntry(rec);
                 await store.write([{ store: 'runs', put: durable(Run.finish(rec, reason, now())) }, ...queued]);
             }
         });

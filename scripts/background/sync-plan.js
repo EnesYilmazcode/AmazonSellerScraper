@@ -7,11 +7,23 @@
  * documents of every ASIN on it, the run header and the source. The end of
  * a run writes the header and the source again with the final status.
  *
- * Each write is {path, data, fields}. `fields` null means replace the whole
- * document; otherwise only those fields are written, each replaced whole
- * (Firestore mergeFields), so a price that failed to parse is gone from
- * `latest` instead of kept from last week. A field given as an array is a
- * field path, e.g. ['d', '2026-06-09'].
+ * Each write is {path, data, fields} or {path, data, merge: true}. `fields`
+ * null means replace the whole document; otherwise only those fields are
+ * written, each replaced whole (Firestore mergeFields). A field given as an
+ * array is a field path, e.g. ['d', '2026-06-09'].
+ *
+ * A product document is a `merge` write, so its sourceIds arrayUnion keeps
+ * the sources written before (in a mergeFields mask it would be replaced
+ * whole). `latest`, `prev` and `delta` are still replaced whole: every key
+ * they can have and this write lacks is sent as a delete, so a price that
+ * failed to parse is gone from `latest` instead of kept from last week.
+ *
+ * The run header and the source are written once per flush for each run,
+ * on its last entry in that flush (`header`), not once per page.
+ *
+ * Firestore rules cap string lengths and list sizes the schema validators
+ * do not know about. checkRuleCaps() applies the same caps here, so an
+ * entry the rules would refuse on every try fails planning instead.
  *
  * @module SyncPlan
  */
@@ -23,11 +35,70 @@ import {
 
 const DAY_MS = 86400000;
 const same = (v) => v;
+/** What a field delete looks like when the caller passes no converter. */
+export const DELETE = Object.freeze({ delete: true });
+
+/** Caps from the dashboard's firestore.rules that the schema does not check. */
+export const RULE_CAPS = {
+    keyword: 300, url: 2000, sellerId: 40, name: 1000, productUrl: 500, img: 1000,
+    runId: 260, reason: 100, maxPages: 1000, page: 1000, kind: 20, sourceIds: 200
+};
+
+const tooLong = (v, max) => typeof v === 'string' && v.length > max;
+
+/** Throws when `doc` of `kind` breaks a rules cap. */
+export function checkRuleCaps(kind, doc) {
+    const errs = [];
+    const c = RULE_CAPS;
+    if (kind === 'source') {
+        if (tooLong(doc.keyword, c.keyword)) errs.push(`keyword: at most ${c.keyword} characters`);
+        if (tooLong(doc.url, c.url)) errs.push(`url: at most ${c.url} characters`);
+        if (tooLong(doc.sellerId, c.sellerId)) errs.push(`sellerId: at most ${c.sellerId} characters`);
+        if (tooLong(doc.lastRunId, c.runId)) errs.push(`lastRunId: at most ${c.runId} characters`);
+        if (!/^[sk]_[A-Za-z0-9_-]{1,200}$/.test(doc.sourceId || '')) errs.push('sourceId: s_ or k_ and 1 to 200 id characters');
+    } else if (kind === 'run') {
+        if (tooLong(doc.reason, c.reason)) errs.push(`reason: at most ${c.reason} characters`);
+        if (doc.maxPages > c.maxPages) errs.push(`maxPages: at most ${c.maxPages}`);
+    } else if (kind === 'page') {
+        if (doc.page > c.page) errs.push(`page: at most ${c.page}`);
+        if (tooLong(doc.kind, c.kind)) errs.push(`kind: at most ${c.kind} characters`);
+    } else if (kind === 'product') {
+        if (tooLong(doc.name, c.name)) errs.push(`name: at most ${c.name} characters`);
+        if (tooLong(doc.url, c.productUrl)) errs.push(`url: at most ${c.productUrl} characters`);
+        if (tooLong(doc.img, c.img)) errs.push(`img: at most ${c.img} characters`);
+        if (doc.latest && tooLong(doc.latest.runId, c.runId)) errs.push(`latest.runId: at most ${c.runId} characters`);
+        if (tooLong(doc.firstRunId, c.runId)) errs.push(`firstRunId: at most ${c.runId} characters`);
+    }
+    if (errs.length) throw new Error(`${kind} document breaks a rules cap: ${errs.join('; ')}`);
+    return doc;
+}
+
+/** Every key each replaced map of a product document can hold. */
+const MAP_KEYS = {
+    latest: ['p', 'r', 'v', 'pr', 'rk', 'at', 'runId', 'dayKey'],
+    prev: ['p', 'r', 'v', 'pr', 'rk', 'at'],
+    delta: ['p', 'pPct', 'r', 'v', 'days']
+};
+
+/** `doc` with the keys its replaced maps lack set to `del()`, for a merge write. */
+function withDeletes(doc, del) {
+    const out = { ...doc };
+    for (const [field, keys] of Object.entries(MAP_KEYS)) {
+        const v = doc[field];
+        if (!v || typeof v !== 'object') continue;
+        const filled = { ...v };
+        for (const k of keys) if (!(k in filled)) filled[k] = del();
+        out[field] = filled;
+    }
+    return out;
+}
 
 /** Placements of `product` on page `pageIndex`. */
 function onPage(product, pageIndex) {
     return (product.placements || []).filter((pl) => pl.page === pageIndex);
 }
+
+const clamp = (v, max) => (typeof v === 'string' && v.length > max ? v.slice(0, max) : v);
 
 /** The run's source id, day key and source, also for a run from before 2.3. */
 export function runKeys(run) {
@@ -38,7 +109,12 @@ export function runKeys(run) {
     return {
         sourceId,
         dayKey,
-        source: { type: found.type, sellerId: found.sellerId || null, keyword: found.keyword || null, url: found.url || source.url || null }
+        source: {
+            type: found.type,
+            sellerId: found.sellerId || null,
+            keyword: clamp(found.keyword || null, RULE_CAPS.keyword),
+            url: clamp(found.url || source.url || null, RULE_CAPS.url)
+        }
     };
 }
 
@@ -166,9 +242,11 @@ function productDoc(run, keys, p, time, union) {
  * @param {Set<string>} [args.missing] ASINs with no product document yet
  * @param {function(number):*} [args.time]  ms to a Firestore Timestamp
  * @param {function(string[]):*} [args.union] values to arrayUnion
- * @returns {{path: string[], data: Object, fields: ?Array}[]}
+ * @param {function():*} [args.del] a field delete, for merge writes
+ * @param {boolean} [args.header] also write the run header and the source
+ * @returns {{path: string[], data: Object, fields?: ?Array, merge?: boolean}[]}
  */
-export function planEntry({ entry, run: rec, products, pages, missing = new Set(), time = same, union = same }) {
+export function planEntry({ entry, run: rec, products, pages, missing = new Set(), time = same, union = same, del = () => DELETE, header: withHeader = true }) {
     const run = { ...rec, startedAt: timeMs(rec.startedAt), finishedAt: timeMs(rec.finishedAt) };
     const ws = ['workspaces', entry.uid];
     const keys = runKeys(run);
@@ -179,6 +257,7 @@ export function planEntry({ entry, run: rec, products, pages, missing = new Set(
         if (pageRec) {
             const chunk = pageDoc(run, pageRec, products, time);
             assertValid('page', chunk);
+            checkRuleCaps('page', chunk);
             writes.push({ path: [...ws, 'runs', run.runId, 'pages', pageIdOf(pageRec.pageIndex)], data: chunk, fields: null });
         }
         for (const p of products) {
@@ -189,7 +268,8 @@ export function planEntry({ entry, run: rec, products, pages, missing = new Set(
                 doc.firstRunId = run.runId;
             }
             assertValid('product', { ...doc, sourceIds: [keys.sourceId] });
-            writes.push({ path: [...ws, 'products', p.asin], data: doc, fields: Object.keys(doc) });
+            checkRuleCaps('product', doc);
+            writes.push({ path: [...ws, 'products', p.asin], data: withDeletes(doc, del), merge: true });
 
             const point = pointOf(p);
             assertValid('history', { sv: SV, asin: p.asin, d: { [keys.dayKey]: point } });
@@ -201,11 +281,14 @@ export function planEntry({ entry, run: rec, products, pages, missing = new Set(
         }
     }
 
-    const header = runDoc(run, keys, products, pages, time);
-    assertValid('run', header);
-    writes.push({ path: [...ws, 'runs', run.runId], data: header, fields: Object.keys(header) });
+    if (!withHeader && entry.kind !== 'run') return writes;
+    const head = runDoc(run, keys, products, pages, time);
+    assertValid('run', head);
+    checkRuleCaps('run', head);
+    writes.push({ path: [...ws, 'runs', run.runId], data: head, fields: Object.keys(head) });
     const source = sourceDoc(run, keys, pages, time);
     assertValid('source', source);
+    checkRuleCaps('source', source);
     writes.push({ path: [...ws, 'sources', keys.sourceId], data: source, fields: Object.keys(source) });
     return writes;
 }

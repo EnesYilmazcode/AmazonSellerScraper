@@ -4,8 +4,8 @@
 // which starts the emulators.
 //
 // Queue sizes 1, 201 and 600, a page appended in the middle of a flush,
-// replace semantics across runs, create-only firstSeenAt, and a write count
-// per run.
+// replace semantics across runs, create-only firstSeenAt, a write count
+// per run, a product in two sources, and an entry the rules refuse.
 
 import 'fake-indexeddb/auto';
 import { test, before, after } from 'node:test';
@@ -73,10 +73,10 @@ function extension(uid) {
   });
   const sender = { tab: { id: 1 } };
 
-  /** Starts a keyword run at `startMs`. */
-  async function start(keyword, startMs) {
+  /** Starts a keyword run at `startMs`, or a run on `at` when given. */
+  async function start(keyword, startMs, at = null) {
     clock.t = startMs;
-    url = `https://www.amazon.com/s?k=${encodeURIComponent(keyword)}`;
+    url = at || `https://www.amazon.com/s?k=${encodeURIComponent(keyword)}`;
     const resp = await engine.start({ tabId: 1 });
     assert.equal(resp.ok, true, JSON.stringify(resp));
     return resp.runId;
@@ -101,8 +101,8 @@ function extension(uid) {
   }
 
   /** A whole run of `products`, `perPage` to a page. */
-  async function scrape(keyword, startMs, products, perPage) {
-    const runId = await start(keyword, startMs);
+  async function scrape(keyword, startMs, products, perPage, at = null) {
+    const runId = await start(keyword, startMs, at);
     const pages = Math.ceil(products.length / perPage);
     for (let i = 0; i < pages; i++) {
       await page(runId, i + 1, products.slice(i * perPage, (i + 1) * perPage), { last: i === pages - 1, total: products.length });
@@ -128,8 +128,11 @@ function products(n, { price = (i) => 1000 + i } = {}) {
   });
 }
 
-/** Writes an entry takes: chunk + 2 per product + run + source for a page; run + source at the end. */
-const expectedWrites = (pageSizes) => pageSizes.reduce((n, k) => n + 1 + 2 * k + 2, 0) + 2;
+/**
+ * Writes a run takes: per page the chunk and 2 per product (document and
+ * history); the header and source once per flush round the run had entries in.
+ */
+const expectedWrites = (pageSizes, rounds = 1) => pageSizes.reduce((n, k) => n + 1 + 2 * k, 0) + 2 * rounds;
 
 async function account(email) {
   const cred = await createUserWithEmailAndPassword(auth, email, 'contract-pass-1');
@@ -158,7 +161,7 @@ test('queue size 1: one product on one page', async () => {
   assert.equal(runId, `k_single-mug_${start}`);
 
   const totals = await ext.sync().flush(uid);
-  assert.deepEqual(totals, { entries: 2, pages: 1, runs: 1, products: 1, writes: expectedWrites([1]) });
+  assert.deepEqual(totals, { entries: 2, pages: 1, runs: 1, products: 1, writes: expectedWrites([1]), failed: 0 });
   assert.equal(await (await ext.store()).count('outbox'), 0);
 
   const p = (await getDoc(ws(uid, 'products', asinOf(0)))).data();
@@ -202,7 +205,7 @@ test('queue size 201, with a page appended in the middle of the flush', async ()
   assert.equal(appended, true);
   assert.equal(totals.pages, 5);
   assert.equal(totals.products, 201);
-  assert.equal(totals.writes, expectedWrites([48, 48, 48, 48, 9]));
+  assert.equal(totals.writes, expectedWrites([48, 48, 48, 48, 9], 2));
   assert.equal(await (await ext.store()).count('outbox'), 0);
 
   assert.equal(await count(uid, 'products'), 201);
@@ -285,4 +288,38 @@ test('another account cannot write this account\'s queue, and the entries stay',
 
   await assert.rejects(ext.sync().flush(owner), (err) => err.code === 'permission-denied' && !isAuthError(err));
   assert.equal(await (await ext.store()).count('outbox'), 2);
+});
+
+test('a product seen by a storefront and a keyword run lists both sources (NEW-SYNC-1)', async () => {
+  const uid = await account(`two-${Date.now()}@contract.test`);
+  const ext = extension(uid);
+  const day = Date.parse('2026-06-14T10:00:00Z');
+  await ext.scrape('store', day, products(6), 60, 'https://www.amazon.com/s?me=A3K9XELT4QZ6M2');
+  await ext.sync().flush(uid);
+  // The keyword run sees the first 3 again.
+  await ext.scrape('water bottle', day + 60000, products(3), 60);
+  await ext.sync().flush(uid);
+
+  const both = (await getDoc(ws(uid, 'products', asinOf(1)))).data();
+  assert.deepEqual([...both.sourceIds].sort(), ['k_water-bottle', 's_A3K9XELT4QZ6M2']);
+  const one = (await getDoc(ws(uid, 'products', asinOf(5)))).data();
+  assert.deepEqual(one.sourceIds, ['s_A3K9XELT4QZ6M2']);
+});
+
+test('an entry the rules refuse is set aside and the next scan still syncs (EXT9-1)', async () => {
+  const uid = await account(`skew-${Date.now()}@contract.test`);
+  const ext = extension(uid);
+  // A clock two hours fast: the rules refuse times over an hour ahead.
+  const ahead = Date.now() + 2 * 60 * 60 * 1000;
+  const bad = await ext.scrape('fast clock', ahead, products(2), 60);
+  // Other ASINs: these would carry the fast clock in prev.at.
+  const good = await ext.scrape('garden hose', Date.now() - 60000, products(4).slice(2), 60);
+
+  const totals = await ext.sync().flush(uid);
+  assert.equal(totals.failed, 2);
+  assert.equal((await getDoc(ws(uid, 'runs', good))).exists(), true);
+  assert.equal((await getDoc(ws(uid, 'runs', bad))).exists(), false);
+  const sync = ext.sync();
+  assert.equal(await sync.pending(uid), 0);
+  assert.equal(await sync.failed(uid), 2);
 });

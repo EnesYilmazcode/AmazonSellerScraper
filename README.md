@@ -81,14 +81,20 @@ Signed in to a ProScan account in the popup (email and password)
   → Each saved page goes into the IndexedDB outbox, tagged with the account's uid;
     the end of the run goes in after its pages
   → A few seconds after a page, a run end, a popup open or a browser start,
-    the worker flushes the outbox (no alarms)
-  → sync.js writes one entry at a time: the page chunk, a product and a history
-    document per ASIN on the page, the run header and the source. latest, prev
-    and delta are replaced whole, never merged
+    the worker flushes the outbox (no alarms). After a failed flush the next
+    automatic one waits 30 s, doubling up to an hour
+  → sync.js writes one entry at a time: the page chunk, and a product and a
+    history document per ASIN on the page. The run header and the source go
+    once per run per flush. latest, prev and delta are replaced whole, never
+    merged; sourceIds keeps every source
   → An entry leaves the outbox only once its own writes commit; a page saved
     during a flush goes out before the flush returns
+  → An entry the rules refuse is set aside, so the entries behind it still sync;
+    the popup counts them and Export to ProScan tries them again
   → Export to ProScan flushes right away
 ```
+
+Write cost: a page of k products is 1 + 2k writes, plus 2 per run per flush. A 20 page run of 48 products a page is about 1,960 writes. Spark allows 20,000 writes a day for the whole project, shared by every user, so about 10 such runs a day fill it (audit F-23).
 
 The document shapes, ids and validators are in `packages/schema/index.js`, which the dashboard copies. Money is integer cents, unknown values are null (left out of compact points), and every document carries `sv`. A signed-out user queues nothing. If Firebase drops the session, the popup says so and the queued pages wait for the same account to sign in again.
 
@@ -171,7 +177,7 @@ For local Firebase work, `npm run build:dev` points the build at the emulators u
 
 The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, see its README). `npm run test:e2e` loads the built extension into Chromium and runs scrape scenarios against those pages, with every request answered locally. Run `npx playwright install --no-shell chromium` once first. Known bugs run as expected failures tagged with their audit finding id; `PROSCAN_SHOW_KNOWN=1 npm run test:e2e` shows what they fail on.
 
-`npm run test:contract` runs the real sync module against the Firebase emulators with the dashboard's `firestore.rules` (from `PROSCAN_RULES`, or a `web` or `proscan-web` checkout next to this repo): queues of 1, 201 and 600 products, a page added mid-flush, replace semantics across runs, create-only `firstSeenAt` and the write count per run. It needs the Firebase CLI and Java, and uses the `demo-proscan` project only.
+`npm run test:contract` runs the real sync module against the Firebase emulators with the dashboard's `firestore.rules` (from `PROSCAN_RULES`, or a `web` or `proscan-web` checkout next to this repo): queues of 1, 201 and 600 products, a page added mid-flush, replace semantics across runs, create-only `firstSeenAt`, the write count per run, a product in two sources and an entry the rules refuse. It refuses to start if any of its ports is taken, and only stops the emulator processes it started. It needs the Firebase CLI and Java, and uses the `demo-proscan` project only.
 
 The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, see its README). `npm run test:e2e` loads the built extension into Chromium and runs scrape scenarios against those pages, with every request answered locally. Run `npx playwright install --no-shell chromium` once first. Known bugs run as expected failures tagged with their audit finding id; `PROSCAN_SHOW_KNOWN=1 npm run test:e2e` shows what they fail on.
 
