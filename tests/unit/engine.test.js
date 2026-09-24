@@ -575,3 +575,86 @@ describe('foldPage', () => {
     expect(changed[0].placements).toHaveLength(2);
   });
 });
+
+describe('a run left live only in IndexedDB', () => {
+  test('session storage wiped with no recover (disable and enable): the run shows as ended and Start works', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'orphan');
+    await settle(1000);
+    await rig.session.remove('run');
+    rig.killWorker();
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.run).toMatchObject({ state: 'failed', reason: 'interrupted' });
+    expect(Run.isActive(st.run)).toBe(false);
+    expect(st.results).toHaveLength(4);
+    const db = await rig.db();
+    expect(Run.isActive(await db.get('runs', st.run.runId))).toBe(false);
+    db.close();
+    const tab2 = rig.openTab(searchUrl('after'));
+    await settle();
+    expect(await rig.popup({ type: 'START_RUN', tabId: tab2 })).toMatchObject({ ok: true });
+  });
+
+  test('Stop ends it when session storage has no run', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'orphan2');
+    await settle(1000);
+    await rig.session.remove('run');
+    rig.killWorker();
+    expect(await rig.popup({ type: 'STOP_RUN' })).toEqual({ ok: true, stopped: true });
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.run).toMatchObject({ reason: 'stopped' });
+  });
+});
+
+describe('the run tab', () => {
+  test('a new search that loads while the next page is pending ends the run and is not parsed', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    const { tab } = await startIn(rig, 'mine');
+    await settle();
+    const run = await rig.run();
+    await rig.session.set({ run: { ...run, awaiting: true, expectUrl: searchUrl('mine', 2), navAt: null } });
+    const out = await rig.engine().pageReady({ url: searchUrl('theirs') }, { tab: { id: tab } });
+    expect(out).toEqual({ idle: true });
+    expect(await rig.run()).toMatchObject({ reason: 'interrupted' });
+    expect((await results(rig)).map((r) => r.asin)).toEqual([0, 1, 2, 3].map((i) => asinFor('mine', 1, i)));
+  });
+
+  test('the page it opened is parsed even when Amazon rewrites qid and ref', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    const { tab } = await startIn(rig, 'mine');
+    await settle();
+    const run = await rig.run();
+    await rig.session.set({ run: { ...run, awaiting: true, expectUrl: `${searchUrl('mine', 2)}&ref=sr_pg_1`, navAt: null } });
+    const out = await rig.engine().pageReady({ url: `${searchUrl('mine', 2)}&qid=5&ref=sr_pg_2` }, { tab: { id: tab } });
+    expect(out).toMatchObject({ parse: true, page: 2 });
+  });
+});
+
+describe('old runs', () => {
+  test(`starting a run keeps the newest ${require('../../scripts/background/engine').KEEP_RUNS}, and never one waiting to sync`, async () => {
+    const { KEEP_RUNS } = require('../../scripts/background/engine');
+    const rig = createRig({ site: simpleSite(1) });
+    const db = await rig.db();
+    const ops = [];
+    for (let i = 0; i < KEEP_RUNS + 3; i++) {
+      const runId = `old-${String(i).padStart(2, '0')}`;
+      ops.push({ store: 'runs', put: { runId, state: 'done', reason: 'complete', startedAt: 1000 + i } });
+      ops.push({ store: 'products', put: { runId, n: 0, asin: 'B0OLD00000' } });
+      ops.push({ store: 'placements', put: { runId, pageIndex: 1, count: 1 } });
+    }
+    ops.push({ store: 'outbox', put: { runId: 'old-00', pageIndex: 1, queuedAt: 1 } });
+    await db.write(ops);
+    await startIn(rig, 'fresh');
+    await runUntilEnd(rig);
+    const runs = (await db.getAll('runs')).map((r) => r.runId).sort();
+    // The run just made, the 9 newest old ones, and old-00 kept for the outbox.
+    expect(runs).toHaveLength(KEEP_RUNS + 1);
+    expect(runs).toContain('old-00');
+    expect(runs).not.toContain('old-01');
+    expect(await db.runProducts('old-01')).toEqual([]);
+    expect(await db.runPages('old-01')).toEqual([]);
+    expect(await db.runProducts(`old-${KEEP_RUNS + 2}`)).toHaveLength(1);
+    db.close();
+  });
+});

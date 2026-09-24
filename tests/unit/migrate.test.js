@@ -297,4 +297,23 @@ describe('3 -> 4: into IndexedDB', () => {
     expect((await db.getAll('outbox')).map((o) => o.runId).sort()).toEqual(['r0', 'r21']);
     db.close();
   });
+
+  test('a retry after a 2.2 run keeps the newer latest run and its outbox entries', async () => {
+    const queued = [{ asin: 'B0QQQQQQQ1', runId: 'r0' }];
+    await chrome.storage.local.set({ ...V21(), syncQueue: queued });
+    const db = await openDb();
+    // The engine got there first: a 2.2 run and its queued page.
+    await db.write([
+      { store: 'runs', put: { runId: 'r22', state: 'done', reason: 'complete', startedAt: 9 } },
+      { store: 'meta', put: { key: 'latestRunId', value: 'r22' } },
+      { store: 'outbox', put: { runId: 'r22', pageIndex: 1, queuedAt: 9 } },
+    ]);
+    await Migrate.run(chrome.storage.local, { now: NOW, openDb });
+    await Migrate.run({ get: async () => ({ ...V21(), syncQueue: queued }), remove: async () => {}, set: async () => {} }, { now: NOW, openDb });
+    expect(await db.getMeta('latestRunId')).toBe('r22');
+    const outbox = await db.getAll('outbox');
+    expect(outbox.map((o) => o.runId).sort()).toEqual(['r0', 'r22']);
+    expect(outbox.find((o) => o.runId === 'r22')).toMatchObject({ pageIndex: 1 });
+    db.close();
+  });
 });

@@ -122,7 +122,10 @@ function api(idb) {
 
     /**
      * Applies `ops` in one transaction, all or nothing. Each op is
-     * {store, put}, {store, delete} or {store, deleteIndex: [index, key]}.
+     * {store, put}, {store, delete}, {store, deleteIndex: [index, key]}, or
+     * {store, putIfAbsent, unlessIndex?: [index, key]}, which writes only
+     * when no record has its key (or, with unlessIndex, none is in that
+     * index under that key).
      */
     function write(ops) {
         const stores = [...new Set(ops.map((op) => op.store))];
@@ -131,6 +134,13 @@ function api(idb) {
             for (const op of ops) {
                 const s = tx.objectStore(op.store);
                 if ('put' in op) s.put(op.put);
+                else if ('putIfAbsent' in op) {
+                    const v = op.putIfAbsent;
+                    const probe = op.unlessIndex
+                        ? s.index(op.unlessIndex[0]).count(op.unlessIndex[1])
+                        : s.count([].concat(s.keyPath).length > 1 ? s.keyPath.map((k) => v[k]) : v[s.keyPath]);
+                    probe.onsuccess = () => { if (!probe.result) s.put(v); };
+                }
                 else if ('delete' in op) s.delete(op.delete);
                 else if (op.deleteIndex) {
                     s.index(op.deleteIndex[0]).openKeyCursor(op.deleteIndex[1]).onsuccess = (ev) => {

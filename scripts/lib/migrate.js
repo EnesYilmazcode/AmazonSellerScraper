@@ -164,15 +164,22 @@ const Migrate = (() => {
             if (snap && typeof snap === 'object') ops.push({ store: 'lastValues', put: { ...snap, asin } });
         });
 
-        [...new Set(queued.map(runOf))].forEach((runId, i) => {
-            ops.push({ store: 'outbox', put: { seq: i + 1, runId, pageIndex: null, queuedAt: now } });
+        // The outbox numbers its own entries, so ones the engine already
+        // added are never overwritten, and a retry adds nothing twice.
+        [...new Set(queued.map(runOf))].forEach((runId) => {
+            ops.push({
+                store: 'outbox',
+                putIfAbsent: { runId, pageIndex: null, queuedAt: now },
+                unlessIndex: ['runId', runId]
+            });
         });
 
         if (latestRunId) {
             Object.entries(store.spreadResults || {}).forEach(([asin, data]) => {
                 ops.push({ store: 'spread', put: { runId: latestRunId, asin, data: data || null } });
             });
-            ops.push({ store: 'meta', put: { key: 'latestRunId', value: latestRunId } });
+            // A retry that runs after a 2.2 run must not point back at 2.1.
+            ops.push({ store: 'meta', putIfAbsent: { key: 'latestRunId', value: latestRunId } });
         }
         return ops;
     }

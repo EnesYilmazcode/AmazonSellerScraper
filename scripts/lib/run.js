@@ -30,7 +30,7 @@ const Run = (() => {
         stopped: 'Scraping stopped.',
         blocked: 'Amazon showed a captcha or a sign-in page, so the run stopped. Solve it in the tab, then start again.',
         selectors_broken: 'ProScan could not read this page. Amazon may have shown an error or changed its layout.',
-        storage_full: 'Browser storage is full, so the run stopped. Download your results. Starting a new scan clears them.',
+        storage_full: 'Browser storage is full, so the run stopped. Download your results. Starting a new scan removes older saved scans.',
         interrupted: 'The run ended early because its tab was closed or left the search.',
         storage_error: 'ProScan could not save a page, so the run stopped.',
         updated: 'ProScan was updated during the run, so it stopped. The products found before the update are kept.'

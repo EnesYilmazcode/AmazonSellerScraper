@@ -252,7 +252,7 @@ async function warnIfNearlyFull() {
         const { usage, quota } = await navigator.storage.estimate();
         if (quota && usage >= quota * Storage.NEAR_FULL) {
             const pct = Math.round((usage / quota) * 100);
-            updateStatus(`Browser storage is ${pct}% full. Download your results before the next run.`, 'warning');
+            updateStatus(`Browser storage is ${pct}% full. Download your results; the next run removes older saved scans.`, 'warning');
         }
     } catch (e) { /* no estimate in this context */ }
 }
@@ -295,7 +295,7 @@ const AMAZON_URL = /^https:\/\/([a-z0-9-]+\.)*amazon\.com\//i;
  *
  * The worker pings the tab and changes nothing if the content script is not
  * there (an open tab keeps the old script after an update) or the page is
- * not a search. Old runs are kept; the view moves to the new one.
+ * not a search. The 10 newest runs are kept; the view moves to the new one.
  *
  * @async
  */

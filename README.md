@@ -178,7 +178,7 @@ The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, s
 
 - `chrome.storage.local` -- Settings and the schema version only
 - `chrome.storage.session` -- The live run record, written by the service worker
-- IndexedDB (the extension's own origin, no permission) -- Runs, products, pages, lastValues and the sync outbox
+- IndexedDB (the extension's own origin, no permission) -- Runs, products, pages, lastValues and the sync outbox. Starting a run keeps the 10 newest runs and removes older ones, except runs still waiting to sync.
 - `chrome.runtime.sendMessage` / `onMessage` -- Messages, all listed in `scripts/lib/messages.js`
 - `chrome.downloads` -- File export downloads
 - `chrome.tabs` -- Messages to the run's tab, `tabs.update` for the next page, and `onRemoved` / `onUpdated` to notice the tab going away (none of these need the `tabs` permission)

@@ -29,6 +29,9 @@ const Delta = require('../modules/delta.js');
 /** A page asked for but not reported this long is asked for again. */
 const PAGE_TIMEOUT_MS = 20000;
 
+/** Runs kept in IndexedDB. Starting a run removes the oldest past this. */
+const KEEP_RUNS = 10;
+
 /**
  * Folds one page's products into a run. Placements get the page number and
  * a run-wide organic rank. An ASIN the run already has only adds its
@@ -171,6 +174,28 @@ function createEngine({
         return run;
     }
 
+    /**
+     * Keeps the newest `keep` runs (KEEP_RUNS - 1 by default, so the one
+     * starting makes KEEP_RUNS). A run still in the outbox or still live is
+     * never removed.
+     */
+    async function pruneRuns(store, keep = KEEP_RUNS - 1) {
+        const [runs, outbox] = await Promise.all([store.getAll('runs'), store.getAll('outbox')]);
+        const pending = new Set(outbox.map(e => e.runId));
+        const old = runs
+            .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
+            .slice(keep)
+            .filter(r => !pending.has(r.runId) && !Run.isActive(r));
+        if (old.length === 0) return 0;
+        const ops = [];
+        for (const { runId } of old) {
+            ops.push({ store: 'runs', delete: runId });
+            for (const s of ['products', 'placements', 'spread']) ops.push({ store: s, deleteIndex: ['runId', runId] });
+        }
+        await store.write(ops);
+        return old.length;
+    }
+
     function start({ tabId }) {
         return serial(async () => {
             if (typeof tabId !== 'number') return { error: 'refused', message: Run.refusal('unknown') };
@@ -190,11 +215,24 @@ function createEngine({
             const runId = `${t}-${runSuffix(random)}`;
             let run = Run.create({ runId, tabId, maxPages: settings.maxPages, source: Run.sourceOf(pong.url, t), now: t });
             await saveRun(run);
+            const first = [
+                { store: 'runs', put: durable(run) },
+                { store: 'meta', put: { key: 'latestRunId', value: runId } }
+            ];
             try {
-                await (await db()).write([
-                    { store: 'runs', put: durable(run) },
-                    { store: 'meta', put: { key: 'latestRunId', value: runId } }
-                ]);
+                await pruneRuns(await db());
+            } catch (err) {
+                log.warn('[ProScan] Could not remove old runs:', err.message);
+            }
+            try {
+                try {
+                    await (await db()).write(first);
+                } catch (err) {
+                    if (err.code !== 'storage_full') throw err;
+                    // Full: drop every older run that is not waiting to sync, then try once more.
+                    await pruneRuns(await db(), 0);
+                    await (await db()).write(first);
+                }
             } catch (err) {
                 await end(run, err.code === 'storage_full' ? 'storage_full' : 'storage_error');
                 return { error: err.code || 'storage_error', message: Run.MESSAGES[err.code] || Run.MESSAGES.storage_error };
@@ -211,9 +249,29 @@ function createEngine({
         });
     }
 
+    /**
+     * The latest run IndexedDB still has as live when session storage has
+     * no run: the extension was disabled and enabled again, or its process
+     * crashed. Nothing can resume it, so it is ended as `reason`. Returns
+     * the ended record, or null. Call inside serial().
+     */
+    async function endOrphan(store, reason) {
+        if (await getRun()) return null;
+        const latestId = await store.getMeta('latestRunId');
+        const rec = latestId ? await store.get('runs', latestId) : null;
+        if (!Run.isActive(rec)) return null;
+        const ended = Run.finish(rec, reason, now());
+        await store.write([{ store: 'runs', put: durable(ended) }]);
+        return ended;
+    }
+
     function stop() {
         return serial(async () => {
             const run = await getRun();
+            if (!run) {
+                const ended = await endOrphan(await db(), 'stopped').catch(() => null);
+                return { ok: true, stopped: !!ended };
+            }
             if (!Run.isActive(run)) return { ok: true, stopped: false };
             const stopping = Run.transition(run, 'stopping');
             await saveRun(stopping);
@@ -228,7 +286,11 @@ function createEngine({
             const run = await liveRun();
             const tabId = sender && sender.tab ? sender.tab.id : null;
             if (!Run.owns(run, tabId) || run.state !== 'running') return { idle: true };
-            if (run.awaiting) return { parse: true, runId: run.runId, page: run.page + 1 };
+            // Only the page the engine opened is parsed. A search the user
+            // typed in the tab while it was loading ends the run instead.
+            if (run.awaiting && (!run.expectUrl || Run.samePage(run.expectUrl, url))) {
+                return { parse: true, runId: run.runId, page: run.page + 1 };
+            }
             if (url === run.lastUrl) return { heartbeat: true, runId: run.runId };
             // The tab went somewhere else while the next page was pending.
             await end(run, 'interrupted');
@@ -413,7 +475,11 @@ function createEngine({
         ]);
         const spread = {};
         spreadRows.forEach(r => { spread[r.asin] = r.data; });
-        const run = live && live.runId === runId ? live : (rec || null);
+        let run = live && live.runId === runId ? live : (rec || null);
+        if (!live && Run.isActive(rec)) {
+            // Live in IndexedDB only: no session record means nothing drives it.
+            run = (await endOrphan(store, 'interrupted').catch(() => null)) || Run.finish(rec, 'interrupted', now());
+        }
         return { run, results, pages, spread };
     }
 
@@ -479,4 +545,4 @@ function createEngine({
     };
 }
 
-module.exports = { createEngine, foldPage, durable, PAGE_TIMEOUT_MS };
+module.exports = { createEngine, foldPage, durable, PAGE_TIMEOUT_MS, KEEP_RUNS };
