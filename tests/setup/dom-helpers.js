@@ -7,7 +7,16 @@
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
-const { JSDOM } = require('jsdom');
+const { JSDOM, VirtualConsole } = require('jsdom');
+
+// Real Amazon pages carry CSS jsdom cannot parse; keep that out of test output.
+function quietConsole() {
+  const vc = new VirtualConsole();
+  vc.on('jsdomError', (err) => {
+    if (!/Could not parse CSS stylesheet/.test(err.message)) console.error(err);
+  });
+  return vc;
+}
 
 /**
  * Load a content script into a JSDOM context with Chrome API mocks.
@@ -19,7 +28,7 @@ const { JSDOM } = require('jsdom');
  * @returns {Object} VM context with all script functions accessible
  */
 function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=test&page=1') {
-  const dom = new JSDOM(html, { url, runScripts: 'outside-only' });
+  const dom = new JSDOM(html, { url, runScripts: 'outside-only', virtualConsole: quietConsole() });
 
   // Polyfill innerText (JSDOM doesn't implement it)
   if (!dom.window.HTMLElement.prototype.hasOwnProperty('innerText')) {
@@ -98,4 +107,4 @@ function wrapHTML(bodyContent) {
   return `<!DOCTYPE html><html><head></head><body>${bodyContent}</body></html>`;
 }
 
-module.exports = { loadContentScript, wrapHTML };
+module.exports = { loadContentScript, wrapHTML, quietConsole };
