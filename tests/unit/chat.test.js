@@ -41,6 +41,22 @@ describe('model id', () => {
             `https://generativelanguage.googleapis.com/v1beta/models/${Chat.GEMINI_MODEL}:generateContent`);
     });
 
+    test('no other source file hardcodes a Gemini model id', () => {
+        const root = path.join(__dirname, '..', '..', 'scripts');
+        const offenders = [];
+        const walk = (dir) => {
+            for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) walk(p);
+                else if (p.endsWith('.js') && !p.endsWith(path.join('lib', 'chat.js'))) {
+                    if (/gemini-\d/.test(fs.readFileSync(p, 'utf8'))) offenders.push(p);
+                }
+            }
+        };
+        walk(root);
+        expect(offenders).toEqual([]);
+    });
+
     test('manifest CSP connect-src covers the Gemini origin (F-61)', () => {
         const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'manifest.json'), 'utf8'));
         const connect = manifest.content_security_policy.extension_pages.match(/connect-src ([^;]*)/)[1].split(/\s+/);
