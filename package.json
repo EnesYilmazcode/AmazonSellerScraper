@@ -3,11 +3,16 @@
   "private": true,
   "scripts": {
     "build": "node tools/build.mjs",
+    "build:dev": "node tools/build.mjs --dev",
     "zip": "node tools/build.mjs && node tools/zip.mjs",
-    "test": "jest --verbose",
+    "test": "jest --verbose && npm run test:tools",
     "test:unit": "jest tests/unit --verbose",
     "test:integration": "jest tests/integration --verbose",
-    "test:coverage": "jest --coverage"
+    "test:tools": "node --test --test-concurrency=1 \"tools/tests/*.test.mjs\"",
+    "test:coverage": "jest --coverage",
+    "lock": "node tools/permission-lock.mjs && node tools/version-gate.mjs",
+    "scan:secrets": "node tools/secret-scan.mjs",
+    "check": "npm run build && npm run lock && npm run scan:secrets"
   },
   "devDependencies": {
     "adm-zip": "^0.5.17",

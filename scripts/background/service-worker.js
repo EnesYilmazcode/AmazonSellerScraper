@@ -24,21 +24,6 @@ import { syncToCloud } from './sync.js';
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
 /**
- * Fallback API key (base64-encoded). Used only when the user hasn't
- * configured their own key via the popup settings panel.
- * @const {string}
- * @private
- */
-const _t = 'QUl6YVN5RHdfOVhQLXRpQ0tLX3lkQThCd0ZrZUpxNWdTdTAxNUhj';
-
-/**
- * Decode the fallback API key.
- * @returns {string} Decoded API key
- * @private
- */
-const _dk = () => atob(_t);
-
-/**
  * Main message listener -- routes messages between extension components.
  *
  * Message types handled:
@@ -74,17 +59,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
  * Handle a chat message by calling the Gemini 2.0 Flash API.
  *
  * Builds a prompt with the system role, product context, and user question.
- * Uses the user's API key from chrome.storage if available, otherwise
- * falls back to the built-in key.
+ * Uses the user's API key from chrome.storage. There is no built-in key.
  *
  * @param {string} question - User's natural language question
  * @param {Object[]} products - Array of product objects for context
  * @returns {Promise<string>} AI-generated response text
- * @throws {Error} On invalid API key or Gemini API failure
+ * @throws {Error} On a missing or invalid API key, or Gemini API failure
  */
 async function handleChatMessage(question, products) {
     const data = await chrome.storage.local.get(['geminiApiKey']);
-    const apiKey = data.geminiApiKey || _dk();
+    const apiKey = data.geminiApiKey;
+    if (!apiKey) {
+        throw new Error('AI chat needs a Gemini API key, and none is set.');
+    }
 
     const productCount = products.length;
     const productList = products.map(p =>
