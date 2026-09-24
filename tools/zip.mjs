@@ -1,51 +1,40 @@
-// tools/zip.mjs — packages dist/ ONLY into proscan-v{manifest.version}.zip
-// at the repo root, behind three hard gates (each exits nonzero on failure):
+// tools/zip.mjs - packages dist/ ONLY into
+// dist-zips/proscan-v{version}-{sha}.zip, behind hard gates (any failure exits
+// nonzero and writes nothing):
 //
-//   1. ALLOWLIST       — every file under dist/ must be in the explicit
+//   1. ALLOWLIST       - every file under dist/ must be in the explicit
 //                        allowlist (the exact build output set; no sourcemaps,
 //                        no strays).
-//   2. LEGACY TRIPWIRE — no archive path may match a known legacy/dead-weight
-//                        pattern (v1 root files, server/, tests, docs, etc.).
-//   3. MANIFEST CLOSURE — every file manifest.json references must be present
-//                        in the archive.
+//   2. LEGACY TRIPWIRE - no archive path may match a known legacy/dead-weight
+//                        pattern (v1 root files, server/, tests, docs, zips).
+//   3. MANIFEST CLOSURE - every file manifest.json references must be present.
+//   4. PROD ONLY       - a dev build (emulator origins) never gets zipped.
+//   5. PERMISSION LOCK - nothing added over tools/live-manifest.json.
+//   6. VERSION GATE    - version above the live one.
+//   7. SECRET SCAN     - no API keys in the archive.
 //
-// Uses adm-zip; never shells out, never zips the repo root.
+// Uses adm-zip; never shells out for packaging, never zips the repo root.
 
 import AdmZip from 'adm-zip';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   COPY_FILES,
   BUNDLE_ENTRY,
   manifestClosureMissing,
+  htmlReferencesMissing,
   listFilesRecursive,
 } from './build.mjs';
+import { checkPermissionLock, LIVE_MANIFEST } from './permission-lock.mjs';
+import { compareVersions } from './version-gate.mjs';
+import { scanText } from './secret-scan.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
+export const ZIP_DIR = path.join(ROOT, 'dist-zips');
 
-function fail(gate, lines) {
-  console.error(`[zip] FAIL (${gate}):`);
-  for (const line of lines) console.error(`  - ${line}`);
-  process.exit(1);
-}
-
-if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
-  fail('PRECONDITION', ['dist/ is missing or has no manifest.json — run `npm run build` first.']);
-}
-
-// Archive contents = every file under dist/, recursively (forward-slash paths).
-const archivePaths = listFilesRecursive(DIST).sort();
-
-// ---- Gate 1: ALLOWLIST -----------------------------------------------------
-const ALLOWLIST = new Set([...COPY_FILES, BUNDLE_ENTRY, 'manifest.json']);
-const notAllowed = archivePaths.filter((p) => !ALLOWLIST.has(p));
-if (notAllowed.length > 0) {
-  fail('ALLOWLIST', notAllowed.map((p) => `unexpected file in dist/: ${p}`));
-}
-
-// ---- Gate 2: LEGACY TRIPWIRE -----------------------------------------------
 const LEGACY_PATTERNS = [
   /^(popup|background|contentscript)\.(js|html|css)$/, // legacy v1 root files
   /^icon(16|48|128)\.png$/,                            // legacy root icons
@@ -58,32 +47,94 @@ const LEGACY_PATTERNS = [
   /(^|\/)node_modules(\/|$)/,
   /(^|\/)\.pytest_cache(\/|$)/,
   /(^|\/)docs\//,
-  /(^|\/)README[^/]*$/,
-  /(^|\/)CLAUDE[^/]*$/,
+  /\.md$/i,
+  /\.(zip|crx)$/i,
+  /\.map$/,
+  /(^|\/)\.git(\/|$)/,
 ];
-const legacyHits = archivePaths.filter((p) => LEGACY_PATTERNS.some((re) => re.test(p)));
-if (legacyHits.length > 0) {
-  fail('LEGACY TRIPWIRE', legacyHits.map((p) => `legacy/dead-weight path in archive: ${p}`));
+
+/** Returns {gate: [problems]} for a built dist dir; empty object means all pass. */
+export function zipGateProblems(distDir) {
+  const problems = {};
+  const add = (gate, list) => {
+    if (list.length) problems[gate] = list;
+  };
+  const archivePaths = listFilesRecursive(distDir).sort();
+
+  const allow = new Set([...COPY_FILES, BUNDLE_ENTRY, 'manifest.json']);
+  add('ALLOWLIST', archivePaths.filter((p) => !allow.has(p)).map((p) => `unexpected file: ${p}`));
+  add('LEGACY TRIPWIRE', archivePaths
+    .filter((p) => LEGACY_PATTERNS.some((re) => re.test(p)))
+    .map((p) => `legacy/dead-weight path: ${p}`));
+  add('MANIFEST CLOSURE', [...manifestClosureMissing(distDir), ...htmlReferencesMissing(distDir)]);
+
+  const manifestText = fs.readFileSync(path.join(distDir, 'manifest.json'), 'utf8');
+  const manifest = JSON.parse(manifestText);
+  add('PROD ONLY', /localhost|127\.0\.0\.1/.test(manifestText)
+    ? ['manifest references a local host; this is a dev build (rebuild without PROSCAN_ENV=dev)']
+    : []);
+
+  const live = JSON.parse(fs.readFileSync(LIVE_MANIFEST, 'utf8'));
+  add('PERMISSION LOCK', checkPermissionLock(manifest, live));
+  let versionProblem = [];
+  try {
+    if (compareVersions(manifest.version, live.version) <= 0) {
+      versionProblem = [`version ${manifest.version} is not above the live ${live.version}`];
+    }
+  } catch (err) {
+    versionProblem = [err.message];
+  }
+  add('VERSION GATE', versionProblem);
+
+  const secrets = [];
+  for (const rel of archivePaths.filter((p) => !p.endsWith('.png'))) {
+    for (const h of scanText(fs.readFileSync(path.join(distDir, rel), 'utf8'))) {
+      secrets.push(`${rel}:${h.line} ${h.name}`);
+    }
+  }
+  add('SECRET SCAN', secrets);
+  return problems;
 }
 
-// ---- Gate 3: MANIFEST CLOSURE ----------------------------------------------
-// The archive contains exactly the files under dist/, so closure against
-// dist/ is closure against the archive.
-const missing = manifestClosureMissing(DIST);
-if (missing.length > 0) {
-  fail('MANIFEST CLOSURE', missing.map((p) => `manifest references file not in archive: ${p}`));
+function gitStamp() {
+  try {
+    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT }).toString().trim();
+    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT }).toString().trim();
+    return dirty ? `${sha}-dirty` : sha;
+  } catch {
+    return 'nogit';
+  }
 }
 
-// ---- Package ----------------------------------------------------------------
-const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'manifest.json'), 'utf8'));
-const outName = `proscan-v${manifest.version}.zip`;
-const outPath = path.join(ROOT, outName);
+function main() {
+  if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
+    console.error('[zip] FAIL: dist/ has no manifest.json. Run `npm run build` first.');
+    process.exit(1);
+  }
+  const problems = zipGateProblems(DIST);
+  if (Object.keys(problems).length) {
+    for (const [gate, list] of Object.entries(problems)) {
+      console.error(`[zip] FAIL (${gate}):`);
+      for (const line of list) console.error(`  - ${line}`);
+    }
+    process.exit(1);
+  }
 
-const zip = new AdmZip();
-for (const rel of archivePaths) {
-  const dir = path.posix.dirname(rel);
-  zip.addLocalFile(path.join(DIST, rel), dir === '.' ? '' : dir);
+  const archivePaths = listFilesRecursive(DIST).sort();
+  const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'manifest.json'), 'utf8'));
+  const outName = `proscan-v${manifest.version}-${gitStamp()}.zip`;
+  fs.mkdirSync(ZIP_DIR, { recursive: true });
+
+  const zip = new AdmZip();
+  for (const rel of archivePaths) {
+    const dir = path.posix.dirname(rel);
+    zip.addLocalFile(path.join(DIST, rel), dir === '.' ? '' : dir);
+  }
+  zip.writeZip(path.join(ZIP_DIR, outName));
+
+  console.log(`[zip] OK: dist-zips/${outName} (${archivePaths.length} files, all gates passed).`);
 }
-zip.writeZip(outPath);
 
-console.log(`[zip] OK: ${outName} (${archivePaths.length} files, all gates passed).`);
+const invokedDirectly =
+  process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main();
