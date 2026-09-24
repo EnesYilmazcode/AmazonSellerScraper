@@ -202,47 +202,31 @@ const Exporter = {
      * @returns {Object} XLSX.js worksheet object
      */
     createDataSheet(results) {
-        // Calculate averages
-        const validPrices = results
-            .map(r => parseFloat(String(r.price).replace(/[^0-9.]/g, '')))
-            .filter(p => !isNaN(p) && p > 0);
-        const validRatings = results
-            .map(r => parseFloat(r.rating))
-            .filter(r => !isNaN(r) && r > 0);
+        // Unknown values stay empty cells; only real numbers are averaged.
+        const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+        const mean = (values) => {
+            const known = values.filter(v => v !== null);
+            return known.length ? Math.round((known.reduce((a, b) => a + b, 0) / known.length) * 100) / 100 : null;
+        };
+        const rows = results.map(item => [
+            item.name || '',
+            item.asin || '',
+            this.priceDollars(item),
+            num(item.rating),
+            num(item.reviewCount)
+        ]);
 
-        const avgPrice = validPrices.length > 0
-            ? (validPrices.reduce((a, b) => a + b, 0) / validPrices.length).toFixed(2)
-            : 0;
-        const avgRating = validRatings.length > 0
-            ? (validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(2)
-            : 0;
-
-        // Build worksheet data
         const wsData = [
             ['Amazon Product Analysis Report', '', '', '', ''],
             [],
             ['Report Details', '', '', 'Summary Statistics', ''],
             ['Generated Date:', new Date().toLocaleDateString(), '', 'Total Products:', results.length],
-            ['Time:', new Date().toLocaleTimeString(), '', 'Average Rating:', parseFloat(avgRating)],
-            ['Status:', 'Complete', '', 'Average Price:', parseFloat(avgPrice)],
+            ['Time:', new Date().toLocaleTimeString(), '', 'Average Rating:', mean(rows.map(r => r[3]))],
+            ['Status:', 'Complete', '', 'Average Price:', mean(rows.map(r => r[2]))],
             [],
-            ['Product Name', 'ASIN', 'Price ($)', 'Rating', 'Review Count']
+            ['Product Name', 'ASIN', 'Price ($)', 'Rating', 'Review Count'],
+            ...rows
         ];
-
-        // Add data rows
-        results.forEach(item => {
-            const price = parseFloat(String(item.price).replace(/[^0-9.]/g, '')) || 0;
-            const rating = parseFloat(item.rating) || 0;
-            const reviewCount = parseInt(item.reviewCount) || 0;
-
-            wsData.push([
-                item.name || '',
-                item.asin || '',
-                price,
-                rating,
-                reviewCount
-            ]);
-        });
 
         const ws = XLSX.utils.aoa_to_sheet(wsData);
 
@@ -314,11 +298,12 @@ const Exporter = {
         // Add top opportunities if available
         if (analysisReport && analysisReport.topOpportunities) {
             analysisReport.topOpportunities.slice(0, 10).forEach(opp => {
+                const score = opp.opportunityScore;
                 chartData.push([
                     opp.name?.substring(0, 40) || '',
-                    opp.price || '',
-                    opp.rating || '',
-                    opp.opportunityScore?.toFixed(1) || ''
+                    this.priceDollars(opp),
+                    typeof opp.rating === 'number' ? opp.rating : null,
+                    typeof score === 'number' ? Math.round(score * 10) / 10 : null
                 ]);
             });
         }
