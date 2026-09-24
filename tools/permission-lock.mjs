@@ -14,12 +14,30 @@ export const LIVE_MANIFEST = path.join(ROOT, 'tools', 'live-manifest.json');
 
 // Keys that grant access on their own. Removing one is fine; adding or
 // changing one fails.
-const OPAQUE_KEYS = [
+export const OPAQUE_KEYS = [
   'externally_connectable',
   'chrome_url_overrides',
   'declarative_net_request',
   'oauth2',
   'key',
+];
+
+// Top-level keys a manifest may add over the live one. Every other new key
+// fails, so an unknown key (chrome_settings_overrides, devtools_page,
+// automation, ...) cannot slip past the lock.
+export const SAFE_NEW_KEYS = [
+  'author',
+  'background',
+  'content_security_policy',
+  'default_locale',
+  'description',
+  'homepage_url',
+  'icons',
+  'minimum_chrome_version',
+  'name',
+  'short_name',
+  'version',
+  'version_name',
 ];
 
 function contentScriptMatches(m) {
@@ -63,6 +81,14 @@ export function checkPermissionLock(candidate, live) {
   added('content_scripts', contentScriptMatches(candidate), contentScriptMatches(live));
   added('web_accessible_resources', warMatches(candidate), warMatches(live));
 
+  const checkedAbove = new Set([
+    'permissions', 'optional_permissions', 'host_permissions', 'optional_host_permissions',
+    'content_scripts', 'web_accessible_resources', ...OPAQUE_KEYS,
+  ]);
+  for (const key of Object.keys(candidate)) {
+    if (key in live || SAFE_NEW_KEYS.includes(key) || checkedAbove.has(key)) continue;
+    problems.push(`new manifest key "${key}"`);
+  }
   for (const key of OPAQUE_KEYS) {
     if (!(key in candidate)) continue;
     if (JSON.stringify(candidate[key]) !== JSON.stringify(live[key])) {

@@ -12,6 +12,9 @@
 //   5. PERMISSION LOCK - nothing added over tools/live-manifest.json.
 //   6. VERSION GATE    - version above the live one.
 //   7. SECRET SCAN     - no API keys in the archive.
+//   8. CLEAN TREE      - no uncommitted changes, so the zip matches a commit.
+//                        `--allow-dirty` overrides it for local experiments and
+//                        stamps the file name with -dirty.
 //
 // Uses adm-zip; never shells out for packaging, never zips the repo root.
 
@@ -96,17 +99,28 @@ export function zipGateProblems(distDir) {
   return problems;
 }
 
-function gitStamp() {
-  try {
-    const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT }).toString().trim();
-    const dirty = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT }).toString().trim();
-    return dirty ? `${sha}-dirty` : sha;
-  } catch {
-    return 'nogit';
-  }
+/** Returns {sha, dirty}; dirty lists `git status --porcelain` lines. */
+export function gitState(cwd = ROOT) {
+  const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd }).toString().trim();
+  const dirty = execFileSync('git', ['status', '--porcelain'], { cwd }).toString().split(/\r?\n/).filter(Boolean);
+  return { sha, dirty };
 }
 
-function main() {
+function main(argv) {
+  const allowDirty = argv.includes('--allow-dirty');
+  let git;
+  try {
+    git = gitState();
+  } catch (err) {
+    console.error(`[zip] FAIL (CLEAN TREE): cannot read git state (${err.message}).`);
+    process.exit(1);
+  }
+  if (git.dirty.length && !allowDirty) {
+    console.error('[zip] FAIL (CLEAN TREE): uncommitted changes; commit them or pass --allow-dirty:');
+    for (const line of git.dirty.slice(0, 20)) console.error(`  - ${line}`);
+    process.exit(1);
+  }
+
   if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
     console.error('[zip] FAIL: dist/ has no manifest.json. Run `npm run build` first.');
     process.exit(1);
@@ -122,7 +136,7 @@ function main() {
 
   const archivePaths = listFilesRecursive(DIST).sort();
   const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'manifest.json'), 'utf8'));
-  const outName = `proscan-v${manifest.version}-${gitStamp()}.zip`;
+  const outName = `proscan-v${manifest.version}-${git.sha}${git.dirty.length ? '-dirty' : ''}.zip`;
   fs.mkdirSync(ZIP_DIR, { recursive: true });
 
   const zip = new AdmZip();
@@ -137,4 +151,4 @@ function main() {
 
 const invokedDirectly =
   process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (invokedDirectly) main();
+if (invokedDirectly) main(process.argv.slice(2));

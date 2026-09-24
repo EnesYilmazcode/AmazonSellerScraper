@@ -66,3 +66,23 @@ test('CSP changes are not permissions and pass', () => {
   m.content_security_policy.extension_pages += "; connect-src 'self' https://firestore.googleapis.com";
   assert.deepEqual(checkPermissionLock(m, live), []);
 });
+
+test('any new top-level key outside the safe list fails', () => {
+  for (const [key, value] of [
+    ['chrome_settings_overrides', { search_provider: { name: 'x', keyword: 'x', search_url: 'https://x.test/?q={searchTerms}', favicon_url: 'https://x.test/f.ico', encoding: 'UTF-8', is_default: true } }],
+    ['automation', { desktop: true }],
+    ['devtools_page', 'devtools.html'],
+    ['sandbox', { pages: ['sandbox.html'] }],
+  ]) {
+    const m = clone();
+    m[key] = value;
+    assert.match(checkPermissionLock(m, live).join(' | '), new RegExp(`new manifest key "${key}"`), key);
+  }
+});
+
+test('safe new keys such as minimum_chrome_version pass', () => {
+  const m = clone();
+  m.minimum_chrome_version = '116';
+  m.version_name = '2.1 beta';
+  assert.deepEqual(checkPermissionLock(m, live), []);
+});

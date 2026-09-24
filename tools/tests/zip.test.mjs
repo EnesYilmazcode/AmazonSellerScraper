@@ -54,3 +54,21 @@ test('a key in the bundle is refused', async () => {
   fs.appendFileSync(swPath, `\nconst _t = '${key}';\n`);
   assert.ok(zipGateProblems(dir)['SECRET SCAN']);
 });
+
+test('gitState reports uncommitted changes', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { gitState } = await import('../zip.mjs');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'proscan-git-'));
+  try {
+    const git = (...a) => execFileSync('git', a, { cwd: repo });
+    git('init', '-q');
+    fs.writeFileSync(path.join(repo, 'a.txt'), '1');
+    git('add', '.');
+    git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'a');
+    assert.deepEqual(gitState(repo).dirty, []);
+    fs.appendFileSync(path.join(repo, 'a.txt'), '2');
+    assert.equal(gitState(repo).dirty.length, 1);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
