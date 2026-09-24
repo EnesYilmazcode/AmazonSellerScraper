@@ -467,6 +467,7 @@ function sendToWorker(message) {
 function showSignedIn(user) {
     currentProScanUser = user;
     elements.authStatusEmail.textContent = user.email || user.displayName || 'Signed in';
+    document.getElementById('authSummary').textContent = 'Syncing to dashboard';
     elements.authForm.classList.add('hidden');
     elements.authAccount.classList.remove('hidden');
     elements.authError.classList.add('hidden');
@@ -510,6 +511,9 @@ function showSignInForm(notice = null) {
         ? 'Your session expired. Sign in again to keep syncing; your scans are kept.'
         : '';
     elements.authNotice.classList.toggle('hidden', notice !== 'expired');
+    document.getElementById('authSummary').textContent = 'Dashboard sync (optional)';
+    // An expired session is the one case worth unfolding the panel for.
+    if (notice === 'expired') document.getElementById('authPanel').open = true;
     elements.authForm.classList.remove('hidden');
     elements.authError.classList.add('hidden');
     elements.authError.textContent = '';

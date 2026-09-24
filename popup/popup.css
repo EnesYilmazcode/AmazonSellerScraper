@@ -490,6 +490,16 @@ h1 {
     color: var(--color-text-primary);
 }
 
+#authPanel {
+    margin-top: var(--spacing-md);
+}
+
+.auth-help {
+    font-size: var(--font-size-sm);
+    opacity: 0.7;
+    margin-bottom: var(--spacing-sm);
+}
+
 /* AI chat settings */
 .ai-settings summary {
     cursor: pointer;

@@ -277,9 +277,13 @@ test('with cloud sync off, the popup shows no sign-in and no Export to ProScan',
   expect(resp.error).toMatch(/not available/);
 });
 
-test('with cloud sync on, the popup offers sign-in, sign-up and a password reset', async ({ ext }) => {
+test('with cloud sync on, sign-in is folded away and offers sign-up and a password reset', async ({ ext }) => {
   test.skip(!Flags.CLOUD_SYNC, 'cloud sync is off in this build');
   const popup = await extPage(ext);
+  await expect(popup.locator('#actionButton')).toBeVisible();
+  await expect(popup.locator('#authPanel')).toBeVisible();
+  await expect(popup.locator('#authForm')).toBeHidden();
+  await popup.click('#authPanel summary');
   await expect(popup.locator('#authForm')).toBeVisible();
   await expect(popup.locator('#authSignUpLink')).toHaveAttribute('href', /^https:\/\/proscanbot\.web\.app\/dashboard\//);
   await expect(popup.locator('#authResetBtn')).toBeVisible();
