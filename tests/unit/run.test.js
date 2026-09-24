@@ -66,6 +66,12 @@ describe('Run.outcome', () => {
     expect(Run.outcome(page(kind, kind === 'last' ? {} : { products: [] }), 2, 20)).toBe(reason);
   });
 
+  test('cards that all fail to parse mean the selectors broke, even on the last page', () => {
+    expect(Run.outcome(page('results', { products: [] }), 1, 20)).toBe('selectors_broken');
+    expect(Run.outcome(page('last', { products: [] }), 1, 20)).toBe('selectors_broken');
+    expect(Run.outcome(page('results', { fill: { asin: 1, title: 0, price: 0 } }), 20, 20)).toBe('selectors_broken');
+  });
+
   test('cards with neither titles nor prices mean the selectors broke', () => {
     expect(Run.outcome(page('results', { fill: { asin: 1, title: 0, price: 0.2 } }), 1, 20)).toBe('selectors_broken');
     expect(Run.outcome(page('results', { fill: { asin: 1, title: 1, price: 0.2 } }), 1, 20)).toBeNull();

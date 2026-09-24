@@ -87,18 +87,18 @@ const Run = (() => {
             case 'unknown':
                 return 'interrupted';
             case 'empty':
+                return 'complete';
             case 'last':
-                break;
             case 'results':
-                if (!page.nextHref || pageNumber >= maxPages) return 'complete';
                 break;
             default:
                 return 'selectors_broken';
         }
-        if (page.products.length > 0 && page.fill && page.fill.title < 0.5 && page.fill.price < 0.5) {
-            return 'selectors_broken';
-        }
-        return page.kind === 'results' ? null : 'complete';
+        // Result cards were found, so none parsing means the selectors broke.
+        if (page.products.length === 0) return 'selectors_broken';
+        if (page.fill && page.fill.title < 0.5 && page.fill.price < 0.5) return 'selectors_broken';
+        if (page.kind === 'last' || !page.nextHref || pageNumber >= maxPages) return 'complete';
+        return null;
     }
 
     /** Wait before the next page: 2 to 4 seconds. */
