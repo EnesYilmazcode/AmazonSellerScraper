@@ -107,11 +107,11 @@ export async function syncToCloud(uid, bundle) {
       const payload = {
         asin: q.asin, // rules: doc id must equal this
         mk,
-        name: q.name,
-        url: q.url,
+        url: `https://www.amazon.com/dp/${q.asin}`,
         latest: { ...pointFrom(q), at, runId, dayKey }, // rules require latest.dayKey:string
         sourceIds: arrayUnion(sourceId),
       };
+      if (typeof q.name === 'string' && q.name) payload.name = q.name;
       const d = deltaBlock(q);
       if (d) payload.delta = d;
       if (q.delta && q.delta.isNew) {
@@ -153,9 +153,13 @@ export async function syncToCloud(uid, bundle) {
       pagesDone: bundle.scrapeRunPages ? bundle.scrapeRunPages.length : null,
       pagesPlanned: bundle.scrapeRunPages ? bundle.scrapeRunPages.length : null,
       counters: {
-        placements: queue.length,
+        // Each queued product is one ASIN; its placements list every card it had
+        placements: queue.reduce((n, q) => n + (Array.isArray(q.placements) ? q.placements.length : 1), 0),
         uniqueAsins: new Set(queue.map((q) => q.asin)).size,
-        sponsored: 0,
+        sponsored: queue.reduce(
+          (n, q) => n + (Array.isArray(q.placements) ? q.placements.filter((pl) => pl.sponsored).length : q.sponsored ? 1 : 0),
+          0,
+        ),
         priceParseFailures: queue.filter((q) => q.priceCents == null).length,
         newSeen: queue.filter((q) => q.delta && q.delta.isNew).length,
       },
