@@ -179,9 +179,11 @@ AmazonSellerScraper/
 │   └── popup.js                  # UI state management and export handling
 ├── scripts/
 │   ├── content/
-│   │   ├── scraper.js            # DOM scraping with cascading selectors
+│   │   ├── scraper.js            # Scrape loop: storage, messages, pagination
 │   │   ├── chatbot.js            # Floating AI chatbot (Shadow DOM)
 │   │   └── offer-fetcher.js      # Seller offer page fetching for spread analysis
+│   ├── lib/
+│   │   └── parsers.js            # Pure search and offer page parsing
 │   ├── background/
 │   │   └── service-worker.js     # Message routing + Gemini API
 │   └── modules/

@@ -15,6 +15,8 @@
  * @module Analyzer
  */
 
+const AnalyzerParsers = typeof Parsers !== 'undefined' ? Parsers : require('../lib/parsers.js');
+
 const Analyzer = {
     /**
      * Parse a price string into a numeric value.
@@ -28,8 +30,7 @@ const Analyzer = {
      * Analyzer.parsePrice("N/A")       // => 0
      */
     parsePrice(priceStr) {
-        if (!priceStr || priceStr === 'N/A') return 0;
-        return parseFloat(String(priceStr).replace(/[^0-9.]/g, '')) || 0;
+        return AnalyzerParsers.toDollars(priceStr);
     },
 
     /**
@@ -39,8 +40,7 @@ const Analyzer = {
      * @returns {number} Numeric rating, or 0 if unparseable
      */
     parseRating(rating) {
-        if (!rating || rating === 'N/A') return 0;
-        return parseFloat(rating) || 0;
+        return AnalyzerParsers.toRating(rating);
     },
 
     /**
@@ -51,8 +51,7 @@ const Analyzer = {
      * @returns {number} Integer review count, or 0 if unparseable
      */
     parseReviewCount(count) {
-        if (!count) return 0;
-        return parseInt(String(count).replace(/[^0-9]/g, '')) || 0;
+        return AnalyzerParsers.toReviewCount(count);
     },
 
     /**
