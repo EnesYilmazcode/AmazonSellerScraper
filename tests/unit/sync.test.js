@@ -1,217 +1,204 @@
 /**
- * @fileoverview Offline unit test for scripts/background/sync.js syncToCloud.
+ * @jest-environment node
  *
- * sync.js is authored as ESM and bundled into the service worker by esbuild.
- * Here it is loaded through a tiny scoped Jest transform (see jest.config.js)
- * that rewrites its import/export to CommonJS, with firebase/firestore and the
- * firebase-init db fully mocked so the test never touches a real Firebase.
- *
- * We assert syncToCloud issues the cloud-schema writes the dashboard depends on
- * (products/{asin} with latest + delta, products/{asin}/history/daily,
- * runs/{runId}, sources/{sourceId}) and returns {written, runId, products}.
+ * scripts/background/sync.js over fake-indexeddb and an in-memory Firestore
+ * that applies set and mergeFields the way Firestore does. The contract test
+ * (tests/contract) runs the same module against the real emulator and rules.
  */
+jest.mock('firebase/firestore', () => ({}));
 
-// ── Mock firebase/firestore: record every doc path and set() payload. ──
-// All recording state lives INSIDE the factory (Jest hoists jest.mock above
-// the file, so the factory may not close over outer variables) and is exposed
-// via __writes / __committed / __reset on the mocked module.
-jest.mock('firebase/firestore', () => {
-  const writes = [];
-  const state = { committed: 0 };
-  const makeBatch = () => ({
-    set(ref, data, opts) {
-      writes.push({ path: ref.__path, data, opts });
-    },
-    async commit() {
-      state.committed++;
-    },
-  });
-  return {
-    // doc(db, 'workspaces', uid, 'products', asin, ...) -> ref carrying its path
-    doc: (_db, ...segments) => ({ __path: segments.join('/') }),
-    writeBatch: () => makeBatch(),
-    serverTimestamp: () => ({ __sentinel: 'serverTimestamp' }),
-    arrayUnion: (...vals) => ({ __arrayUnion: vals }),
-    Timestamp: { fromDate: (d) => ({ __ts: d.toISOString() }) },
-    // test-only handles
-    __writes: writes,
-    __state: state,
-    __reset: () => {
-      writes.length = 0;
-      state.committed = 0;
+require('fake-indexeddb/auto');
+const DB = require('../../scripts/background/db');
+const { createSync, isAuthError } = require('../../scripts/background/sync.js');
+
+const START = Date.parse('2026-06-21T10:00:00.000Z');
+const RUN_ID = `k_wireless-mouse_${START}`;
+
+/** A tiny Firestore: documents in a Map, keyed by path. */
+function fakeFirestore({ failCommit = () => false } = {}) {
+  const docs = new Map();
+  let commits = 0;
+  class FieldPath { constructor(...segs) { this.segs = segs; } }
+  const setPath = (obj, segs, value) => {
+    let o = obj;
+    segs.slice(0, -1).forEach((s) => { o[s] = o[s] && typeof o[s] === 'object' ? o[s] : {}; o = o[s]; });
+    o[segs[segs.length - 1]] = value;
+  };
+  const getPath = (obj, segs) => segs.reduce((o, s) => (o == null ? undefined : o[s]), obj);
+  const resolve = (v) => (v && v.__union ? v.__union : v);
+  const copy = (v) => (Array.isArray(v) ? v.map(copy)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, copy(x)])) : v);
+  const fs = {
+    doc: (_db, ...path) => ({ path: path.join('/') }),
+    getDoc: async (ref) => ({ exists: () => docs.has(ref.path) }),
+    Timestamp: { fromMillis: (ms) => ({ toMillis: () => ms, ms }) },
+    arrayUnion: (...vals) => ({ __union: vals }),
+    FieldPath,
+    writeBatch: () => {
+      const ops = [];
+      return {
+        set(ref, data, opts) { ops.push({ ref, data, opts }); },
+        async commit() {
+          if (failCommit(ops)) throw Object.assign(new Error('unavailable'), { code: 'unavailable' });
+          commits++;
+          for (const { ref, data, opts } of ops) {
+            if (!opts) { docs.set(ref.path, copy(data)); continue; }
+            const cur = docs.get(ref.path) || {};
+            for (const f of opts.mergeFields) {
+              const segs = f instanceof FieldPath ? f.segs : [f];
+              let v = getPath(data, segs);
+              if (v && v.__union) v = [...new Set([...(getPath(cur, segs) || []), ...resolve(v)])];
+              setPath(cur, segs, copy(v));
+            }
+            docs.set(ref.path, cur);
+          }
+        },
+      };
     },
   };
-});
-
-// ── Mock the firebase-init db (sync.js imports { db } from it) ──
-jest.mock('../../scripts/background/firebase-init.js', () => ({ db: { __db: true } }), {
-  virtual: true,
-});
-
-const firestoreMock = require('firebase/firestore');
-const writes = firestoreMock.__writes;
-const { syncToCloud } = require('../../scripts/background/sync.js');
-
-const UID = 'user_abc';
-
-function seedBundle() {
-  return {
-    scrapeRunMeta: {
-      type: 'keyword',
-      keyword: 'wireless mouse',
-      sellerId: null,
-      url: 'https://www.amazon.com/s?k=wireless+mouse',
-      startedAt: '2026-06-21T10:00:00.000Z',
-    },
-    scrapeRunPages: [{ pageIndex: 0 }, { pageIndex: 1 }],
-    syncQueue: [
-      {
-        // first-sight product
-        asin: 'B0NEW00001',
-        name: 'New Mouse',
-        url: 'https://www.amazon.com/dp/B0NEW00001',
-        priceCents: 1999,
-        rating: 4.5,
-        reviewCount: 120,
-        isPrime: true,
-        scrapedAt: '2026-06-21T10:00:05.000Z',
-        delta: { isNew: true, dPriceCents: null, dRating: null, dReviews: null },
-      },
-      {
-        // returning product with a price drop
-        asin: 'B0SEEN00002',
-        name: 'Seen Mouse',
-        url: 'https://www.amazon.com/dp/B0SEEN00002',
-        priceCents: 1799,
-        rating: 4.2,
-        reviewCount: 300,
-        isPrime: false,
-        scrapedAt: '2026-06-21T10:00:06.000Z',
-        delta: { isNew: false, dPriceCents: -200, dRating: 0, dReviews: 20 },
-      },
-    ],
-  };
+  return { fs, docs, commits: () => commits };
 }
 
-const findWrite = (path) => writes.find((w) => w.path === path);
+let dbCount = 0;
+async function storeWith({ products = 3, perPage = 2, uid = 'u1', state = 'running' } = {}) {
+  const store = await DB.open({ name: `sync-test-${++dbCount}` });
+  const pages = Math.ceil(products / perPage);
+  const ops = [{
+    store: 'runs',
+    put: {
+      runId: RUN_ID, sourceId: 'k_wireless-mouse', dayKey: '2026-06-21', state, reason: state === 'done' ? 'complete' : null,
+      source: { type: 'keyword', sellerId: null, keyword: 'wireless mouse', url: 'https://www.amazon.com/s?k=wireless+mouse' },
+      startedAt: START, finishedAt: state === 'done' ? START + 1000 : null, page: pages, maxPages: 20,
+    },
+  }];
+  for (let n = 0; n < products; n++) {
+    const page = Math.floor(n / perPage) + 1;
+    ops.push({
+      store: 'products',
+      put: {
+        runId: RUN_ID, n, pageIndex: page, asin: `B0${String(n).padStart(8, '0')}`, name: `Mouse ${n}`,
+        priceCents: 1000 + n, rating: 4.5, reviewCount: 10, isPrime: true, sponsored: false, organicRank: n + 1,
+        scrapedAt: new Date(START + n).toISOString(), placements: [{ page, position: 1, sponsored: false, rank: n + 1 }],
+        delta: { isNew: true, dPriceCents: null, dRating: null, dReviews: null }, prev: null,
+      },
+    });
+  }
+  for (let page = 1; page <= pages; page++) {
+    ops.push({ store: 'placements', put: { runId: RUN_ID, pageIndex: page, count: perPage, placements: perPage, kind: 'results', scrapedAt: new Date(START).toISOString(), total: products } });
+    ops.push({ store: 'outbox', put: { runId: RUN_ID, kind: 'page', pageIndex: page, uid, queuedAt: START } });
+  }
+  if (state === 'done') ops.push({ store: 'outbox', put: { runId: RUN_ID, kind: 'run', uid, queuedAt: START } });
+  await store.write(ops);
+  return store;
+}
 
-describe('sync.js — syncToCloud', () => {
-  beforeEach(() => {
-    firestoreMock.__reset();
-  });
+const quiet = { warn() {}, log() {}, error() {} };
 
-  test('returns {written:0, runId:null, products:0} for an empty queue', async () => {
-    const res = await syncToCloud(UID, { syncQueue: [] });
-    expect(res).toEqual({ written: 0, runId: null, products: 0 });
-    expect(writes).toHaveLength(0);
-  });
+test('a flush writes every queued page and empties the outbox', async () => {
+  const store = await storeWith({ products: 3, perPage: 2, state: 'done' });
+  const cloud = fakeFirestore();
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  const totals = await sync.flush('u1');
+  // page 1: chunk + 2x2 + run + source; page 2: chunk + 1x2 + run + source; end: run + source
+  expect(totals).toEqual({ entries: 3, pages: 2, runs: 1, products: 3, writes: 7 + 5 + 2 });
+  expect(await store.count('outbox')).toBe(0);
+  const run = cloud.docs.get(`workspaces/u1/runs/${RUN_ID}`);
+  expect(run).toMatchObject({ status: 'complete', pagesDone: 2, pagesPlanned: 2, counters: { uniqueAsins: 3 } });
+  expect(cloud.docs.get('workspaces/u1/products/B000000002').sourceIds).toEqual(['k_wireless-mouse']);
+  expect(cloud.docs.has(`workspaces/u1/runs/${RUN_ID}/pages/p0002`)).toBe(true);
+  expect(cloud.docs.get('workspaces/u1/sources/k_wireless-mouse')).toMatchObject({ lastRunId: RUN_ID, catalogSize: 3 });
+});
 
-  test('derives a canonical keyword runId/sourceId from run meta', async () => {
-    const res = await syncToCloud(UID, seedBundle());
-    const sourceId = 'k_wireless-mouse';
-    const startMs = Date.parse('2026-06-21T10:00:00.000Z');
-    expect(res.runId).toBe(`${sourceId}_${startMs}`);
-  });
+test('a new product gets firstSeenAt, and a second flush never moves it (F-29b)', async () => {
+  const store = await storeWith({ products: 1, perPage: 1 });
+  const cloud = fakeFirestore();
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  await sync.flush('u1');
+  const first = cloud.docs.get('workspaces/u1/products/B000000000');
+  expect(first.firstSeenAt.ms).toBe(START);
+  expect(first.firstRunId).toBe(RUN_ID);
 
-  test('writes products/{asin} with latest (incl. dayKey) + sourceIds', async () => {
-    await syncToCloud(UID, seedBundle());
-    const p = findWrite(`workspaces/${UID}/products/B0NEW00001`);
-    expect(p).toBeDefined();
-    expect(p.opts).toEqual({ merge: true });
-    expect(p.data.asin).toBe('B0NEW00001');
-    expect(p.data.mk).toBe('US');
-    expect(p.data.latest.p).toBe(1999);
-    expect(p.data.latest.pr).toBe(1); // isPrime -> 1
-    expect(p.data.latest.dayKey).toBe('2026-06-21');
-    expect(p.data.sourceIds).toEqual({ __arrayUnion: ['k_wireless-mouse'] });
-    // first-sight stamps present on a new product
-    expect(p.data.firstRunId).toBeDefined();
-    expect(p.data.firstSeenAt).toBeDefined();
-  });
+  // The same product again, as after a reinstall: new locally, known in the cloud.
+  cloud.docs.get('workspaces/u1/products/B000000000').firstSeenAt = { ms: 1, toMillis: () => 1 };
+  await store.write([{ store: 'outbox', put: { runId: RUN_ID, kind: 'page', pageIndex: 1, uid: 'u1', queuedAt: START } }]);
+  await sync.flush('u1');
+  expect(cloud.docs.get('workspaces/u1/products/B000000000').firstSeenAt.ms).toBe(1);
+});
 
-  test('writes a delta block for a returning product, not for a new one', async () => {
-    await syncToCloud(UID, seedBundle());
-    const seen = findWrite(`workspaces/${UID}/products/B0SEEN00002`);
-    const fresh = findWrite(`workspaces/${UID}/products/B0NEW00001`);
-    expect(seen.data.delta).toMatchObject({ p: -200, v: 20 });
-    expect(seen.data.delta.pPct).toBeCloseTo(-10, 1); // -200 on prior 1999
-    expect(fresh.data.delta).toBeUndefined();
-    expect(fresh.data.firstRunId).toBeDefined();
-    // returning product gets no first-sight stamp
-    expect(seen.data.firstRunId).toBeUndefined();
-  });
+test('an entry leaves the outbox only after its own commit (F-22)', async () => {
+  const store = await storeWith({ products: 4, perPage: 2 });
+  let calls = 0;
+  const cloud = fakeFirestore({ failCommit: () => ++calls === 2 });
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  await expect(sync.flush('u1')).rejects.toMatchObject({ code: 'unavailable' });
+  expect((await store.getAll('outbox')).map((e) => e.pageIndex)).toEqual([2]);
+  await sync.flush('u1');
+  expect(await store.count('outbox')).toBe(0);
+  expect(cloud.docs.has(`workspaces/u1/runs/${RUN_ID}/pages/p0002`)).toBe(true);
+});
 
-  test('writes the date-keyed history/daily point per product', async () => {
-    await syncToCloud(UID, seedBundle());
-    const h = findWrite(`workspaces/${UID}/products/B0NEW00001/history/daily`);
-    expect(h).toBeDefined();
-    expect(h.opts).toEqual({ merge: true });
-    expect(h.data.d['2026-06-21']).toMatchObject({ p: 1999, r: 4.5, v: 120, pr: 1 });
-  });
+test('a page queued during a flush is written before it returns (F-22)', async () => {
+  const store = await storeWith({ products: 2, perPage: 2 });
+  const cloud = fakeFirestore();
+  let appended = false;
+  const onBatch = async () => {
+    if (appended) return;
+    appended = true;
+    await store.write([
+      { store: 'products', put: { runId: RUN_ID, n: 2, pageIndex: 2, asin: 'B0LATE0001', priceCents: 5, isPrime: false, placements: [{ page: 2, position: 1, sponsored: false, rank: 3 }], delta: { isNew: true }, prev: null, scrapedAt: new Date(START).toISOString() } },
+      { store: 'placements', put: { runId: RUN_ID, pageIndex: 2, count: 1, placements: 1, kind: 'last', scrapedAt: new Date(START).toISOString() } },
+      { store: 'outbox', put: { runId: RUN_ID, kind: 'page', pageIndex: 2, uid: 'u1', queuedAt: START } },
+    ]);
+  };
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, onBatch, log: quiet });
+  const totals = await sync.flush('u1');
+  expect(totals.pages).toBe(2);
+  expect(await store.count('outbox')).toBe(0);
+  expect(cloud.docs.get('workspaces/u1/products/B0LATE0001').latest.p).toBe(5);
+});
 
-  test('writes the run header doc with counters', async () => {
-    await syncToCloud(UID, seedBundle());
-    const startMs = Date.parse('2026-06-21T10:00:00.000Z');
-    const runId = `k_wireless-mouse_${startMs}`;
-    const run = findWrite(`workspaces/${UID}/runs/${runId}`);
-    expect(run).toBeDefined();
-    expect(run.data.runId).toBe(runId);
-    expect(run.data.sourceId).toBe('k_wireless-mouse');
-    expect(run.data.status).toBe('complete');
-    expect(run.data.dayKey).toBe('2026-06-21');
-    expect(run.data.counters.placements).toBe(2);
-    expect(run.data.counters.uniqueAsins).toBe(2);
-    expect(run.data.counters.newSeen).toBe(1);
-    expect(run.data.pagesDone).toBe(2);
-  });
+test('a second flush while one runs waits for it and does not write twice', async () => {
+  const store = await storeWith({ products: 2, perPage: 1 });
+  const cloud = fakeFirestore();
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  const [a, b] = await Promise.all([sync.flush('u1'), sync.flush('u1')]);
+  expect(a).toBe(b);
+  expect(a.pages).toBe(2);
+  expect(cloud.commits()).toBe(2);
+});
 
-  test('counts every placement and sponsored card, and skips a missing name (F-27, F-28)', async () => {
-    const bundle = seedBundle();
-    bundle.syncQueue[0].placements = [
-      { page: 1, position: 1, sponsored: true, rank: null },
-      { page: 1, position: 4, sponsored: false, rank: 3 },
-    ];
-    bundle.syncQueue[1].name = null;
-    bundle.syncQueue[1].url = 'https://www.amazon.com/sspa/click?url=x';
-    await syncToCloud(UID, bundle);
-    const startMs = Date.parse('2026-06-21T10:00:00.000Z');
-    const run = findWrite(`workspaces/${UID}/runs/k_wireless-mouse_${startMs}`);
-    expect(run.data.counters).toMatchObject({ placements: 3, uniqueAsins: 2, sponsored: 1 });
-    const seen = findWrite(`workspaces/${UID}/products/B0SEEN00002`);
-    expect(seen.data).not.toHaveProperty('name');
-    expect(seen.data.url).toBe('https://www.amazon.com/dp/B0SEEN00002');
-  });
+test('entries of another account are left alone (F-29e)', async () => {
+  const store = await storeWith({ products: 2, perPage: 2, uid: 'someone-else' });
+  const cloud = fakeFirestore();
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  expect(await sync.pending('u1')).toBe(0);
+  expect(await sync.flush('u1')).toMatchObject({ entries: 0, writes: 0 });
+  expect(cloud.docs.size).toBe(0);
+  expect(await sync.pending('someone-else')).toBe(1);
+  expect(await sync.flush(null)).toMatchObject({ entries: 0 });
+});
 
-  test('writes the source spine doc with lastRunId', async () => {
-    await syncToCloud(UID, seedBundle());
-    const src = findWrite(`workspaces/${UID}/sources/k_wireless-mouse`);
-    expect(src).toBeDefined();
-    expect(src.data.sourceId).toBe('k_wireless-mouse');
-    expect(src.data.type).toBe('keyword');
-    expect(src.data.keyword).toBe('wireless mouse');
-    expect(src.data.lastRunId).toMatch(/^k_wireless-mouse_/);
-  });
+test('big pages are split into batches under the Firestore limit', async () => {
+  const store = await storeWith({ products: 60, perPage: 60 });
+  const cloud = fakeFirestore();
+  const sizes = [];
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, batchLimit: 50, onBatch: async ({ writes }) => sizes.push(writes), log: quiet });
+  const totals = await sync.flush('u1');
+  expect(totals.writes).toBe(1 + 120 + 2);
+  expect(sizes).toEqual([50, 50, 23]);
+});
 
-  test('returns the expected write tally (2 per product + 2 headers)', async () => {
-    const res = await syncToCloud(UID, seedBundle());
-    expect(res.products).toBe(2);
-    expect(res.written).toBe(2 * 2 + 2); // products*2 + run + source
-    // every batch was committed (1 product batch + 1 header batch)
-    expect(firestoreMock.__state.committed).toBe(2);
-  });
+test('an entry whose run is gone is dropped', async () => {
+  const store = await DB.open({ name: `sync-test-${++dbCount}` });
+  await store.write([{ store: 'outbox', put: { runId: 'gone', kind: 'page', pageIndex: 1, uid: 'u1' } }]);
+  const sync = createSync({ db: {}, openStore: async () => store, fs: fakeFirestore().fs, log: quiet });
+  expect(await sync.flush('u1')).toMatchObject({ entries: 1, pages: 0 });
+  expect(await store.count('outbox')).toBe(0);
+});
 
-  test('derives a storefront sourceId (s_{sellerId}) from seller meta', async () => {
-    const bundle = seedBundle();
-    bundle.scrapeRunMeta = {
-      type: 'storefront',
-      sellerId: 'A123XYZ',
-      keyword: null,
-      startedAt: '2026-06-21T10:00:00.000Z',
-    };
-    await syncToCloud(UID, bundle);
-    const src = findWrite(`workspaces/${UID}/sources/s_A123XYZ`);
-    expect(src).toBeDefined();
-    expect(src.data.type).toBe('storefront');
-    expect(src.data.sellerId).toBe('A123XYZ');
-  });
+test('auth errors are told apart from network errors', () => {
+  expect(isAuthError({ code: 'permission-denied' })).toBe(true);
+  expect(isAuthError({ code: 'auth/user-token-expired' })).toBe(true);
+  expect(isAuthError({ code: 'unavailable' })).toBe(false);
+  expect(isAuthError(null)).toBe(false);
 });

@@ -11,12 +11,16 @@ jest.mock('../../scripts/background/firebase-init.js', () => ({
 jest.mock('firebase/auth/web-extension', () => ({
   onAuthStateChanged: (auth, cb) => { cb(auth.currentUser); return () => {}; },
   signInWithEmailAndPassword: async () => ({}),
+  sendPasswordResetEmail: async () => {},
   signOut: async () => {},
 }), { virtual: true });
-jest.mock('../../scripts/background/sync.js', () => ({ syncToCloud: jest.fn(async () => ({ written: 1 })) }));
+jest.mock('../../scripts/background/sync.js', () => {
+  const flush = jest.fn(async () => ({ entries: 0, pages: 0, runs: 0, products: 0, writes: 0 }));
+  return { createSync: () => ({ flush, pending: async () => 0 }), isAuthError: () => false, __flush: flush };
+});
 
 require('fake-indexeddb/auto');
-const { syncToCloud } = require('../../scripts/background/sync.js');
+const { __flush: flush } = require('../../scripts/background/sync.js');
 const DB = require('../../scripts/background/db');
 
 const fs = require('fs');
@@ -58,7 +62,7 @@ test('one router answers every message', () => {
 test('Export to ProScan is refused while cloud sync is off', async () => {
   const resp = await send({ type: 'PROSCAN_EXPORT' });
   expect(resp.error).toMatch(/not available/);
-  expect(syncToCloud).not.toHaveBeenCalled();
+  expect(flush).not.toHaveBeenCalled();
 });
 
 test('messages meant for the popup or a tab are left alone', async () => {
