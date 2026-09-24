@@ -221,7 +221,7 @@ exports[`current price, rating and review parsers rating and review strings 1`] 
 
 exports[`current scraper behavior on the corpus 2026-02/aod-synthetic 1`] = `
 {
-  "currentItemCount": 0,
+  "currentItemCount": undefined,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/gp/aod/ajax?asin=B0TEST001&page=2&ref=sr_pg_2",
@@ -230,7 +230,9 @@ exports[`current scraper behavior on the corpus 2026-02/aod-synthetic 1`] = `
   "isScrapingActive": false,
   "nav": [],
   "results": [],
+  "runPage": 0,
   "runPages": [],
+  "runStatus": "interrupted",
   "sent": [
     "SCRAPING_COMPLETE",
   ],
@@ -239,7 +241,7 @@ exports[`current scraper behavior on the corpus 2026-02/aod-synthetic 1`] = `
 
 exports[`current scraper behavior on the corpus 2026-02/offer-classic-synthetic 1`] = `
 {
-  "currentItemCount": 0,
+  "currentItemCount": undefined,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/gp/offer-listing/B0TEST001?page=2&ref=sr_pg_2",
@@ -248,7 +250,9 @@ exports[`current scraper behavior on the corpus 2026-02/offer-classic-synthetic 
   "isScrapingActive": false,
   "nav": [],
   "results": [],
+  "runPage": 0,
   "runPages": [],
+  "runStatus": "interrupted",
   "sent": [
     "SCRAPING_COMPLETE",
   ],
@@ -286,6 +290,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-lastpage 1`] = `
       "url": "https://www.amazon.com/dp/B0LAST001/ref=sr_1_1",
     },
   ],
+  "runPage": 1,
   "runPages": [
     {
       "count": 1,
@@ -293,6 +298,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-lastpage 1`] = `
       "url": "https://www.amazon.com/s?k=test+widgets&page=5",
     },
   ],
+  "runStatus": "complete",
   "sent": [
     "UPDATE_PROGRESS",
     "ENQUEUE_SYNC",
@@ -391,6 +397,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
       "url": "https://www.amazon.com/dp/B0TEST004/ref=sr_1_4",
     },
   ],
+  "runPage": 1,
   "runPages": [
     {
       "count": 4,
@@ -398,6 +405,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
       "url": "https://www.amazon.com/s?k=test+widgets",
     },
   ],
+  "runStatus": "running",
   "sent": [
     "UPDATE_PROGRESS",
     "ENQUEUE_SYNC",
@@ -407,7 +415,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
 
 exports[`current scraper behavior on the corpus 2026-09/aod-pinned-only 1`] = `
 {
-  "currentItemCount": 0,
+  "currentItemCount": undefined,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/gp/product/ajax/aodAjaxMain/?asin=B09B8V1LZ3&page=2&ref=sr_pg_2",
@@ -416,7 +424,9 @@ exports[`current scraper behavior on the corpus 2026-09/aod-pinned-only 1`] = `
   "isScrapingActive": false,
   "nav": [],
   "results": [],
+  "runPage": 0,
   "runPages": [],
+  "runStatus": "interrupted",
   "sent": [
     "SCRAPING_COMPLETE",
   ],
@@ -425,7 +435,7 @@ exports[`current scraper behavior on the corpus 2026-09/aod-pinned-only 1`] = `
 
 exports[`current scraper behavior on the corpus 2026-09/captcha-synthetic 1`] = `
 {
-  "currentItemCount": 0,
+  "currentItemCount": undefined,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/s?k=yoga+mat&page=4&ref=sr_pg_4",
@@ -434,7 +444,9 @@ exports[`current scraper behavior on the corpus 2026-09/captcha-synthetic 1`] = 
   "isScrapingActive": false,
   "nav": [],
   "results": [],
+  "runPage": 0,
   "runPages": [],
+  "runStatus": "blocked",
   "sent": [
     "SCRAPING_COMPLETE",
   ],
@@ -443,7 +455,7 @@ exports[`current scraper behavior on the corpus 2026-09/captcha-synthetic 1`] = 
 
 exports[`current scraper behavior on the corpus 2026-09/interstitial-akamai 1`] = `
 {
-  "currentItemCount": 0,
+  "currentItemCount": undefined,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/s?k=usb+c+cable&page=3&ref=sr_pg_3",
@@ -452,7 +464,9 @@ exports[`current scraper behavior on the corpus 2026-09/interstitial-akamai 1`] 
   "isScrapingActive": false,
   "nav": [],
   "results": [],
+  "runPage": 0,
   "runPages": [],
+  "runStatus": "blocked",
   "sent": [
     "SCRAPING_COMPLETE",
   ],
@@ -461,7 +475,7 @@ exports[`current scraper behavior on the corpus 2026-09/interstitial-akamai 1`] 
 
 exports[`current scraper behavior on the corpus 2026-09/product-dp 1`] = `
 {
-  "currentItemCount": 0,
+  "currentItemCount": undefined,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/dp/B09B8V1LZ3?page=2&ref=sr_pg_2",
@@ -470,7 +484,9 @@ exports[`current scraper behavior on the corpus 2026-09/product-dp 1`] = `
   "isScrapingActive": false,
   "nav": [],
   "results": [],
+  "runPage": 0,
   "runPages": [],
+  "runStatus": "interrupted",
   "sent": [
     "SCRAPING_COMPLETE",
   ],
@@ -527,6 +543,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
       "url": "https://www.amazon.com/Rare-Widget-2/dp/B0ONLYONE2/ref=sr_1_2",
     },
   ],
+  "runPage": 1,
   "runPages": [
     {
       "count": 2,
@@ -534,6 +551,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
       "url": "https://www.amazon.com/s?k=rare+widget",
     },
   ],
+  "runStatus": "complete",
   "sent": [
     "UPDATE_PROGRESS",
     "ENQUEUE_SYNC",
@@ -632,6 +650,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
       "url": "https://www.amazon.com/Acme-Widget/dp/B0SPONS001/ref=sr_1_4",
     },
   ],
+  "runPage": 1,
   "runPages": [
     {
       "count": 4,
@@ -639,6 +658,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
       "url": "https://www.amazon.com/s?k=widget",
     },
   ],
+  "runStatus": "running",
   "sent": [
     "UPDATE_PROGRESS",
     "ENQUEUE_SYNC",
@@ -1990,6 +2010,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "url": "https://www.amazon.com/sspa/click?ie=UTF8&spc=x&url=%2FGruper-TPE-Blue-Black-Yoga-Mat%2Fdp%2FB0HF4FK2QS%2Fref%3Dsxbs_pa_sp_search_thematic_btf_sspa%3Fcontent-id%3Damzn1.sym.230701df-77c6-4675-b11d-39cf91b8bb1b%253Aamzn1.sym.230701df-77c6-4675-b11d-39cf91b8bb1b%26cv_ct_cx%3Dyoga%2Bmat%26keywords%3Dyoga%2Bmat%26pd_rd_i%3DB0HF4FK2QS%26pd_rd_r%3Dde21bbd9-1795-44ef-a802-9f896189ba48%26pd_rd_w%3DjO2FJ%26pd_rd_wg%3DgaFhJ%26pf_rd_p%3D230701df-77c6-4675-b11d-39cf91b8bb1b%26pf_rd_r%3DP96Q3KMBPB9SP02HFAJV%26qid%3D1790222636%26sbo%3DRZvfv%252F%252FHxDF%252BO5021pAnSA%253D%253D%26sr%3D1-5-2111c337-e22b-460d-97fe-5be1c77b95e4-spons%26aref%3DRf9xQFU1RZ%26sp_csd%3Dd2lkZ2V0TmFtZT1zcF9zZWFyY2hfdGhlbWF0aWNfYnRm%26psc%3D1&aref=x",
     },
   ],
+  "runPage": 1,
   "runPages": [
     {
       "count": 70,
@@ -1997,6 +2018,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "url": "https://www.amazon.com/s?k=yoga+mat",
     },
   ],
+  "runStatus": "running",
   "sent": [
     "UPDATE_PROGRESS",
     "ENQUEUE_SYNC",

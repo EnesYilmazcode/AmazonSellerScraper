@@ -30,6 +30,7 @@ export const COPY_FILES = [
   'scripts/content/chatbot.js',
   'scripts/content/offer-fetcher.js',
   'scripts/lib/parsers.js',
+  'scripts/lib/run.js',
   'scripts/modules/price.js',
   'scripts/modules/delta.js',
   'scripts/modules/storage.js',

@@ -6,6 +6,7 @@
     <script src="../libs/xlsx.full.min.js"></script>
     <script src="../scripts/modules/price.js"></script>
     <script src="../scripts/lib/parsers.js"></script>
+    <script src="../scripts/lib/run.js"></script>
     <script src="../scripts/modules/storage.js"></script>
     <script src="../scripts/modules/analyzer.js"></script>
     <script src="../scripts/modules/spread-analyzer.js"></script>
@@ -91,6 +92,10 @@
         <div class="status" id="status">
             <i class="fas fa-info-circle"></i> Ready to start
         </div>
+
+        <button id="reloadTabButton" class="spread-button hidden">
+            <i class="fas fa-rotate-right"></i> Reload the tab and start
+        </button>
 
         <button id="actionButton" class="primary-button">
             <i class="fas fa-play"></i> Start Scraping

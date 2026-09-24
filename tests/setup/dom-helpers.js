@@ -84,7 +84,7 @@ function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=t
   // declarations share one lexical environment only within a single
   // runInContext call, so they are concatenated ahead of the target script.
   let preamble = '';
-  for (const rel of ['scripts/modules/price.js', 'scripts/lib/parsers.js', 'scripts/modules/delta.js']) {
+  for (const rel of ['scripts/modules/price.js', 'scripts/lib/parsers.js', 'scripts/lib/run.js', 'scripts/modules/delta.js']) {
     const dep = path.resolve(__dirname, '../../', rel);
     if (fs.existsSync(dep)) preamble += fs.readFileSync(dep, 'utf8') + '\n';
   }

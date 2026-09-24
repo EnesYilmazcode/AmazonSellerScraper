@@ -11,8 +11,9 @@
  * - currentResults: full array of scraped product objects
  *
  * Communication:
- * - Sends START_SCRAPING / STOP_SCRAPING to content script via chrome.tabs
+ * - Pings the tab, then sends START_SCRAPING / STOP_SCRAPING to the run's tab
  * - Receives UPDATE_PROGRESS, SCRAPING_COMPLETE, PAGE_COMPLETE from content script
+ * - Renders the run's end from the run record (scripts/lib/run.js)
  *
  * @module PopupUI
  * @requires Storage
@@ -49,6 +50,7 @@ const elements = {
     avgPrice: document.getElementById('avgPrice'),
     status: document.getElementById('status'),
     actionButton: document.getElementById('actionButton'),
+    reloadTabButton: document.getElementById('reloadTabButton'),
     exportButtons: document.getElementById('exportButtons'),
     downloadExcel: document.getElementById('downloadExcel'),
     downloadCSV: document.getElementById('downloadCSV'),
@@ -208,16 +210,32 @@ function setDownloadLoading(button, loading) {
  */
 async function initializeUI() {
     const state = await Storage.getScrapingState();
+    let run = await Storage.get(Run.KEY);
 
-    isScrapingActive = state.isActive;
+    // A run whose tab stopped checking in, or a flag left by an older
+    // version with no run record, is not running.
+    if (Run.isStale(run)) {
+        run = Run.finish(run, 'interrupted');
+        await Storage.setMultiple({ [Run.KEY]: run, [Storage.KEYS.IS_SCRAPING]: false });
+    } else if (state.isActive && !Run.isActive(run)) {
+        await Storage.set(Storage.KEYS.IS_SCRAPING, false);
+    }
+
+    isScrapingActive = Run.isActive(run);
     scrapedItemCount = state.itemCount;
     currentResults = state.results;
 
     updateStats(currentResults);
     setScrapingState(isScrapingActive);
 
-    if (!isScrapingActive && currentResults.length > 0) {
+    const line = Run.describe(run, currentResults.length);
+    if (line && (isScrapingActive || run.status !== 'complete')) {
+        updateStatus(line.text, line.type);
+    } else if (!isScrapingActive && currentResults.length > 0) {
         updateStatus('Ready to download ' + currentResults.length + ' products', 'success');
+    }
+
+    if (!isScrapingActive && currentResults.length > 0) {
         elements.spreadButton.classList.remove('hidden');
 
         // Check if spread results already exist
@@ -230,23 +248,64 @@ async function initializeUI() {
     }
 }
 
+/** The tab the popup was opened over, or null. */
+function activeTab() {
+    return new Promise(resolve => {
+        chrome.tabs.query({ active: true, currentWindow: true }, tabs => resolve((tabs && tabs[0]) || null));
+    });
+}
+
+/** Sends `message` to tab `tabId`; resolves null when nothing answers. */
+function sendToTab(tabId, message) {
+    return new Promise(resolve => {
+        try {
+            chrome.tabs.sendMessage(tabId, message, response => {
+                if (chrome.runtime.lastError) return resolve(null);
+                resolve(response || null);
+            });
+        } catch (e) {
+            resolve(null);
+        }
+    });
+}
+
+const AMAZON_URL = /^https:\/\/([a-z0-9-]+\.)*amazon\.com\//i;
+
 /**
  * Start a new scraping session.
- * Resets storage and UI state, then sends START_SCRAPING to the active tab.
+ *
+ * Pings the tab first and changes nothing if the content script is not
+ * there (an open tab keeps the old script after an update) or the page is
+ * not a search. Only then are the old results cleared and a run bound to
+ * this tab.
  *
  * @async
  */
 async function startScraping() {
-    isScrapingActive = true;
+    elements.reloadTabButton.classList.add('hidden');
+    const tab = await activeTab();
+    if (!tab || !AMAZON_URL.test(tab.url || '')) {
+        updateStatus(Run.refusal('unknown'), 'warning');
+        return;
+    }
 
+    const pong = await sendToTab(tab.id, { type: 'PING' });
+    if (!pong || !pong.ok) {
+        offerReload(tab.id);
+        return;
+    }
+    if (!Run.STARTABLE.includes(pong.kind)) {
+        updateStatus(Run.refusal(pong.kind), 'warning');
+        return;
+    }
+
+    const settings = (await Storage.get(Storage.KEYS.SETTINGS)) || {};
     await Storage.resetForNewScrape();
-
-    chrome.tabs.query({ active: true, currentWindow: true }, async tabs => {
-        // Mint a run id (with storefront/keyword source metadata from the tab
-        // URL) before the content script begins; it persists across pagination.
-        await Storage.beginRun(tabs[0] && tabs[0].url);
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SCRAPING' });
-    });
+    // Mint a run id (with storefront/keyword source metadata from the tab
+    // URL) before the content script begins; it persists across pagination.
+    const runId = await Storage.beginRun(tab.url);
+    const run = Run.create({ runId, tabId: tab.id, maxPages: settings.maxPages });
+    await Storage.set(Run.KEY, run);
 
     // Reset UI
     elements.itemCount.textContent = '0';
@@ -254,24 +313,86 @@ async function startScraping() {
     elements.avgPrice.textContent = '-';
     elements.insightsPreview.classList.add('hidden');
     currentResults = [];
-
+    scrapedItemCount = 0;
     updateStatus('Scraping in progress...', 'info');
     setScrapingState(true);
+
+    const ack = await sendToTab(tab.id, { type: 'START_SCRAPING', runId, tabId: tab.id });
+    if (!ack || ack.status !== 'started') {
+        await Storage.setMultiple({ [Run.KEY]: Run.finish(run, 'interrupted'), [Storage.KEYS.IS_SCRAPING]: false });
+        updateStatus('The tab stopped responding. Reload it and try again.', 'error');
+        setScrapingState(false);
+    }
 }
 
 /**
- * Stop the current scraping session gracefully.
- * Updates storage and transitions the UI to the idle/download state.
+ * The tab has no live content script. Offer to reload it, then start once
+ * the reloaded page has finished loading.
+ *
+ * @param {number} tabId
+ */
+function offerReload(tabId) {
+    updateStatus('ProScan is not running on this tab yet. Reload the tab to start.', 'warning');
+    elements.reloadTabButton.classList.remove('hidden');
+    elements.reloadTabButton.onclick = () => {
+        elements.reloadTabButton.classList.add('hidden');
+        updateStatus('Reloading the tab...', 'info');
+        const onUpdated = (id, info) => {
+            if (id !== tabId || info.status !== 'complete') return;
+            chrome.tabs.onUpdated.removeListener(onUpdated);
+            startWhenReady(tabId, 10);
+        };
+        chrome.tabs.onUpdated.addListener(onUpdated);
+        chrome.tabs.reload(tabId);
+    };
+}
+
+/** Starts once the reloaded tab answers a ping, trying a few times. */
+async function startWhenReady(tabId, tries) {
+    const pong = await sendToTab(tabId, { type: 'PING' });
+    if (pong && pong.ok) return startScraping();
+    if (tries <= 1) {
+        updateStatus('The tab still does not answer. Close it and open the search again.', 'error');
+        return;
+    }
+    setTimeout(() => startWhenReady(tabId, tries - 1), 300);
+}
+
+/**
+ * Stop the current run. STOP goes to the run's own tab, which cancels its
+ * pending page and records the run as stopped. If the tab is gone, the
+ * popup records it.
  *
  * @async
  */
 async function stopScraping() {
-    isScrapingActive = false;
+    const run = await Storage.get(Run.KEY);
+    const ack = Run.isActive(run) ? await sendToTab(run.tabId, { type: 'STOP_SCRAPING', runId: run.runId }) : null;
+    if (!ack || !ack.stopped) {
+        const latest = await Storage.get(Run.KEY);
+        const updates = { [Storage.KEYS.IS_SCRAPING]: false };
+        if (Run.isActive(latest)) updates[Run.KEY] = Run.finish(latest, 'stopped');
+        await Storage.setMultiple(updates);
+    }
+    showRunEnd();
+}
 
-    await Storage.set(Storage.KEYS.IS_SCRAPING, false);
-
-    updateStatus('Scraping stopped. Ready to download.', 'warning');
+/**
+ * Show how the last run ended, from the run record, and return the UI to
+ * the idle state. Safe to call more than once.
+ */
+async function showRunEnd() {
+    const run = await Storage.get(Run.KEY);
+    if (Run.isActive(run)) return;
+    const results = await Storage.getResults();
+    currentResults = results;
+    updateStats(currentResults);
+    const line = Run.describe(run, results.length) || { text: 'Scraping stopped.', type: 'warning' };
+    updateStatus(line.text, line.type);
     setScrapingState(false);
+    if (results.length > 0) {
+        elements.spreadButton.classList.remove('hidden');
+    }
 }
 
 // --- Spread Analysis ---
@@ -542,10 +663,16 @@ elements.spreadButton.addEventListener('click', () => {
 
 // Action button: toggle scraping on/off
 elements.actionButton.addEventListener('click', async () => {
-    if (!isScrapingActive) {
-        await startScraping();
-    } else {
-        await stopScraping();
+    // One click at a time: start waits on the tab before it changes anything.
+    elements.actionButton.disabled = true;
+    try {
+        if (!isScrapingActive) {
+            await startScraping();
+        } else {
+            await stopScraping();
+        }
+    } finally {
+        elements.actionButton.disabled = false;
     }
 });
 
@@ -651,16 +778,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         updateStatus('Scraping in progress... ' + scrapedItemCount + ' items', 'info');
     } else if (request.type === 'SCRAPING_COMPLETE') {
-        Storage.getResults().then(results => {
-            currentResults = results;
-            updateStats(currentResults);
-            updateStatus('Scraping complete! ' + results.length + ' products found.', 'success');
-            setScrapingState(false);
-            // Show spread analysis button
-            if (results.length > 0) {
-                elements.spreadButton.classList.remove('hidden');
-            }
-        });
+        showRunEnd();
     } else if (request.type === 'PAGE_COMPLETE') {
         scrapedItemCount += request.itemsScraped;
         elements.itemCount.textContent = scrapedItemCount;
@@ -675,6 +793,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         elements.spreadButton.classList.remove('stop');
         displaySpreadResults();
     }
+});
+
+// A run can end while the popup is open without a message reaching it
+// (the tab closed, another popup stopped it), so follow the record too.
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local' || !changes[Run.KEY]) return;
+    const run = changes[Run.KEY].newValue;
+    if (isScrapingActive && run && !Run.isActive(run)) showRunEnd();
 });
 
 // Initialize on DOM load
