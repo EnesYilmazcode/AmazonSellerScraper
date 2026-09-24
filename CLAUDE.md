@@ -95,7 +95,7 @@ AmazonSellerScraper/
 
 ## Testing
 
-### JavaScript (Jest + JSDOM) — 214 tests
+### JavaScript (Jest + JSDOM)
 
 ```bash
 npm test              # Run all JS tests
