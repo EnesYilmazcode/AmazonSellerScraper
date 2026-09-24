@@ -99,6 +99,18 @@ describe('Parsers.scrapeProduct fields', () => {
     expect(Parsers.scrapeProduct(one(html)).sponsored).toBe(true);
   });
 
+  test('the title is the linked h2, not the brand h2 above it (F-17)', () => {
+    const html = '<div class="s-result-item" data-asin="B0T1"><h2><span>Acme</span></h2><a href="/dp/B0T1"><h2><span>Acme Widget Pro</span></h2></a></div>';
+    expect(Parsers.scrapeProduct(one(html)).name).toBe('Acme Widget Pro');
+  });
+
+  test('a unit price or list price is not the price (F-17)', () => {
+    const html = '<div class="s-result-item" data-asin="B0U1">'
+      + '<span class="a-price a-text-price"><span class="a-offscreen">$0.35</span></span>'
+      + '<div data-cy="secondary-offer-recipe"><span class="a-price"><span class="a-offscreen">$8.99</span></span></div></div>';
+    expect(Parsers.scrapeProduct(one(html)).priceCents).toBeNull();
+  });
+
   test('a plain card is not sponsored', () => {
     expect(Parsers.scrapeProduct(one(card('B0ORG', '$1.00'))).sponsored).toBe(false);
   });

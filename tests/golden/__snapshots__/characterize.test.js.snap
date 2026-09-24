@@ -597,7 +597,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
         "isNew": true,
       },
       "isPrime": false,
-      "name": "Acme",
+      "name": "Acme Widget Pro, 6 ft, Braided",
       "pageIndex": 1,
       "price": "$12.99",
       "priceCents": 1299,
@@ -631,7 +631,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
     },
     {
       "asin": "B0UNITONLY",
-      "currency": "USD",
+      "currency": null,
       "delta": {
         "dPriceCents": null,
         "dRating": null,
@@ -641,8 +641,8 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
       "isPrime": false,
       "name": "Bulk pack of widgets, 24 count",
       "pageIndex": 1,
-      "price": "$0.35",
-      "priceCents": 35,
+      "price": null,
+      "priceCents": null,
       "rating": null,
       "reviewCount": null,
       "runId": "run-golden",

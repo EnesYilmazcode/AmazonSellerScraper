@@ -24,8 +24,6 @@ const KNOWN = {
   },
   '2026-09/search-title-recipe-synthetic': {
     'each ASIN once': 'F-27',
-    'spot B0SPONS001': 'F-17',
-    'spot B0UNITONLY': 'F-17',
   },
   '2026-09/aod-pinned-only': {
     'seller prices': 'F-30',

@@ -21,11 +21,16 @@ const Parsers = (() => {
         // Filtered to exclude empty ASINs (ad placeholders)
         productItem: '.s-result-item[data-asin]:not([data-asin=""])',
 
+        // The title h2 sits inside the product link; a brand line is its own h2 before it
+        titleLinked: 'a h2',
+        titleRecipe: '[data-cy="title-recipe"] h2',
         title: 'h2 span',
         titleAlt: '.a-size-base-plus.a-color-base.a-text-normal',
 
         price: '.a-price[data-a-size="xl"] .a-offscreen',
-        priceAlt: '.a-price .a-offscreen',
+        // a-text-price is a unit or strikethrough list price, never the buy price
+        priceAlt: '.a-price:not(.a-text-price) .a-offscreen',
+        secondaryOffer: '[data-cy="secondary-offer-recipe"]',
 
         rating: '[data-cy="reviews-ratings-slot"] .a-icon-alt',
         ratingAlt: '.a-icon-star-mini .a-icon-alt',
@@ -72,10 +77,20 @@ const Parsers = (() => {
         return el ? el.innerText.trim() : null;
     }
 
+    /** The product title, skipping a separate brand h2. Null if none. */
+    function extractTitle(element) {
+        const linked = element.querySelector(SEARCH_SELECTORS.titleLinked);
+        const recipe = element.querySelectorAll(SEARCH_SELECTORS.titleRecipe);
+        const el = linked || recipe[recipe.length - 1];
+        const text = el ? el.innerText.trim() : '';
+        return text || getText(element, SEARCH_SELECTORS.title, SEARCH_SELECTORS.titleAlt) || null;
+    }
+
     /** Display price string such as "$19.99", or null. */
     function extractPrice(element) {
         const priceEl = element.querySelector(SEARCH_SELECTORS.price) ||
-                        element.querySelector(SEARCH_SELECTORS.priceAlt);
+                        [...element.querySelectorAll(SEARCH_SELECTORS.priceAlt)]
+                            .find(el => !el.closest(SEARCH_SELECTORS.secondaryOffer));
 
         if (priceEl) {
             const text = priceEl.innerText || priceEl.textContent;
@@ -181,7 +196,7 @@ const Parsers = (() => {
         const asin = listing.dataset.asin;
         if (!asin) return null;
 
-        const title = getText(listing, SEARCH_SELECTORS.title, SEARCH_SELECTORS.titleAlt) || null;
+        const title = extractTitle(listing);
         const rawPrice = extractPrice(listing);
         // Only a dollar price counts; anything else keeps its currency and no amount.
         const priceCents = PriceLib.usdToCents(rawPrice);
@@ -376,6 +391,7 @@ const Parsers = (() => {
         OFFER_SELECTORS,
         priceToCents: (input) => PriceLib.priceToCents(input),
         getText,
+        extractTitle,
         extractPrice,
         parseRatingText,
         extractRating,
