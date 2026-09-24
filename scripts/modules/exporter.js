@@ -35,58 +35,102 @@ const Exporter = {
         return `${sanitizedName}_scraped_data_${date}.${format}`;
     },
 
+    /** A cell starting with one of these runs as a formula in a spreadsheet. */
+    FORMULA_START: /^[=+\-@\t\r]/,
+
     /**
-     * Export product data as CSV.
-     * Includes proper escaping for fields containing commas or quotes.
-     * If spread data is available, includes spread columns.
+     * One CSV cell (RFC 4180). Text is always quoted, with inner quotes
+     * doubled, and text that a spreadsheet would run as a formula gets a
+     * leading apostrophe. Numbers are written bare; null is an empty cell.
+     *
+     * @param {*} value
+     * @returns {string}
+     */
+    csvCell(value) {
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+        let text = String(value);
+        if (this.FORMULA_START.test(text)) text = "'" + text;
+        return '"' + text.replace(/"/g, '""') + '"';
+    },
+
+    /**
+     * The product's price in dollars, or null when it has no USD price.
+     * Uses priceCents; older records carry only the display string.
+     *
+     * @param {Object} item
+     * @returns {number|null}
+     */
+    priceDollars(item) {
+        let cents = item ? item.priceCents : null;
+        if (cents === undefined) {
+            const P = typeof Price !== 'undefined' ? Price : require('./price.js');
+            cents = typeof item.price === 'number' ? P.priceToCents(item.price) : P.usdToCents(item.price);
+        }
+        return typeof cents === 'number' && Number.isFinite(cents) ? cents / 100 : null;
+    },
+
+    /**
+     * Export product data as CSV: UTF-8 with a BOM so Excel reads accents
+     * and symbols, CRLF line ends, and every field through csvCell. Price
+     * is a plain number of dollars. If spread data is available, includes
+     * spread columns.
      *
      * @param {Object[]} results - Array of product objects
      * @param {Object} [spreadResults=null] - Optional map of ASIN → spread data
      * @returns {{blob: Blob, filename: string}} CSV blob and suggested filename
      */
     exportToCSV(results, spreadResults = null) {
+        return {
+            blob: new Blob([this.buildCSV(results, spreadResults)], { type: 'text/csv;charset=utf-8;' }),
+            filename: this.getFileName(results, 'csv')
+        };
+    },
+
+    /**
+     * The CSV text behind exportToCSV.
+     *
+     * @param {Object[]} results
+     * @param {Object} [spreadResults=null]
+     * @returns {string}
+     */
+    buildCSV(results, spreadResults = null) {
         const hasSpread = spreadResults && Object.keys(spreadResults).length > 0;
-        const headers = ['Product Name', 'ASIN', 'Price', 'Rating', 'Review Count', 'URL'];
+        const headers = ['Product Name', 'ASIN', 'Price (USD)', 'Rating', 'Review Count', 'URL'];
         if (hasSpread) {
             headers.push('Seller Count', 'Min Offer', 'Max Offer', 'Price Spread', 'CV %', 'Arbitrage Score');
         }
-        const rows = [headers.join(',')];
+        const num = (v) => (typeof v === 'number' ? v : null);
+        const rows = [headers];
 
         results.forEach(item => {
             const row = [
-                `"${(item.name || '').replace(/"/g, '""')}"`,
-                item.asin || '',
-                item.price || '',
-                item.rating || '',
-                item.reviewCount || '',
-                `"${item.url || ''}"`
+                item.name,
+                item.asin,
+                this.priceDollars(item),
+                num(item.rating),
+                num(item.reviewCount),
+                item.url
             ];
 
             if (hasSpread) {
                 const spread = spreadResults[item.asin];
-                if (spread && spread.sellerPrices && typeof SpreadAnalyzer !== 'undefined') {
-                    const metrics = SpreadAnalyzer.calculateSpread(spread.sellerPrices);
-                    if (metrics) {
-                        const score = SpreadAnalyzer.calculateArbitrageScore(metrics);
-                        row.push(metrics.sellerCount, metrics.minPrice, metrics.maxPrice,
-                                 metrics.absoluteSpread, metrics.coefficientOfVariation, score);
-                    } else {
-                        row.push('', '', '', '', '', '');
-                    }
+                const metrics = spread && spread.sellerPrices && typeof SpreadAnalyzer !== 'undefined'
+                    ? SpreadAnalyzer.calculateSpread(spread.sellerPrices)
+                    : null;
+                if (metrics) {
+                    row.push(metrics.sellerCount, metrics.minPrice, metrics.maxPrice,
+                             metrics.absoluteSpread, metrics.coefficientOfVariation,
+                             SpreadAnalyzer.calculateArbitrageScore(metrics));
                 } else {
-                    row.push('', '', '', '', '', '');
+                    row.push(null, null, null, null, null, null);
                 }
             }
 
-            rows.push(row.join(','));
+            rows.push(row);
         });
 
-        const csvContent = rows.join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        return {
-            blob,
-            filename: this.getFileName(results, 'csv')
-        };
+        return '\uFEFF' + rows.map(row => row.map(v => this.csvCell(v)).join(',')).join('\r\n') + '\r\n';
     },
 
     /**
