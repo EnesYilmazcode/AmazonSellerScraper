@@ -6,14 +6,15 @@
  * Depends on Storage, Analyzer, and Exporter modules loaded via popup.html.
  *
  * State Management:
- * - isScrapingActive: tracks whether a scrape is in progress
- * - scrapedItemCount: running total across paginated pages
- * - currentResults: full array of scraped product objects
+ * The service worker owns the run and everything it found. The popup never
+ * writes either: it asks the worker (GET_STATE) and renders the whole view
+ * from the run record it gets back, and again whenever the record in
+ * chrome.storage.session changes.
  *
  * Communication:
- * - Pings the tab, then sends START_SCRAPING / STOP_SCRAPING to the run's tab
- * - Receives UPDATE_PROGRESS, SCRAPING_COMPLETE, PAGE_COMPLETE from content script
- * - Renders the run's end from the run record (scripts/lib/run.js)
+ * - START_RUN / STOP_RUN / GET_STATE to the worker (scripts/lib/messages.js)
+ * - PING to a tab that did not answer, to start after a reload
+ * - SPREAD_PROGRESS and SPREAD_ANALYSIS_COMPLETE from the offer fetcher
  *
  * @module PopupUI
  * @requires Storage
@@ -24,11 +25,14 @@
 /** @type {boolean} Whether scraping is currently in progress */
 let isScrapingActive = false;
 
-/** @type {number} Running count of scraped items across all pages */
-let scrapedItemCount = 0;
-
-/** @type {Object[]} Full array of scraped product objects */
+/** @type {Object[]} Products of the latest run, from the worker */
 let currentResults = [];
+
+/** @type {Object} Spread data of the latest run, ASIN to offers */
+let currentSpread = {};
+
+/** @type {number} Page of the live run the results were last fetched for */
+let renderedPage = -1;
 
 /** @type {boolean} Whether spread analysis is currently running */
 let isSpreadAnalyzing = false;
@@ -202,56 +206,65 @@ function setDownloadLoading(button, loading) {
 }
 
 /**
- * Initialize the popup UI from persisted storage state.
- * Called on DOMContentLoaded to restore scraping state, results,
- * and dashboard stats from the previous session.
+ * Render the whole view from the worker's state: the run record, its
+ * products and its spread data.
  *
- * @async
+ * @param {{run: ?Object, results: Object[], spread: Object}} state
  */
-async function initializeUI() {
-    const state = await Storage.getScrapingState();
-    let run = await Storage.get(Run.KEY);
-
-    // A run whose tab stopped checking in, or a flag left by an older
-    // version with no run record, is not running.
-    if (Run.isStale(run)) {
-        run = Run.finish(run, 'interrupted');
-        await Storage.setMultiple({ [Run.KEY]: run, [Storage.KEYS.IS_SCRAPING]: false });
-    } else if (state.isActive && !Run.isActive(run)) {
-        await Storage.set(Storage.KEYS.IS_SCRAPING, false);
-    }
-
+function render(state) {
+    const run = (state && state.run) || null;
+    currentResults = (state && state.results) || [];
+    currentSpread = (state && state.spread) || {};
     isScrapingActive = Run.isActive(run);
-    scrapedItemCount = state.itemCount;
-    currentResults = state.results;
+    renderedPage = run ? run.page : -1;
 
+    elements.itemCount.textContent = currentResults.length;
+    elements.avgRating.textContent = '-';
+    elements.avgPrice.textContent = '-';
+    elements.insightsPreview.classList.add('hidden');
     updateStats(currentResults);
     setScrapingState(isScrapingActive);
 
     const line = Run.describe(run, currentResults.length);
-    if (line && (isScrapingActive || run.status !== 'complete')) {
+    if (line && (isScrapingActive || run.reason !== 'complete')) {
         updateStatus(line.text, line.type);
-    } else if (!isScrapingActive && currentResults.length > 0) {
+    } else if (currentResults.length > 0) {
         updateStatus('Ready to download ' + currentResults.length + ' products', 'success');
     }
 
-    const usage = await Storage.usage().catch(() => null);
-    if (usage && usage.nearFull && !isScrapingActive) {
-        const pct = Math.round((usage.bytes / usage.quota) * 100);
-        updateStatus(`Browser storage is ${pct}% full. Download your results before the next run.`, 'warning');
-    }
+    const showSpread = !isScrapingActive && currentResults.length > 0;
+    elements.spreadButton.classList.toggle('hidden', !showSpread);
+    if (showSpread && Object.keys(currentSpread).length > 0) displaySpreadResults();
+}
 
-    if (!isScrapingActive && currentResults.length > 0) {
-        elements.spreadButton.classList.remove('hidden');
+/** Fetch the worker's state and render it. */
+async function refresh() {
+    const state = await sendToWorker({ type: Msg.T.GET_STATE });
+    if (state && !state.error) render(state);
+    else updateStatus('Could not reach ProScan. Close and reopen the popup.', 'error');
+    return state;
+}
 
-        // Check if spread results already exist
-        const spreadData = await new Promise(resolve => {
-            chrome.storage.local.get(['spreadResults'], resolve);
-        });
-        if (spreadData.spreadResults && Object.keys(spreadData.spreadResults).length > 0) {
-            displaySpreadResults();
+/** Warn when the extension's storage is nearly full. */
+async function warnIfNearlyFull() {
+    if (isScrapingActive) return;
+    try {
+        const { usage, quota } = await navigator.storage.estimate();
+        if (quota && usage >= quota * Storage.NEAR_FULL) {
+            const pct = Math.round((usage / quota) * 100);
+            updateStatus(`Browser storage is ${pct}% full. Download your results before the next run.`, 'warning');
         }
-    }
+    } catch (e) { /* no estimate in this context */ }
+}
+
+/**
+ * Initialize the popup UI from the worker's state.
+ *
+ * @async
+ */
+async function initializeUI() {
+    await refresh();
+    await warnIfNearlyFull();
 }
 
 /** The tab the popup was opened over, or null. */
@@ -280,10 +293,9 @@ const AMAZON_URL = /^https:\/\/([a-z0-9-]+\.)*amazon\.com\//i;
 /**
  * Start a new scraping session.
  *
- * Pings the tab first and changes nothing if the content script is not
+ * The worker pings the tab and changes nothing if the content script is not
  * there (an open tab keeps the old script after an update) or the page is
- * not a search. Only then are the old results cleared and a run bound to
- * this tab.
+ * not a search. Old runs are kept; the view moves to the new one.
  *
  * @async
  */
@@ -295,40 +307,16 @@ async function startScraping() {
         return;
     }
 
-    const pong = await sendToTab(tab.id, { type: 'PING' });
-    if (!pong || !pong.ok) {
+    const resp = await sendToWorker({ type: Msg.T.START_RUN, tabId: tab.id });
+    if (resp && resp.ok) {
+        await refresh();
+        return;
+    }
+    if (resp && resp.error === 'no_receiver') {
         offerReload(tab.id);
         return;
     }
-    if (!Run.STARTABLE.includes(pong.kind)) {
-        updateStatus(Run.refusal(pong.kind), 'warning');
-        return;
-    }
-
-    const settings = (await Storage.get(Storage.KEYS.SETTINGS)) || {};
-    await Storage.resetForNewScrape();
-    // Mint a run id (with storefront/keyword source metadata from the tab
-    // URL) before the content script begins; it persists across pagination.
-    const runId = await Storage.beginRun(tab.url);
-    const run = Run.create({ runId, tabId: tab.id, maxPages: settings.maxPages });
-    await Storage.set(Run.KEY, run);
-
-    // Reset UI
-    elements.itemCount.textContent = '0';
-    elements.avgRating.textContent = '-';
-    elements.avgPrice.textContent = '-';
-    elements.insightsPreview.classList.add('hidden');
-    currentResults = [];
-    scrapedItemCount = 0;
-    updateStatus('Scraping in progress...', 'info');
-    setScrapingState(true);
-
-    const ack = await sendToTab(tab.id, { type: 'START_SCRAPING', runId, tabId: tab.id });
-    if (!ack || ack.status !== 'started') {
-        await Storage.setMultiple({ [Run.KEY]: Run.finish(run, 'interrupted'), [Storage.KEYS.IS_SCRAPING]: false });
-        updateStatus('The tab stopped responding. Reload it and try again.', 'error');
-        setScrapingState(false);
-    }
+    updateStatus((resp && (resp.message || resp.error)) || 'Could not start the run.', 'warning');
 }
 
 /**
@@ -355,7 +343,7 @@ function offerReload(tabId) {
 
 /** Starts once the reloaded tab answers a ping, trying a few times. */
 async function startWhenReady(tabId, tries) {
-    const pong = await sendToTab(tabId, { type: 'PING' });
+    const pong = await sendToTab(tabId, { type: Msg.T.PING });
     if (pong && pong.ok) return startScraping();
     if (tries <= 1) {
         updateStatus('The tab still does not answer. Close it and open the search again.', 'error');
@@ -365,40 +353,14 @@ async function startWhenReady(tabId, tries) {
 }
 
 /**
- * Stop the current run. STOP goes to the run's own tab, which cancels its
- * pending page and records the run as stopped. If the tab is gone, the
- * popup records it.
+ * Stop the current run. The worker cancels the pending page and records
+ * the run as stopped.
  *
  * @async
  */
 async function stopScraping() {
-    const run = await Storage.get(Run.KEY);
-    const ack = Run.isActive(run) ? await sendToTab(run.tabId, { type: 'STOP_SCRAPING', runId: run.runId }) : null;
-    if (!ack || !ack.stopped) {
-        const latest = await Storage.get(Run.KEY);
-        const updates = { [Storage.KEYS.IS_SCRAPING]: false };
-        if (Run.isActive(latest)) updates[Run.KEY] = Run.finish(latest, 'stopped');
-        await Storage.setMultiple(updates);
-    }
-    showRunEnd();
-}
-
-/**
- * Show how the last run ended, from the run record, and return the UI to
- * the idle state. Safe to call more than once.
- */
-async function showRunEnd() {
-    const run = await Storage.get(Run.KEY);
-    if (Run.isActive(run)) return;
-    const results = await Storage.getResults();
-    currentResults = results;
-    updateStats(currentResults);
-    const line = Run.describe(run, results.length) || { text: 'Scraping stopped.', type: 'warning' };
-    updateStatus(line.text, line.type);
-    setScrapingState(false);
-    if (results.length > 0) {
-        elements.spreadButton.classList.remove('hidden');
-    }
+    await sendToWorker({ type: Msg.T.STOP_RUN });
+    await refresh();
 }
 
 // --- Spread Analysis ---
@@ -424,7 +386,7 @@ async function startSpreadAnalysis() {
     updateStatus('Analyzing price spreads...', 'info');
 
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'START_SPREAD_ANALYSIS' });
+        chrome.tabs.sendMessage(tabs[0].id, { type: Msg.T.START_SPREAD_ANALYSIS });
     });
 }
 
@@ -438,20 +400,16 @@ function stopSpreadAnalysis() {
     updateStatus('Spread analysis stopped.', 'warning');
 
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'STOP_SPREAD_ANALYSIS' });
+        chrome.tabs.sendMessage(tabs[0].id, { type: Msg.T.STOP_SPREAD_ANALYSIS });
     });
 }
 
 /**
- * Display the spread analysis results in the popup.
- * Reads spread data from storage and runs it through SpreadAnalyzer.
+ * Display the spread analysis results in the popup, from the worker's
+ * spread data for the latest run.
  */
-async function displaySpreadResults() {
-    const data = await new Promise(resolve => {
-        chrome.storage.local.get(['spreadResults'], resolve);
-    });
-
-    const spreadResults = data.spreadResults || {};
+function displaySpreadResults() {
+    const spreadResults = currentSpread || {};
     const analyzed = SpreadAnalyzer.analyzeAll(spreadResults);
     const summary = SpreadAnalyzer.generateSummary(analyzed);
 
@@ -554,7 +512,7 @@ async function initializeAuthUI() {
     // Sign-in only serves the cloud export, which is off in this build.
     if (!Flags.CLOUD_SYNC) return;
     document.getElementById('authPanel').classList.remove('hidden');
-    const response = await sendToWorker({ type: 'PROSCAN_AUTH_STATE' });
+    const response = await sendToWorker({ type: Msg.T.PROSCAN_AUTH_STATE });
     if (response && response.user) {
         showSignedIn(response.user);
     } else {
@@ -582,7 +540,7 @@ async function handleSignIn() {
     elements.authSignInBtn.disabled = true;
     elements.authSignInBtn.innerHTML = '<span class="spinner"></span> Signing in…';
 
-    const response = await sendToWorker({ type: 'PROSCAN_SIGN_IN', email, password });
+    const response = await sendToWorker({ type: Msg.T.PROSCAN_SIGN_IN, email, password });
 
     if (response && response.user) {
         elements.authPassword.value = '';
@@ -600,7 +558,7 @@ async function handleSignIn() {
  */
 async function handleSignOut() {
     elements.authSignOutBtn.disabled = true;
-    const response = await sendToWorker({ type: 'PROSCAN_SIGN_OUT' });
+    const response = await sendToWorker({ type: Msg.T.PROSCAN_SIGN_OUT });
     elements.authSignOutBtn.disabled = false;
 
     if (response && response.ok) {
@@ -629,7 +587,7 @@ async function handleExportToProScan() {
     elements.exportToProScanBtn.innerHTML = '<span class="spinner"></span> Exporting…';
     updateStatus('Exporting to ProScan…', 'info');
 
-    const response = await sendToWorker({ type: 'PROSCAN_EXPORT' });
+    const response = await sendToWorker({ type: Msg.T.PROSCAN_EXPORT });
 
     if (response && response.ok) {
         const count = response.products || 0;
@@ -681,12 +639,8 @@ elements.actionButton.addEventListener('click', async () => {
             await stopScraping();
         }
     } catch (err) {
-        if (err && err.name !== 'StorageError') throw err;
-        console.error('[ProScan] Storage write failed:', err.message);
-        updateStatus(err.code === 'storage_full'
-            ? 'Browser storage is full, so the run could not be saved. Download your results first.'
-            : 'Could not save to browser storage: ' + err.message, 'error');
-        setScrapingState(false);
+        console.error('[ProScan] Start or stop failed:', err && err.message);
+        updateStatus('Something went wrong. Close and reopen the popup, then try again.', 'error');
     } finally {
         elements.actionButton.disabled = false;
     }
@@ -776,47 +730,36 @@ elements.downloadJSON.addEventListener('click', async () => {
 });
 
 /**
- * Listen for real-time messages from the content script.
- *
- * Message types:
- * - UPDATE_PROGRESS: Incremental results from each page
- * - SCRAPING_COMPLETE: Final notification when all pages are done
- * - PAGE_COMPLETE: Per-page item count update
+ * Messages from the offer fetcher in the tab:
+ * - SPREAD_PROGRESS: one more product analyzed
+ * - SPREAD_ANALYSIS_COMPLETE: the analysis is done
  */
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'UPDATE_PROGRESS') {
-        scrapedItemCount += request.itemCount;
-        if (request.results) {
-            currentResults = [...currentResults, ...request.results];
-            updateStats(currentResults);
-        } else {
-            elements.itemCount.textContent = scrapedItemCount;
-        }
-        updateStatus('Scraping in progress... ' + scrapedItemCount + ' items', 'info');
-    } else if (request.type === 'SCRAPING_COMPLETE') {
-        showRunEnd();
-    } else if (request.type === 'PAGE_COMPLETE') {
-        scrapedItemCount += request.itemsScraped;
-        elements.itemCount.textContent = scrapedItemCount;
-    } else if (request.type === 'SPREAD_PROGRESS') {
-        // Update spread analysis progress bar
+chrome.runtime.onMessage.addListener((request) => {
+    if (!request) return false;
+    if (request.type === Msg.T.SPREAD_PROGRESS) {
         const percent = Math.round((request.current / request.total) * 100);
         elements.spreadProgressFill.style.width = percent + '%';
         elements.spreadProgressText.textContent = `${request.current}/${request.total}`;
-    } else if (request.type === 'SPREAD_ANALYSIS_COMPLETE') {
+    } else if (request.type === Msg.T.SPREAD_ANALYSIS_COMPLETE) {
         isSpreadAnalyzing = false;
         elements.spreadButton.innerHTML = '<i class="fas fa-chart-bar"></i> Analyze Price Spreads';
         elements.spreadButton.classList.remove('stop');
-        displaySpreadResults();
+        refresh();
     }
+    return false;
 });
 
-// A run can end while the popup is open without a message reaching it
-// (the tab closed, another popup stopped it), so follow the record too.
+// The worker writes the run record to session storage on every change, so
+// the view follows it: a new page, the end of the run, a closed tab.
 chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local' || !changes[Run.KEY]) return;
+    if (area !== 'session' || !changes[Run.KEY]) return;
     const run = changes[Run.KEY].newValue;
-    if (isScrapingActive && run && !Run.isActive(run)) showRunEnd();
+    if (!run) return;
+    if (!Run.isActive(run) || run.page !== renderedPage || !isScrapingActive) {
+        refresh();
+    } else {
+        elements.itemCount.textContent = run.itemCount || 0;
+    }
 });
 
 // Initialize on DOM load
