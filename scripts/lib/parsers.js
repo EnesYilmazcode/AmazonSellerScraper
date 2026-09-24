@@ -38,6 +38,7 @@ const Parsers = (() => {
         reviewCountLegacy: '.a-size-base.puis-normal-weight-text.s-underline-text',
 
         productLink: '.a-link-normal.s-no-outline',
+        sponsored: '.puis-sponsored-label-text, .s-sponsored-label-text, [data-component-type="sp-sponsored-result"], a[href*="/sspa/"]',
         primeBadge: '.a-icon-prime, .s-prime',
         nextPage: '.s-pagination-next:not(.s-pagination-disabled)',
         nextPageLink: 'a.s-pagination-next[href]:not(.s-pagination-disabled)',
@@ -164,6 +165,17 @@ const Parsers = (() => {
         return element.querySelector(SEARCH_SELECTORS.primeBadge) !== null;
     }
 
+    /** True for a paid placement: the Sponsored label, an ad holder or an sspa ad link. */
+    function isSponsored(element) {
+        return element.classList.contains('AdHolder') ||
+            element.querySelector(SEARCH_SELECTORS.sponsored) !== null;
+    }
+
+    /** The product page for an ASIN. Card links can be expiring sspa ad redirects. */
+    function productUrl(asin) {
+        return `https://www.amazon.com/dp/${asin}`;
+    }
+
     /** One product record from a result card, or null without an ASIN. */
     function scrapeProduct(listing) {
         const asin = listing.dataset.asin;
@@ -178,11 +190,6 @@ const Parsers = (() => {
         const reviewCount = extractReviewCount(listing);
         const isPrime = hasPrimeBadge(listing);
 
-        const linkEl = listing.querySelector(SEARCH_SELECTORS.productLink);
-        const productUrl = linkEl
-            ? `https://www.amazon.com${linkEl.getAttribute('href')}`
-            : 'N/A';
-
         return {
             name: title,
             asin: asin,
@@ -193,7 +200,8 @@ const Parsers = (() => {
             rating: rating,
             reviewCount: reviewCount,
             isPrime: isPrime,
-            url: productUrl,
+            sponsored: isSponsored(listing),
+            url: productUrl(asin),
             scrapedAt: new Date().toISOString()
         };
     }
@@ -374,6 +382,8 @@ const Parsers = (() => {
         parseReviewText,
         extractReviewCount,
         hasPrimeBadge,
+        isSponsored,
+        productUrl,
         scrapeProduct,
         getTotalResults,
         getNextPageUrl,

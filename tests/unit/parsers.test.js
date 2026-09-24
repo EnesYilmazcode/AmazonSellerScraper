@@ -85,6 +85,24 @@ describe('Parsers.scrapeProduct fields', () => {
     expect(Parsers.scrapeProduct(one(html)).reviewCount).toBe(1);
   });
 
+  test('the url is the /dp/ page, never the sspa ad redirect (F-16)', () => {
+    const html = '<div class="s-result-item" data-asin="B0AD1"><a class="a-link-normal s-no-outline" href="/sspa/click?url=%2Fx%2Fdp%2FB0AD1"></a></div>';
+    expect(Parsers.scrapeProduct(one(html)).url).toBe('https://www.amazon.com/dp/B0AD1');
+  });
+
+  test.each([
+    ['the Sponsored label', '<span class="puis-sponsored-label-text">Sponsored</span>', ''],
+    ['an sspa link', '<a href="/sspa/click?url=x">x</a>', ''],
+    ['an AdHolder card', '', ' AdHolder'],
+  ])('a card with %s is sponsored (F-16)', (_label, inner, cls) => {
+    const html = `<div class="s-result-item${cls}" data-asin="B0AD2">${inner}</div>`;
+    expect(Parsers.scrapeProduct(one(html)).sponsored).toBe(true);
+  });
+
+  test('a plain card is not sponsored', () => {
+    expect(Parsers.scrapeProduct(one(card('B0ORG', '$1.00'))).sponsored).toBe(false);
+  });
+
   test('a card with no title, rating or reviews has nulls, not 0 or N/A', () => {
     const p = Parsers.scrapeProduct(one('<div class="s-result-item" data-asin="B0BARE"></div>'));
     expect(p).toMatchObject({ name: null, price: null, priceCents: null, rating: null, reviewCount: null });
