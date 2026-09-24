@@ -368,15 +368,19 @@ function createEngine({
         });
     }
 
-    /** After a browser restart the session is empty; a run IndexedDB still has as live was cut off. */
-    function recover() {
+    /**
+     * A browser restart or an update empties session storage, so a run
+     * IndexedDB still has as live was cut off: `interrupted` after a
+     * restart, `updated` after an update.
+     */
+    function recover(reason = 'interrupted') {
         return serial(async () => {
             if (await getRun()) return;
             const store = await db();
             const latest = await store.getMeta('latestRunId');
             const rec = latest ? await store.get('runs', latest) : null;
             if (Run.isActive(rec)) {
-                await store.write([{ store: 'runs', put: durable(Run.finish(rec, 'interrupted', now())) }]);
+                await store.write([{ store: 'runs', put: durable(Run.finish(rec, reason, now())) }]);
             }
         });
     }

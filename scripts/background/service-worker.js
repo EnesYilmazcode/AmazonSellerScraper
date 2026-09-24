@@ -80,7 +80,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   } else if (details.reason === 'update') {
     console.log('[ProScan] Extension updated to version', chrome.runtime.getManifest().version);
-    migrate().then(() => engine.recover());
+    migrate().then(() => engine.recover('updated'));
   }
 });
 

@@ -287,6 +287,17 @@ describe('the worker stopped between pages', () => {
     expect(st.run).toMatchObject({ state: 'failed', reason: 'interrupted' });
   });
 
+  test('after an update empties session storage, the live run is ended as updated', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'upd');
+    await settle();
+    await rig.session.remove('run');
+    rig.killWorker();
+    await rig.engine().recover('updated');
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st.run).toMatchObject({ state: 'failed', reason: 'updated' });
+  });
+
   test('after a browser restart a run IndexedDB still has as live is ended', async () => {
     const rig = createRig({ site: simpleSite(3) });
     await startIn(rig, 'restart');
