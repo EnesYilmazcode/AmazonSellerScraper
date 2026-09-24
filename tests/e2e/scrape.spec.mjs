@@ -79,8 +79,9 @@ test('real markup: Chromium scrapes the saved yoga mat page like the parser does
   expect(fill.title).toBeGreaterThanOrEqual(0.9);
   expect(fill.price).toBeGreaterThanOrEqual(0.9);
 
-  bug('F-27', 'repeats and carousel cards are stored as products');
   expect(new Set(page1.map((r) => r.asin)).size).toBe(page1.length);
+  expect(page1.filter((r) => r.sponsored).length).toBe(12);
+  expect(page1.filter((r) => /\/sspa\//.test(r.url))).toEqual([]);
 });
 
 test('a captcha at page 2 ends the run as blocked', async ({ ext }) => {
@@ -118,8 +119,10 @@ test('duplicates across pages are stored once', async ({ ext }) => {
   const asins = s.results.map((r) => r.asin);
   expect(asins).toEqual(expect.arrayContaining([...allAsins('dupes', [1, 2, 3]), 'B0SPONSOR1']));
 
-  bug('F-27', 'no ASIN dedupe within or across pages');
   expect(asins.length).toBe(new Set(asins).size);
+  const ad = s.results.find((r) => r.asin === 'B0SPONSOR1');
+  expect(ad).toMatchObject({ sponsored: true, organicRank: null, url: 'https://www.amazon.com/dp/B0SPONSOR1' });
+  expect(ad.placements.map((pl) => pl.page)).toEqual([1, 2, 3]);
 });
 
 test('Stop halts the run before the next page loads', async ({ ext }) => {
