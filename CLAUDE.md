@@ -4,11 +4,11 @@
 
 Chrome extension (Manifest V3) that scrapes Amazon seller product listings, provides analytics for resellers/arbitrage, and includes a floating AI chatbot on Amazon pages powered by Gemini API. No server required — everything runs client-side.
 
-## Architecture (v2.2)
+## Architecture (v2.3)
 
 ```text
 AmazonSellerScraper/
-├── manifest.json              # Extension config (v2.2)
+├── manifest.json              # Extension config (v2.3)
 ├── popup/                     # UI Layer
 │   ├── popup.html            # Popup interface (dashboard + settings)
 │   ├── popup.css             # Popup styling
@@ -23,19 +23,23 @@ AmazonSellerScraper/
 │   │   ├── parsers.js        # Pure search/offer parsing (global Parsers)
 │   │   ├── messages.js       # Every message type and who may send it (global Msg)
 │   │   ├── run.js            # Run state machine, bound to one tab (global Run)
-│   │   ├── flags.js          # Build flags (global Flags); CLOUD_SYNC is off until 2.3
+│   │   ├── flags.js          # Build flags (global Flags); CLOUD_SYNC is on from 2.3
 │   │   ├── migrate.js        # Storage schema migrations, run by the SW
 │   │   └── chat.js           # Gemini request builder, run scoping, error text
 │   ├── background/
 │   │   ├── service-worker.js # Wires router, engine, chat, auth and migrations
 │   │   ├── router.js         # The one typed message router
 │   │   ├── engine.js         # The run engine; the only writer of run data
-│   │   └── db.js             # IndexedDB: runs, products, placements, lastValues, outbox, spread
+│   │   ├── db.js             # IndexedDB: runs, products, placements, lastValues, outbox, spread
+│   │   ├── sync-plan.js      # Outbox entry -> cloud writes (pure)
+│   │   └── sync.js           # Drains the outbox into Firestore, one entry at a time
 │   └── modules/
 │       ├── storage.js        # Chrome storage wrapper
 │       ├── analyzer.js       # Data analysis & insights
 │       ├── spread-analyzer.js # Price spread & arbitrage scoring
 │       └── exporter.js       # Excel/CSV/JSON export
+├── packages/
+│   └── schema/index.js       # Cloud schema: types, validators, ids (shared with the dashboard)
 ├── styles/
 │   └── chatbot.css           # Chatbot widget styles (loaded into Shadow DOM)
 ├── tests/                     # Test suite (Jest)
@@ -102,6 +106,27 @@ Run states: idle, starting, running, stopping, then stopped, blocked, failed or 
 `reason` says why it ended: complete, stopped, blocked, selectors_broken, storage_full,
 storage_error, interrupted or updated.
 
+### Cloud sync (2.3)
+
+1. The popup signs in with email and password through the SW (`PROSCAN_SIGN_IN`); sign-up opens
+   the dashboard, and "Forgot password?" sends `PROSCAN_RESET_PASSWORD` (same answer either way)
+2. The SW keeps `account` {uid, email} in `chrome.storage.local` while signed in. The engine
+   queues `{kind:'page', pageIndex, uid}` per saved page and `{kind:'run', uid}` when a run ends,
+   only when an account is signed in
+3. `lastValues` snapshots carry the uid that took them; another account's snapshot gives no delta
+4. `scheduleFlush()` runs a few seconds after PAGE_RESULT, STOP_RUN, a tab change, popup open,
+   sign-in, browser start and update. No alarms
+5. `sync.js` drains the outbox for the signed-in uid, oldest first. `sync-plan.js` turns an entry
+   into writes; each is `set` with `mergeFields`, so `latest`, `prev` and `delta` are replaced whole.
+   `firstSeenAt` is written only when a read shows the product document does not exist
+6. An entry is deleted after its own commit. Entries of another uid are left alone
+7. `permission-denied` or an invalid token signs out and sets `authNotice: 'expired'`;
+   the popup shows "Your session expired"
+
+Cloud paths and shapes: `packages/schema/index.js` (keep the dashboard's copy identical, bump `SV`
+on a shape change). Run id `{sourceId}_{startMs}`, minted once in `engine.start`; page id `p0001`;
+`dayKey` is the local date the run started.
+
 ### AI Chatbot (client-side, no server)
 
 1. `chatbot.js` injects a floating widget (bottom-right) on Amazon pages with product listings
@@ -134,6 +159,9 @@ npm run test:coverage # With coverage report
 - Pure logic modules (`analyzer.js`, `spread-analyzer.js`) are tested via `require()` directly
 - Content scripts (`scraper.js`, `offer-fetcher.js`) have no `module.exports` — loaded via `vm.runInContext` into a JSDOM context with Chrome API mocks and an `innerText` polyfill
 - `tests/setup/engine-rig.js` runs the real router and engine over fake-indexeddb with the real `scraper.js` in a JSDOM page per tab; `tests/unit/engine.test.js` drives runs through it
+- `npm run test:contract` runs the real `sync.js` against the Firebase emulators with the dashboard's
+  `firestore.rules` (`tools/contract.mjs`, `tests/contract/`); ESM files under `packages/` and
+  `scripts/background/` load in Jest through `tests/setup/esm-to-cjs-transform.js`
 - `npm run test:e2e` runs the same scenarios in Chromium (`tests/e2e/`), including the worker stopped via CDP between pages and 2.0 and 2.1 builds updated mid-run
 - HTML fixtures in `tests/fixtures/` match the exact CSS selectors the code uses
 - Chrome APIs (`storage`, `runtime`, `tabs`, `downloads`) are mocked in `tests/setup/chrome-mock.js`
@@ -141,7 +169,7 @@ npm run test:coverage # With coverage report
 
 ## Chrome APIs Used
 
-- `chrome.storage.local`: settings, the Gemini key and `schemaVersion` only
+- `chrome.storage.local`: settings, the Gemini key, `schemaVersion`, and `account`, `authNotice`, `lastSync`
 - `chrome.storage.session`: the live run record (content scripts cannot read it)
 - IndexedDB: run data, in the extension origin; needs no permission
 - `chrome.runtime.sendMessage/onMessage`: messages, all in `scripts/lib/messages.js`
@@ -196,6 +224,8 @@ One record per ASIN per run, from `Parsers.parseSearchPage` and the scraper:
 - `url`: always `https://www.amazon.com/dp/{asin}`, never the sspa ad link
 - `sponsored`: true if any placement was an ad; `organicRank`: run-wide rank of the first organic card, or null
 - `placements`: every card the ASIN had, as `{page, position, sponsored, rank}`
+- `img`: the card image on Amazon's image host, or null
+- `prev`: the `lastValues` snapshot the delta was taken against, or null
 - `delta`: taken once, on the ASIN's first sighting in the run, against `lastValues` from earlier runs.
   A field that fails to parse keeps its last good value in `lastValues`, with the time in `carried`
 
@@ -210,7 +240,7 @@ One record per ASIN per run, from `Parsers.parseSearchPage` and the scraper:
   the IndexedDB writes commit before anything is removed.
 - IndexedDB `proscan` (`scripts/background/db.js`): `runs`, `products` (key `[runId, n]`,
   n is the order found), `placements` (one record per page), `lastValues` (by ASIN),
-  `outbox` (pages waiting for sync), `spread` and `meta` (`latestRunId`). The popup shows
+  `outbox` (`{kind, runId, uid, pageIndex}` entries waiting for sync), `spread` and `meta` (`latestRunId`). The popup shows
   the latest run's products.
   `tests/fixtures/v2.0-storage.json` is what the live 2.0 build stores, captured with
   `node tests/e2e/capture-v20-storage.mjs`.
@@ -218,8 +248,8 @@ One record per ASIN per run, from `Parsers.parseSearchPage` and the scraper:
   (`Delta.MAX_ENTRIES`, `Delta.MAX_AGE_DAYS`).
 - A page write that fails ends the run as `storage_full` (quota) or `storage_error`.
   The popup warns from 90% of `navigator.storage.estimate()`.
-- Cloud sync is off in 2.1 and 2.2 (`Flags.CLOUD_SYNC`): nothing goes into the outbox, the SW
-  refuses `PROSCAN_EXPORT`, and the popup hides sign-in and Export to ProScan.
+- Cloud sync was off in 2.1 and 2.2 and is on from 2.3 (`Flags.CLOUD_SYNC`). Signed out, nothing
+  goes into the outbox.
 
 ## Export
 

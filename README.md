@@ -74,6 +74,24 @@ User clicks "Start Scraping"
   → User exports via exporter.js (Excel/CSV/JSON)
 ```
 
+### Cloud Sync
+
+```
+Signed in to a ProScan account in the popup (email and password)
+  → Each saved page goes into the IndexedDB outbox, tagged with the account's uid;
+    the end of the run goes in after its pages
+  → A few seconds after a page, a run end, a popup open or a browser start,
+    the worker flushes the outbox (no alarms)
+  → sync.js writes one entry at a time: the page chunk, a product and a history
+    document per ASIN on the page, the run header and the source. latest, prev
+    and delta are replaced whole, never merged
+  → An entry leaves the outbox only once its own writes commit; a page saved
+    during a flush goes out before the flush returns
+  → Export to ProScan flushes right away
+```
+
+The document shapes, ids and validators are in `packages/schema/index.js`, which the dashboard copies. Money is integer cents, unknown values are null (left out of compact points), and every document carries `sv`. A signed-out user queues nothing. If Firebase drops the session, the popup says so and the queued pages wait for the same account to sign in again.
+
 ### AI Chatbot Flow
 
 ```
@@ -153,6 +171,8 @@ For local Firebase work, `npm run build:dev` points the build at the emulators u
 
 The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, see its README). `npm run test:e2e` loads the built extension into Chromium and runs scrape scenarios against those pages, with every request answered locally. Run `npx playwright install --no-shell chromium` once first. Known bugs run as expected failures tagged with their audit finding id; `PROSCAN_SHOW_KNOWN=1 npm run test:e2e` shows what they fail on.
 
+`npm run test:contract` runs the real sync module against the Firebase emulators with the dashboard's `firestore.rules` (from `PROSCAN_RULES`, or a `web` or `proscan-web` checkout next to this repo): queues of 1, 201 and 600 products, a page added mid-flush, replace semantics across runs, create-only `firstSeenAt` and the write count per run. It needs the Firebase CLI and Java, and uses the `demo-proscan` project only.
+
 The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, see its README). `npm run test:e2e` loads the built extension into Chromium and runs scrape scenarios against those pages, with every request answered locally. Run `npx playwright install --no-shell chromium` once first. Known bugs run as expected failures tagged with their audit finding id; `PROSCAN_SHOW_KNOWN=1 npm run test:e2e` shows what they fail on.
 
 ## Usage
@@ -176,7 +196,7 @@ The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, s
 
 ## Chrome APIs Used
 
-- `chrome.storage.local` -- Settings and the schema version only
+- `chrome.storage.local` -- Settings, the schema version, and the signed-in account (`account`, `authNotice`, `lastSync`)
 - `chrome.storage.session` -- The live run record, written by the service worker
 - IndexedDB (the extension's own origin, no permission) -- Runs, products, pages, lastValues and the sync outbox. Starting a run keeps the 10 newest runs and removes older ones, except runs still waiting to sync.
 - `chrome.runtime.sendMessage` / `onMessage` -- Messages, all listed in `scripts/lib/messages.js`
@@ -201,19 +221,23 @@ AmazonSellerScraper/
 │   │   ├── parsers.js            # Pure search and offer page parsing
 │   │   ├── messages.js           # Every message type and who may send it
 │   │   ├── run.js                # The run state machine and its end reasons
-│   │   ├── flags.js              # Build flags (cloud sync is off until 2.3)
+│   │   ├── flags.js              # Build flags (cloud sync is on from 2.3)
 │   │   ├── migrate.js            # Storage schema migrations (schemaVersion)
 │   │   └── chat.js               # Gemini request builder and run scoping
 │   ├── background/
 │   │   ├── service-worker.js     # Wires the router, the engine, the chat and migrations
 │   │   ├── router.js             # The one message router
 │   │   ├── engine.js             # Runs scrapes; the only writer of run data
-│   │   └── db.js                 # IndexedDB stores
+│   │   ├── db.js                 # IndexedDB stores
+│   │   ├── sync-plan.js          # What each outbox entry writes (pure)
+│   │   └── sync.js               # Drains the outbox into Firestore
 │   └── modules/
 │       ├── storage.js            # Chrome storage abstraction layer
 │       ├── analyzer.js           # Analytics engine + opportunity scoring
 │       ├── spread-analyzer.js    # Price spread statistics (CV, arbitrage score)
 │       └── exporter.js           # Multi-format export (Excel/CSV/JSON)
+├── packages/
+│   └── schema/index.js           # Cloud schema shared with the dashboard
 ├── styles/
 │   └── chatbot.css               # Chatbot widget styles (Shadow DOM)
 ├── libs/
