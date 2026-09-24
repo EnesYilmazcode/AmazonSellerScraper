@@ -116,10 +116,16 @@ const sync = createSync({ db: firestore, openStore: () => engine.db() });
 function currentUser() {
   return new Promise((resolve) => {
     if (auth.currentUser) return resolve(auth.currentUser);
-    const unsub = onAuthStateChanged(auth, (u) => {
-      unsub();
+    let settled = false;
+    let unsub = null;
+    unsub = onAuthStateChanged(auth, (u) => {
+      if (settled) return;
+      settled = true;
+      if (unsub) unsub();
       resolve(u);
     });
+    // The first answer can come before onAuthStateChanged returns.
+    if (settled) unsub();
   });
 }
 

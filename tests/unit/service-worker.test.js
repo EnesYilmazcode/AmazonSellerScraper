@@ -8,12 +8,20 @@ jest.mock('../../scripts/background/firebase-init.js', () => ({
   auth: { currentUser: { uid: 'u1', email: 'u1@example.test', displayName: null } },
   db: {},
 }));
-jest.mock('firebase/auth/web-extension', () => ({
-  onAuthStateChanged: (auth, cb) => { cb(auth.currentUser); return () => {}; },
-  signInWithEmailAndPassword: async () => ({}),
-  sendPasswordResetEmail: async () => {},
-  signOut: async () => {},
-}), { virtual: true });
+jest.mock('firebase/auth/web-extension', () => {
+  const listeners = [];
+  return {
+    __listeners: listeners,
+    onAuthStateChanged: (auth, cb) => {
+      listeners.push(cb);
+      cb(auth.currentUser);
+      return () => {};
+    },
+    signInWithEmailAndPassword: async () => ({}),
+    sendPasswordResetEmail: async () => {},
+    signOut: async () => {},
+  };
+}, { virtual: true });
 jest.mock('../../scripts/background/sync.js', () => {
   const flush = jest.fn(async () => ({ entries: 0, pages: 0, runs: 0, products: 0, writes: 0 }));
   return { createSync: () => ({ flush, pending: async () => 0 }), isAuthError: () => false, __flush: flush };
@@ -111,4 +119,30 @@ test('the chat reads the key from settings and the run from IndexedDB', async ()
   chrome.storage.local.set({ geminiApiKey: 'k', schemaVersion: 4 });
   const st = await send({ type: 'CHAT_STATUS' }, { id: 'test-extension', tab: { id: 3 } });
   expect(st).toMatchObject({ hasKey: true });
+});
+
+test('a session Firebase dropped without a sign-out shows as expired (F-57)', async () => {
+  const { auth } = require('../../scripts/background/firebase-init.js');
+  const authMod = require('firebase/auth/web-extension');
+  const user = auth.currentUser;
+  await chrome.storage.local.set({ account: { uid: 'u1', email: 'u1@example.test' } });
+  auth.currentUser = null;
+  try {
+    // The worker's own listener is the first one registered.
+    authMod.__listeners[0](null);
+    await settle();
+    expect(chrome.storage.local._getStore()).toMatchObject({ authNotice: 'expired' });
+    expect(chrome.storage.local._getStore()).not.toHaveProperty('account');
+    const st = await send({ type: 'PROSCAN_AUTH_STATE' });
+    expect(st).toMatchObject({ user: null, notice: 'expired' });
+  } finally {
+    auth.currentUser = user;
+  }
+});
+
+test('signing out on purpose clears the account without an expired notice', async () => {
+  await chrome.storage.local.set({ account: { uid: 'u1' }, authNotice: 'expired' });
+  expect(await send({ type: 'PROSCAN_SIGN_OUT' })).toEqual({ ok: true });
+  expect(chrome.storage.local._getStore()).not.toHaveProperty('account');
+  expect(chrome.storage.local._getStore()).not.toHaveProperty('authNotice');
 });
