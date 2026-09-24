@@ -309,6 +309,8 @@ test('a service worker stopped between pages does not break the run', async ({ e
 test('the page cap in settings ends the run as complete', async ({ ext }) => {
   const served = await serveAmazon(ext.context, simplePlan(5));
   const store = await extPage(ext);
+  // Wait for the install defaults first, or they can overwrite this on a slow runner.
+  await waitForState(store, (x) => x.schemaVersion, { timeout: 15000, interval: 100 });
   await store.evaluate(() => chrome.storage.local.set({ settings: { pageDelay: 2000, maxPages: 2 } }));
   const tab = await openSearch(ext, 'capped');
   await clickStart(ext, tab);
