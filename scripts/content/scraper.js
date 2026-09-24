@@ -76,7 +76,7 @@ function scrapeCurrentPage() {
 
     console.log(`[ProScan] Found ${results.length} product listings`);
 
-    if (page.kind === 'empty') {
+    if (page.products.length === 0) {
         console.log('[ProScan] No listings found on this page');
         finishScraping(itemCount);
         return;
@@ -136,8 +136,8 @@ function scrapeCurrentPage() {
                 chrome.runtime.sendMessage({ type: 'ENQUEUE_SYNC', runId: runId, pageIndex: pageIndex });
 
                 // Checked after the write, as before the parser split
-                if (hasNextPage() && isScrapingActive) {
-                    const nextUrl = getNextPageUrl();
+                if (page.nextHref && isScrapingActive) {
+                    const nextUrl = page.nextHref;
                     console.log(`[ProScan] Navigating to next page: ${nextUrl}`);
 
                     // 2-second delay to avoid rate limiting

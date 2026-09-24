@@ -39,7 +39,10 @@ const Parsers = (() => {
 
         productLink: '.a-link-normal.s-no-outline',
         primeBadge: '.a-icon-prime, .s-prime',
+        nextPage: '.s-pagination-next:not(.s-pagination-disabled)',
+        nextPageLink: 'a.s-pagination-next[href]:not(.s-pagination-disabled)',
         nextPageDisabled: '.s-pagination-next.s-pagination-disabled',
+        searchPage: '.s-main-slot, .s-search-results, [data-component-type="s-search-result"]',
         resultsText: 'h2.a-size-base.a-spacing-small.a-spacing-top-small span',
         resultsToolbar: '.s-desktop-toolbar .a-spacing-small span'
     };
@@ -216,9 +219,35 @@ const Parsers = (() => {
         return currentUrl.toString();
     }
 
-    /** False only when a disabled Next button is present. */
+    /** True when the page has a Next button that is not disabled. */
     function hasNextPage(doc) {
-        return !doc.querySelector(SEARCH_SELECTORS.nextPageDisabled);
+        return !!doc.querySelector(SEARCH_SELECTORS.nextPage);
+    }
+
+    /**
+     * The address of the next page: the Next link's own href when there is
+     * one, the page number bumped by hand for an older span button, or null.
+     */
+    function nextPageHref(doc, url) {
+        const link = doc.querySelector(SEARCH_SELECTORS.nextPageLink);
+        if (link) return new URL(link.getAttribute('href'), url).href;
+        return hasNextPage(doc) ? getNextPageUrl(url) : null;
+    }
+
+    /**
+     * What kind of page this is when it has no result cards: a captcha, a
+     * bot check, a sign-in wall, a search with nothing on it, or something
+     * else (a product page, a broken layout).
+     */
+    function classifyPage(doc, url) {
+        const path = url ? new URL(url).pathname : '';
+        if (doc.querySelector('form[action*="validateCaptcha"], #captchacharacters')) return 'captcha';
+        if (/robot check/i.test(doc.title || '')) return 'captcha';
+        if (/^\/ap\/(signin|mfa|cvf)/.test(path) || doc.querySelector('form[name="signIn"], #ap_email, #ap_password')) return 'signin';
+        const refresh = doc.querySelector('meta[http-equiv="refresh" i]');
+        if (refresh || /bm-verify|_bm_|akamai/i.test(url || '')) return 'interstitial';
+        if (path === '/s' || path.startsWith('/s/') || doc.querySelector(SEARCH_SELECTORS.searchPage)) return 'empty';
+        return 'unknown';
     }
 
     /** Share of products with an ASIN, a title and a price. */
@@ -233,10 +262,11 @@ const Parsers = (() => {
     }
 
     /**
-     * Parses one search page the way the scraper does today.
+     * Parses one search page.
      *
-     * kind is 'empty' when no result card matched, 'last' when the Next
-     * button is disabled, else 'results'. nextHref is the hand-built next URL.
+     * kind is 'results' when there is a next page, 'last' when there is not,
+     * and otherwise what classifyPage says (empty, captcha, interstitial,
+     * signin or unknown). nextHref follows the page's own Next link.
      *
      * @param {Document} doc
      * @param {string} url - the page's address
@@ -246,7 +276,7 @@ const Parsers = (() => {
         const listings = doc.querySelectorAll(SEARCH_SELECTORS.productItem);
         const total = getTotalResults(doc);
         if (listings.length === 0) {
-            return { kind: 'empty', products: [], nextHref: null, total, fill: fillRates([]) };
+            return { kind: classifyPage(doc, url), products: [], nextHref: null, total, fill: fillRates([]) };
         }
 
         const products = [];
@@ -255,11 +285,11 @@ const Parsers = (() => {
             if (product) products.push(product);
         });
 
-        const more = hasNextPage(doc);
+        const nextHref = nextPageHref(doc, url);
         return {
-            kind: more ? 'results' : 'last',
+            kind: nextHref ? 'results' : 'last',
             products,
-            nextHref: more ? getNextPageUrl(url) : null,
+            nextHref,
             total,
             fill: fillRates(products)
         };
@@ -344,6 +374,8 @@ const Parsers = (() => {
         getTotalResults,
         getNextPageUrl,
         hasNextPage,
+        nextPageHref,
+        classifyPage,
         fillRates,
         parseSearchPage,
         buildOfferUrl,

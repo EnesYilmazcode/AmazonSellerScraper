@@ -34,6 +34,31 @@ describe('Parsers.parseSearchPage', () => {
     expect(r).toEqual({ kind: 'empty', products: [], nextHref: null, total: 0, fill: { asin: 0, title: 0, price: 0 } });
   });
 
+  test('the next page is the Next link itself, resolved against the page', () => {
+    const next = '<a class="s-pagination-next" href="/s?k=widget&amp;page=2&amp;qid=9&amp;ref=sr_pg_1">Next</a>';
+    const r = Parsers.parseSearchPage(parseDoc(page(card('B0A', '$1.00') + next), URL_P1), URL_P1);
+    expect(r.kind).toBe('results');
+    expect(r.nextHref).toBe('https://www.amazon.com/s?k=widget&page=2&qid=9&ref=sr_pg_1');
+  });
+
+  test('no pagination strip at all is the last page', () => {
+    const r = Parsers.parseSearchPage(parseDoc(page(card('B0A', '$1.00')), URL_P1), URL_P1);
+    expect(r.kind).toBe('last');
+    expect(r.nextHref).toBeNull();
+  });
+
+  test.each([
+    ['a captcha form', '<form action="/errors/validateCaptcha"><input id="captchacharacters"></form>', URL_P1, 'captcha'],
+    ['a Robot Check title', '<title>Robot Check</title><p>x</p>', URL_P1, 'captcha'],
+    ['a sign-in form', '<form name="signIn"><input id="ap_email"></form>', 'https://www.amazon.com/ap/signin?x=1', 'signin'],
+    ['a meta refresh bot check', '<meta http-equiv="refresh" content="5; URL=/s?k=a">', URL_P1, 'interstitial'],
+    ['a search page with no cards', '<div class="s-main-slot"></div>', URL_P1, 'empty'],
+    ['a product page', '<div id="dp">Echo Dot</div>', 'https://www.amazon.com/dp/B09B8V1LZ3', 'unknown'],
+  ])('a page with %s is %s', (_label, body, url, kind) => {
+    expect(Parsers.classifyPage(parseDoc(page(body), url), url)).toBe(kind);
+    expect(Parsers.parseSearchPage(parseDoc(page(body), url), url).kind).toBe(kind);
+  });
+
   test('fill counts products with a price', () => {
     const doc = parseDoc(page(card('B0A', '$1.00') + card('B0B', null)), URL_P1);
     expect(Parsers.parseSearchPage(doc, URL_P1).fill).toEqual({ asin: 1, title: 1, price: 0.5 });
