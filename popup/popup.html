@@ -52,12 +52,17 @@
                 <div class="auth-title">
                     <i class="fas fa-cloud"></i> Sign in to ProScan
                 </div>
+                <div class="auth-notice hidden" id="authNotice"></div>
                 <input type="email" id="authEmail" class="auth-input" placeholder="Email" autocomplete="username">
                 <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="current-password">
                 <button id="authSignInBtn" class="auth-button">
                     <i class="fas fa-right-to-bracket"></i> Sign in to ProScan
                 </button>
                 <div class="auth-error hidden" id="authError"></div>
+                <div class="auth-links">
+                    <a id="authSignUpLink" href="https://proscanbot.web.app/dashboard/" target="_blank" rel="noopener">Create an account</a>
+                    <button type="button" id="authResetBtn" class="auth-link-button">Forgot password?</button>
+                </div>
             </div>
 
             <!-- Signed-in: account state -->
@@ -70,6 +75,7 @@
                     <i class="fas fa-right-from-bracket"></i> Sign out
                 </button>
             </div>
+            <div class="auth-sync hidden" id="authSync"></div>
         </div>
 
         <!-- AI chat settings: the user's own Gemini key -->
