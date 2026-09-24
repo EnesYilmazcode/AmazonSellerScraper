@@ -6,6 +6,7 @@ import {
 } from 'firebase/auth/web-extension';
 import { syncToCloud } from './sync.js';
 import Chat from '../lib/chat.js';
+import Run from '../lib/run.js';
 
 /**
  * @fileoverview Background Service Worker
@@ -30,7 +31,7 @@ const chatDeps = {
  * Main message listener -- routes messages between extension components.
  *
  * Message types handled:
- * - STOP_SCRAPING: Forwarded from popup to the active tab's content script
+ * - WHO_AM_I: Tells a content script its tab id, so it can check the run is its own
  * - SCRAPING_COMPLETE: Logs scrape completion
  * - CHAT_STATUS: Whether a Gemini key is set, and which run the chat covers
  * - CHAT_MESSAGE: Answers a question about the current run with Gemini
@@ -39,14 +40,14 @@ const chatDeps = {
  * never passes through the content script.
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    // Route STOP_SCRAPING from popup to content script
-    if (request.type === 'STOP_SCRAPING' && sender.tab) {
-        chrome.tabs.sendMessage(sender.tab.id, { type: 'STOP_SCRAPING' });
+    if (request.type === 'WHO_AM_I') {
+        sendResponse({ tabId: sender.tab ? sender.tab.id : null });
+        return false;
     }
 
     // Log scrape completion
     if (request.type === 'SCRAPING_COMPLETE') {
-        console.log('[ProScan] Scraping completed:', request.itemCount, 'items');
+        console.log('[ProScan] Run ended:', request.reason, request.itemCount, 'items');
     }
 
     if (request.type === 'CHAT_STATUS') {
@@ -79,7 +80,7 @@ chrome.runtime.onInstalled.addListener((details) => {
             isScrapingActive: false,
             settings: {
                 pageDelay: 2000,
-                maxPages: 100
+                maxPages: Run.DEFAULT_MAX_PAGES
             }
         });
     } else if (details.reason === 'update') {
@@ -87,14 +88,26 @@ chrome.runtime.onInstalled.addListener((details) => {
     }
 });
 
+/** Ends the running run as `reason` if `test(run)` holds. */
+async function endRunIf(test, reason) {
+    const { run } = await chrome.storage.local.get(Run.KEY);
+    if (Run.isActive(run) && test(run)) {
+        await chrome.storage.local.set({ [Run.KEY]: Run.finish(run, reason), isScrapingActive: false });
+    }
+}
+
 /**
  * Clean up on browser startup.
- * Resets the scraping flag in case the browser was closed mid-scrape.
+ * A run cannot survive a browser restart, since its tab id is gone.
  */
 chrome.runtime.onStartup.addListener(() => {
-    chrome.storage.local.set({
-        isScrapingActive: false
-    });
+    chrome.storage.local.set({ isScrapingActive: false });
+    endRunIf(() => true, 'interrupted');
+});
+
+// Closing the run's tab ends the run. Needs no tabs permission.
+chrome.tabs.onRemoved.addListener((tabId) => {
+    endRunIf((run) => run.tabId === tabId, 'interrupted');
 });
 
 // ════════════════════════════════════════════════════════════════════════════
