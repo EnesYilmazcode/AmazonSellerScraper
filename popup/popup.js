@@ -240,7 +240,7 @@ function render(state) {
 /** Fetch the worker's state and render it. */
 async function refresh() {
     const state = await sendToWorker({ type: Msg.T.GET_STATE });
-    if (state && !state.error) render(state);
+    if (state && (state.run || !state.error)) render(state);
     else updateStatus('Could not reach ProScan. Close and reopen the popup.', 'error');
     return state;
 }

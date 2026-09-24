@@ -384,7 +384,13 @@ function createEngine({
     /** The latest run and what it found, for the popup and the chat. */
     async function latest() {
         const live = await liveRun();
-        const store = await db();
+        let store;
+        try {
+            store = await db();
+        } catch (err) {
+            // The run record is in session storage, so the popup can still say how it ended.
+            return { run: live, results: [], pages: [], spread: {}, error: err.code || 'storage_error' };
+        }
         const runId = (live && live.runId) || await store.getMeta('latestRunId');
         if (!runId) return { run: null, results: [], pages: [], spread: {} };
         const [rec, results, pages, spreadRows] = await Promise.all([

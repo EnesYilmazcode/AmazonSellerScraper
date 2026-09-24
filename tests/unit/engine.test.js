@@ -375,6 +375,8 @@ describe('the database', () => {
     await settle(5000);
     expect(run).toMatchObject({ state: 'failed', reason: 'storage_error', page: 1 });
     expect(served(rig, 'gone')).toEqual([1, 2]);
+    const st = await rig.popup({ type: 'GET_STATE' });
+    expect(st).toMatchObject({ run: { reason: 'storage_error' }, results: [], error: 'storage_error' });
   });
 });
 
