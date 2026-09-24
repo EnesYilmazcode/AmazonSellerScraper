@@ -80,3 +80,14 @@ test('a quota error is reported as storage_full', () => {
   expect(DB.storageError(quota).code).toBe('storage_full');
   expect(DB.storageError(new Error('other')).code).toBe('storage_error');
 });
+
+test('a database closed by another context says so', async () => {
+  const factory = new IDBFactory();
+  const mine = await DB.open({ indexedDB: factory });
+  expect(mine.closed).toBe(false);
+  await new Promise((resolve) => {
+    const req = factory.deleteDatabase('proscan');
+    req.onsuccess = resolve;
+  });
+  expect(mine.closed).toBe(true);
+});

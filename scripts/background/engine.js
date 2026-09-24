@@ -97,10 +97,20 @@ function createEngine({
     let timer = null;
     let chain = Promise.resolve();
 
-    const db = () => {
-        if (!dbPromise) dbPromise = openDb().catch((err) => { dbPromise = null; throw err; });
-        return dbPromise;
-    };
+    /** The open database, opened again if it was closed under us. */
+    async function db() {
+        if (dbPromise) {
+            const open = await dbPromise.catch(() => null);
+            if (open && !open.closed) return open;
+        }
+        dbPromise = openDb();
+        try {
+            return await dbPromise;
+        } catch (err) {
+            dbPromise = null;
+            throw err;
+        }
+    }
 
     /** Runs `fn` after every change queued before it. */
     function serial(fn) {
@@ -240,11 +250,12 @@ function createEngine({
                 return { ok: true, next: 'end', reason: ended.reason };
             }
 
-            const store = await db();
             const t = now();
+            let store;
             let ops;
             let next;
             try {
+                store = await db();
                 const existing = await store.runProducts(runId);
                 const { fresh, changed } = foldPage(existing, result.products, page);
                 const prevs = await store.getMany('lastValues', fresh.map(p => p.asin));

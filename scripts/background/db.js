@@ -55,9 +55,12 @@ function open({ indexedDB = globalThis.indexedDB, name = NAME } = {}) {
         req.onblocked = () => reject(storageError(new Error('database upgrade blocked')));
         req.onsuccess = () => {
             const idb = req.result;
-            // Another context upgrading the schema should not hang on us.
-            idb.onversionchange = () => idb.close();
-            resolve(api(idb));
+            const db = api(idb);
+            // Another context upgrading or deleting the database should not
+            // hang on us; the caller opens it again.
+            idb.onversionchange = () => { idb.close(); db.closed = true; };
+            idb.onclose = () => { db.closed = true; };
+            resolve(db);
         };
     });
 }
@@ -197,10 +200,12 @@ function api(idb) {
         });
     }
 
-    return {
+    const db = {
         idb, run, get, getAll, getMany, count, write, getMeta, runProducts, runPages, pruneLastValues,
-        close: () => idb.close()
+        closed: false,
+        close() { idb.close(); db.closed = true; }
     };
+    return db;
 }
 
 module.exports = { open, NAME, VERSION, storageError };

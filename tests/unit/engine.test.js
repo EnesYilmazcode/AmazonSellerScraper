@@ -346,6 +346,38 @@ describe('page results', () => {
   });
 });
 
+describe('the database', () => {
+  test('closed under the worker between pages, it is opened again and the run goes on', async () => {
+    let opened = 0;
+    let first = null;
+    const rig = createRig({ site: simpleSite(3), wrapDb: (db) => { opened++; if (!first) first = db; return db; } });
+    await startIn(rig, 'reopen');
+    await settle();
+    first.closed = true;
+    const run = await runUntilEnd(rig);
+    expect(run).toMatchObject({ reason: 'complete', page: 3 });
+    expect(opened).toBe(2);
+  });
+
+  test('that cannot be opened again, it ends the run loudly as storage_error', async () => {
+    let opened = 0;
+    let first = null;
+    const wrapDb = (db) => {
+      if (++opened > 1) throw Object.assign(new Error('VersionError'), { name: 'StorageError', code: 'storage_error' });
+      first = db;
+      return db;
+    };
+    const rig = createRig({ site: simpleSite(3), wrapDb });
+    await startIn(rig, 'gone');
+    await settle();
+    first.closed = true;
+    const run = await runUntilEnd(rig);
+    await settle(5000);
+    expect(run).toMatchObject({ state: 'failed', reason: 'storage_error', page: 1 });
+    expect(served(rig, 'gone')).toEqual([1, 2]);
+  });
+});
+
 describe('products across pages (F-27, F-28)', () => {
   const PAGE1 = page(card('B0A', '$5.00', { ad: true }) + card('B0B', '$2.00') + card('B0A', '$5.00'), '/s?k=w&page=2');
   const PAGE2 = page(card('B0C', '$3.00') + card('B0A', '$5.00') + card('B0B', '$2.00', { rating: false }), null);
