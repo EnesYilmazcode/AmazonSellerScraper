@@ -217,4 +217,61 @@ describe('Storage', () => {
       expect(results).toEqual([]);
     });
   });
+
+  // ── write errors and quota (F-26) ───────────────────────────
+  describe('write errors', () => {
+    test('a quota error rejects with code storage_full', async () => {
+      chrome.storage.local._failNext('QUOTA_BYTES quota exceeded');
+      await expect(Storage.set('results', [1])).rejects.toMatchObject({
+        name: 'StorageError', code: 'storage_full'
+      });
+      expect(await Storage.get('results')).toBeUndefined();
+    });
+
+    test('any other error rejects with code storage_error', async () => {
+      chrome.storage.local._failNext('IO error: .../LOCK: File currently in use.');
+      await expect(Storage.setMultiple({ a: 1 })).rejects.toMatchObject({ code: 'storage_error' });
+    });
+
+    test('resetForNewScrape fails loudly instead of resolving', async () => {
+      chrome.storage.local._failNext();
+      await expect(Storage.resetForNewScrape()).rejects.toMatchObject({ code: 'storage_full' });
+    });
+
+    test('lastError is cleared again after the failed call', async () => {
+      chrome.storage.local._failNext();
+      await Storage.set('a', 1).catch(() => {});
+      await Storage.set('b', 2);
+      expect(await Storage.get('b')).toBe(2);
+      expect(chrome.runtime.lastError).toBeNull();
+    });
+  });
+
+  describe('usage', () => {
+    test('reports bytes against the quota', async () => {
+      await Storage.set('results', [{ asin: 'B001' }]);
+      const u = await Storage.usage();
+      expect(u.quota).toBe(10485760);
+      expect(u.bytes).toBeGreaterThan(0);
+      expect(u.nearFull).toBe(false);
+    });
+
+    test('is near full from 90% of the quota', async () => {
+      const orig = chrome.storage.local.getBytesInUse;
+      chrome.storage.local.getBytesInUse = (keys, cb) => cb(Math.ceil(10485760 * 0.9));
+      try {
+        expect((await Storage.usage()).nearFull).toBe(true);
+      } finally {
+        chrome.storage.local.getBytesInUse = orig;
+      }
+    });
+  });
+
+  describe('remove', () => {
+    test('removes the given keys only', async () => {
+      await Storage.setMultiple({ a: 1, b: 2, c: 3 });
+      await Storage.remove(['a', 'b']);
+      expect(chrome.storage.local._getStore()).toEqual({ c: 3 });
+    });
+  });
 });

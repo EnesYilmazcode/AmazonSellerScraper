@@ -235,6 +235,12 @@ async function initializeUI() {
         updateStatus('Ready to download ' + currentResults.length + ' products', 'success');
     }
 
+    const usage = await Storage.usage().catch(() => null);
+    if (usage && usage.nearFull && !isScrapingActive) {
+        const pct = Math.round((usage.bytes / usage.quota) * 100);
+        updateStatus(`Browser storage is ${pct}% full. Download your results before the next run.`, 'warning');
+    }
+
     if (!isScrapingActive && currentResults.length > 0) {
         elements.spreadButton.classList.remove('hidden');
 
@@ -671,6 +677,13 @@ elements.actionButton.addEventListener('click', async () => {
         } else {
             await stopScraping();
         }
+    } catch (err) {
+        if (err && err.name !== 'StorageError') throw err;
+        console.error('[ProScan] Storage write failed:', err.message);
+        updateStatus(err.code === 'storage_full'
+            ? 'Browser storage is full, so the run could not be saved. Download your results first.'
+            : 'Could not save to browser storage: ' + err.message, 'error');
+        setScrapingState(false);
     } finally {
         elements.actionButton.disabled = false;
     }
