@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
@@ -121,4 +122,32 @@ export async function killServiceWorker(ext, page) {
     await sleep(100);
   }
   return false;
+}
+
+/** Writes the tree of git revision `rev` into `dir`, without touching the index. */
+export function checkoutRevision(rev, dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  const index = path.join(os.tmpdir(), `proscan-index-${process.pid}-${Date.now()}`);
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+  const root = path.resolve(HERE, '../../..');
+  execFileSync('git', ['read-tree', rev], { cwd: root, env });
+  execFileSync('git', ['checkout-index', '-a', `--prefix=${dir.split(path.sep).join('/')}/`], { cwd: root, env });
+  fs.rmSync(index, { force: true });
+}
+
+export function copyDir(src, dst) {
+  fs.rmSync(dst, { recursive: true, force: true });
+  fs.cpSync(src, dst, { recursive: true });
+}
+
+/**
+ * Turns developer mode on. A fresh profile has it off, and then reloading an
+ * unpacked extension from new files disables it (unsupportedDeveloperExtension).
+ */
+export async function enableDeveloperMode(ext) {
+  const page = await ext.context.newPage();
+  await page.goto('chrome://extensions');
+  await page.evaluate(() => new Promise((r) => chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }, r)));
+  await page.close();
 }
