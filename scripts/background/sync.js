@@ -32,8 +32,11 @@ const FIRESTORE = { doc, getDoc, writeBatch, Timestamp, arrayUnion, FieldPath };
 /** Firestore allows 500 writes per batch; stay under it. */
 export const BATCH_LIMIT = 450;
 
-/** Errors that mean the account's session is gone, not the network. */
-const AUTH_CODES = ['permission-denied', 'unauthenticated', 'auth/user-token-expired', 'auth/user-disabled', 'auth/invalid-user-token'];
+/**
+ * Errors that mean the account's session is gone, not the network. A
+ * permission-denied is the rules refusing a document, not a lost session.
+ */
+const AUTH_CODES = ['unauthenticated', 'auth/user-token-expired', 'auth/user-disabled', 'auth/invalid-user-token'];
 
 export function isAuthError(err) {
   return !!err && AUTH_CODES.includes(err.code);

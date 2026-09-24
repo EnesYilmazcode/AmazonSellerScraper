@@ -196,8 +196,9 @@ test('an entry whose run is gone is dropped', async () => {
   expect(await store.count('outbox')).toBe(0);
 });
 
-test('auth errors are told apart from network errors', () => {
-  expect(isAuthError({ code: 'permission-denied' })).toBe(true);
+test('auth errors are told apart from network and rules errors', () => {
+  expect(isAuthError({ code: 'permission-denied' })).toBe(false);
+  expect(isAuthError({ code: 'unauthenticated' })).toBe(true);
   expect(isAuthError({ code: 'auth/user-token-expired' })).toBe(true);
   expect(isAuthError({ code: 'unavailable' })).toBe(false);
   expect(isAuthError(null)).toBe(false);

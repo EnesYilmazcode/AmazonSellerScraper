@@ -283,6 +283,6 @@ test('another account cannot write this account\'s queue, and the entries stay',
   await signOut(auth);
   await account(`b-${Date.now()}@contract.test`);
 
-  await assert.rejects(ext.sync().flush(owner), (err) => isAuthError(err));
+  await assert.rejects(ext.sync().flush(owner), (err) => err.code === 'permission-denied' && !isAuthError(err));
   assert.equal(await (await ext.store()).count('outbox'), 2);
 });
