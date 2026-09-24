@@ -4,6 +4,13 @@
  * Checks today's code gets wrong are listed in KNOWN with their finding id
  * and run as test.failing. When a fix lands the check passes, test.failing
  * reports that, and the entry comes out of KNOWN.
+ *
+ * A test.failing passes on any error, a crash included, so every page also
+ * gets plain checks that must hold today: the parsers run without throwing
+ * and return the right shape. A broken harness or parser fails those.
+ *
+ * NEW-PARSE-1 has no audit finding: the header count selector does not match
+ * the "of over 10,000 results" header, so total comes back 0.
  */
 const Parsers = require('../../scripts/lib/parsers');
 const { corpus, parseDoc } = require('../setup/corpus');
@@ -15,7 +22,7 @@ const KNOWN = {
     'sponsored count': 'F-16',
     'no sspa ad links': 'F-16',
     'next href is the page link': 'F-15',
-    'total results': 'F-25',
+    'total results': 'NEW-PARSE-1',
   },
   '2026-09/search-title-recipe-synthetic': {
     'each ASIN once': 'F-27',
@@ -60,6 +67,12 @@ for (const page of corpus()) {
     beforeAll(() => {
       doc = parseDoc(page.html, exp.url);
       parsed = Parsers.parseSearchPage(doc, exp.url);
+    });
+
+    test('parses without throwing', () => {
+      expect(() => Parsers.parseSearchPage(doc, exp.url)).not.toThrow();
+      expect(Array.isArray(parsed.products)).toBe(true);
+      expect(typeof parsed.kind).toBe('string');
     });
 
     if (exp.type === 'search') {
@@ -122,6 +135,12 @@ for (const page of corpus()) {
     }
 
     if (exp.offers) {
+      test('offer parser runs on an offers page', () => {
+        let prices;
+        expect(() => { prices = Parsers.extractPricesFromDocument(doc); }).not.toThrow();
+        expect(Array.isArray(prices)).toBe(true);
+      });
+
       check(id, 'seller prices', () => {
         expect(Parsers.extractPricesFromDocument(doc)).toEqual(exp.offers.prices);
       });
