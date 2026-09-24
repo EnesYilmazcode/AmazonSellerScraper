@@ -22,6 +22,8 @@ AmazonSellerScraper/
 │   ├── lib/
 │   │   ├── parsers.js        # Pure search/offer parsing (global Parsers)
 │   │   ├── run.js            # Scrape run record, bound to one tab (global Run)
+│   │   ├── flags.js          # Build flags (global Flags); CLOUD_SYNC is off in 2.1
+│   │   ├── migrate.js        # Storage schema migrations, run by the SW
 │   │   └── chat.js           # Gemini request builder, run scoping, error text
 │   ├── background/
 │   │   └── service-worker.js # Message routing + Gemini API calls
@@ -114,7 +116,7 @@ npm run test:coverage # With coverage report
 - Content scripts (`scraper.js`, `offer-fetcher.js`) have no `module.exports` — loaded via `vm.runInContext` into a JSDOM context with Chrome API mocks and an `innerText` polyfill
 - HTML fixtures in `tests/fixtures/` match the exact CSS selectors the code uses
 - Chrome APIs (`storage`, `runtime`, `tabs`, `downloads`) are mocked in `tests/setup/chrome-mock.js`
-- XLSX is mocked with jest.fn() stubs for workbook creation
+- XLSX is mocked with jest.fn() stubs in exporter.test.js; export-xlsx.test.js uses the real libs/xlsx.full.min.js
 
 ## Chrome APIs Used
 
@@ -170,6 +172,30 @@ One record per ASIN per run, from `Parsers.parseSearchPage` and the scraper:
 - `placements`: every card the ASIN had, as `{page, position, sponsored, rank}`
 - `delta`: taken once, on the ASIN's first sighting in the run, against `lastValues` from earlier runs.
   A field that fails to parse keeps its last good value in `lastValues`, with the time in `carried`
+
+## Storage
+
+- `chrome.storage.local` carries `schemaVersion` (3). Storage without it came from 2.0.
+  `scripts/lib/migrate.js` brings it up to date on install, update and browser start;
+  each step is idempotent. 2 to 3 adds `priceCents`, nulls and `/dp/` URLs to 2.0 rows,
+  seeds `lastValues` from them (with `firstSeenAt`), ends a run the update cut off as
+  `updated`, and drops the untouched 2.0 default settings.
+  `tests/fixtures/v2.0-storage.json` is what the live 2.0 build stores, captured with
+  `node tests/e2e/capture-v20-storage.mjs`.
+- `lastValues` is capped by `Delta.prune`: 5,000 ASINs, none older than a year.
+- `Storage` rejects when `chrome.runtime.lastError` is set (code `storage_full` on a
+  quota error). The popup warns from 90% of the quota.
+- Cloud sync is off in 2.1 (`Flags.CLOUD_SYNC`): nothing goes into `syncQueue`, the SW
+  refuses `PROSCAN_EXPORT`, and the popup hides sign-in and Export to ProScan.
+
+## Export
+
+- CSV: UTF-8 with a BOM, CRLF, every text field quoted (RFC 4180). Text starting with
+  `=`, `+`, `-`, `@`, tab or CR gets a leading `'`. Price is a number of dollars from
+  `priceCents`; unknown values are empty cells and real zeros stay 0.
+- Excel: prices, ratings, review counts and scores are numbers; unknowns are empty.
+  `tests/unit/export-xlsx.test.js` writes the workbook with the real SheetJS and checks
+  every XML part parses.
 
 ## Analytics
 

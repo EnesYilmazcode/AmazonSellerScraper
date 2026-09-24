@@ -65,7 +65,8 @@ User clicks "Start Scraping"
   → Follows the page's Next link after a 2 to 4 second delay
   → Repeats until the last page or the page cap (settings.maxPages, default 20)
   → The run ends with a reason: complete, stopped, blocked (captcha,
-    bot check, sign-in), selectors_broken, storage_full or interrupted
+    bot check, sign-in), selectors_broken, storage_full, interrupted or
+    updated (the extension updated mid-run)
   → analyzer.js generates insights and opportunity scores
   → User exports via exporter.js (Excel/CSV/JSON)
 ```
@@ -194,6 +195,8 @@ AmazonSellerScraper/
 │   ├── lib/
 │   │   ├── parsers.js            # Pure search and offer page parsing
 │   │   ├── run.js                # The scrape run record and its end reasons
+│   │   ├── flags.js              # Build flags (cloud sync is off in 2.1)
+│   │   ├── migrate.js            # Storage schema migrations (schemaVersion)
 │   │   └── chat.js               # Gemini request builder and run scoping
 │   ├── background/
 │   │   └── service-worker.js     # Message routing + Gemini API
