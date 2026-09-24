@@ -218,10 +218,10 @@ test('a full storage quota fails the run loudly', async ({ ext }) => {
   expect(endReason(s)).toBe('storage_full');
 });
 
-test('two runs without an export keep their own attribution', async ({ ext }) => {
-  await serveAmazon(ext.context, simplePlan(2));
-  const store = await extPage(ext);
+const Flags = require('../../scripts/lib/flags.js');
 
+/** Scrapes 2 pages of "garden hose" in one tab, then 2 of "yoga mat" in another. */
+async function twoRuns(ext, store, done = () => true) {
   const tab1 = await openSearch(ext, 'garden hose');
   await clickStart(ext, tab1);
   await waitForState(store, (x) => x.scrapeRunPages?.length >= 2 && !x.isScrapingActive, { timeout: 30000 });
@@ -232,8 +232,37 @@ test('two runs without an export keep their own attribution', async ({ ext }) =>
   await aimPopupAt(popup, tab2);
   await popup.click('#actionButton');
   await sleep(300);
-  const s = await waitForState(store, (x) => x.scrapeRunPages?.length >= 2 && !x.isScrapingActive &&
-    (x.syncQueue || []).length >= 16, { timeout: 30000 });
+  return waitForState(store, (x) => x.scrapeRunPages?.length >= 2 && !x.isScrapingActive &&
+    (x.results || []).some((r) => r.name.startsWith('yoga mat')) && done(x), { timeout: 30000 });
+}
+
+test('with cloud sync off (2.1), two runs queue nothing and keep their deltas (F-26)', async ({ ext }) => {
+  test.skip(Flags.CLOUD_SYNC, 'cloud sync is on in this build');
+  await serveAmazon(ext.context, simplePlan(2));
+  const store = await extPage(ext);
+  const s = await twoRuns(ext, store);
+
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('yoga mat', [1, 2]));
+  expect(s).not.toHaveProperty('syncQueue');
+  expect(Object.keys(s.lastValues).sort()).toEqual([...allAsins('garden hose', [1, 2]), ...allAsins('yoga mat', [1, 2])].sort());
+});
+
+test('with cloud sync off (2.1), the popup shows no sign-in and no Export to ProScan', async ({ ext }) => {
+  test.skip(Flags.CLOUD_SYNC, 'cloud sync is on in this build');
+  const popup = await extPage(ext);
+  await sleep(500);
+  await expect(popup.locator('#actionButton')).toBeVisible();
+  await expect(popup.locator('#authPanel')).toBeHidden();
+  await expect(popup.locator('#exportToProScanBtn')).toBeHidden();
+  const resp = await popup.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: 'PROSCAN_EXPORT' }, r)));
+  expect(resp.error).toMatch(/not available/);
+});
+
+test('two runs without an export keep their own attribution', async ({ ext }) => {
+  test.skip(!Flags.CLOUD_SYNC, 'F-20: cloud sync is off in 2.1, so nothing is queued to attribute');
+  await serveAmazon(ext.context, simplePlan(2));
+  const store = await extPage(ext);
+  const s = await twoRuns(ext, store, (x) => (x.syncQueue || []).length >= 16);
 
   const runIds = [...new Set(s.syncQueue.map((p) => p.runId))];
   expect(runIds).toHaveLength(2);
