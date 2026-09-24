@@ -8,9 +8,6 @@
  * A test.failing passes on any error, a crash included, so every page also
  * gets plain checks that must hold today: the parsers run without throwing
  * and return the right shape. A broken harness or parser fails those.
- *
- * NEW-PARSE-1 has no audit finding: the header count selector does not match
- * the "of over 10,000 results" header, so total comes back 0.
  */
 const Parsers = require('../../scripts/lib/parsers');
 const { corpus, parseDoc } = require('../setup/corpus');

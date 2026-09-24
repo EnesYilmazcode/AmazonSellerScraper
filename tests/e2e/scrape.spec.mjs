@@ -344,3 +344,58 @@ test('Start on a tab left over from an update offers a reload, then runs', async
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('orphan', [1, 2]));
   expect(endReason(s)).toBe('complete');
 });
+
+test('a new search typed in the run tab ends the run and is not scraped into it', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(3));
+  const tab = await openSearch(ext, 'first');
+  const store = await extPage(ext);
+  await clickStart(ext, tab);
+  await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
+  await tab.goto(searchUrl('second'));
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 15000 });
+  await sleep(5000);
+
+  expect(pagesOf(served, 'second')).toEqual([1]);
+  expect(pagesOf(served, 'first')).toEqual([1]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('first', [1]));
+  expect(endReason(s)).toBe('interrupted');
+});
+
+test('a run tab that left Amazon and comes back after a minute does not resume', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(3));
+  const tab = await openSearch(ext, 'wander');
+  const store = await extPage(ext);
+  await clickStart(ext, tab);
+  await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
+  // Answered locally like every other request.
+  await tab.route('https://example.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>elsewhere</p>' }));
+  await tab.goto('https://example.com/');
+  // Age the heartbeat instead of waiting out the 60 s.
+  await store.evaluate(async () => {
+    const { run } = await chrome.storage.local.get('run');
+    await chrome.storage.local.set({ run: { ...run, heartbeat: Date.now() - 120000 } });
+  });
+  await tab.goto(searchUrl('wander', 2));
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 15000 });
+  await sleep(5000);
+
+  expect(pagesOf(served, 'wander')).toEqual([1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('wander', [1]));
+  expect(endReason(s)).toBe('interrupted');
+});
+
+test('a 503 error page at page 2 ends the run as a warning, not complete', async ({ ext }) => {
+  const dog = '<!DOCTYPE html><html><head><title>Sorry! Something went wrong!</title></head>'
+    + '<body><b>Sorry! Something went wrong on our end.</b><img alt="Dogs of Amazon"></body></html>';
+  const served = await serveAmazon(ext.context, ({ keyword, page }) =>
+    page === 2 ? { body: dog } : { body: searchPage(keyword, page, { last: page >= 4 }) });
+  const tab = await openSearch(ext, 'throttled');
+  const store = await extPage(ext);
+  await clickStart(ext, tab);
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+  await sleep(2500);
+
+  expect(pagesOf(served, 'throttled')).toEqual([1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('throttled', [1]));
+  expect(endReason(s)).toBe('selectors_broken');
+});

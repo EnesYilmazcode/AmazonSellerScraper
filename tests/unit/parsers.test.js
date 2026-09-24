@@ -28,10 +28,28 @@ describe('Parsers.parseSearchPage', () => {
     expect(r.nextHref).toBeNull();
   });
 
-  test('no result cards is empty', () => {
-    const doc = parseDoc(page('<p>nothing</p>'), URL_P1);
+  test('no result cards and a "No results for" block is empty', () => {
+    const doc = parseDoc(page('<div class="s-main-slot"><div><span>No results for </span><span>zzqx</span></div></div>'), URL_P1);
     const r = Parsers.parseSearchPage(doc, URL_P1);
     expect(r).toEqual({ kind: 'empty', products: [], placements: 0, nextHref: null, total: 0, fill: { asin: 0, title: 0, price: 0 } });
+  });
+
+  test('no result cards and no "No results" marker is unreadable, not empty', () => {
+    expect(Parsers.parseSearchPage(parseDoc(page('<p>nothing</p>'), URL_P1), URL_P1).kind).toBe('unreadable');
+  });
+
+  test('a 503 error page served at a search URL is unreadable', () => {
+    const url = 'https://www.amazon.com/s?k=yoga+mat&page=3';
+    const html = '<!DOCTYPE html><html><head><title>Sorry! Something went wrong!</title></head>'
+      + '<body><a href="/ref=cs_503_logo"><img alt="Amazon.com"></a><b>Sorry! Something went wrong on our end.</b>'
+      + '<img src="https://images-na.ssl-images-amazon.com/images/G/01/error/500_503.png" alt="Dogs of Amazon"></body></html>';
+    expect(Parsers.parseSearchPage(parseDoc(html, url), url).kind).toBe('unreadable');
+  });
+
+  test('renamed result cards inside .s-main-slot are unreadable', () => {
+    const url = 'https://www.amazon.com/s?k=yoga+mat&page=3';
+    const body = '<div class="s-main-slot"><div class="s-card-v2" data-item="B0AAAA0001"><h2><span>Mat</span></h2></div></div>';
+    expect(Parsers.parseSearchPage(parseDoc(page(body), url), url).kind).toBe('unreadable');
   });
 
   test('the next page is the Next link itself, resolved against the page', () => {
@@ -52,7 +70,8 @@ describe('Parsers.parseSearchPage', () => {
     ['a Robot Check title', '<title>Robot Check</title><p>x</p>', URL_P1, 'captcha'],
     ['a sign-in form', '<form name="signIn"><input id="ap_email"></form>', 'https://www.amazon.com/ap/signin?x=1', 'signin'],
     ['a meta refresh bot check', '<meta http-equiv="refresh" content="5; URL=/s?k=a">', URL_P1, 'interstitial'],
-    ['a search page with no cards', '<div class="s-main-slot"></div>', URL_P1, 'empty'],
+    ['a search page with no cards', '<div class="s-main-slot"></div>', URL_P1, 'unreadable'],
+    ['an s-no-results component', '<div class="s-main-slot"><div data-component-type="s-no-results"></div></div>', URL_P1, 'empty'],
     ['a product page', '<div id="dp">Echo Dot</div>', 'https://www.amazon.com/dp/B09B8V1LZ3', 'unknown'],
   ])('a page with %s is %s', (_label, body, url, kind) => {
     expect(Parsers.classifyPage(parseDoc(page(body), url), url)).toBe(kind);

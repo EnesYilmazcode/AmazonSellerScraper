@@ -263,10 +263,21 @@ const Parsers = (() => {
         return hasNextPage(doc) ? getNextPageUrl(url) : null;
     }
 
+    /** Amazon's own "No results for ..." markers on a search page. */
+    const NO_RESULTS = '[data-component-type="s-no-results"], .s-no-results, #noResultsTitle';
+
+    function hasNoResultsMarker(doc) {
+        if (doc.querySelector(NO_RESULTS)) return true;
+        const scope = doc.querySelector('.s-main-slot, .s-search-results, #search') || doc.body;
+        return !!scope && /\bNo results for\b/i.test(scope.textContent || '');
+    }
+
     /**
      * What kind of page this is when it has no result cards: a captcha, a
-     * bot check, a sign-in wall, a search with nothing on it, or something
-     * else (a product page, a broken layout).
+     * bot check, a sign-in wall, a search Amazon says has no results
+     * ('empty'), a search page with no readable cards ('unreadable': an
+     * error page or a changed layout), or something else ('unknown': a
+     * product page, another site section).
      */
     function classifyPage(doc, url) {
         const path = url ? new URL(url).pathname : '';
@@ -275,7 +286,9 @@ const Parsers = (() => {
         if (/^\/ap\/(signin|mfa|cvf)/.test(path) || doc.querySelector('form[name="signIn"], #ap_email, #ap_password')) return 'signin';
         const refresh = doc.querySelector('meta[http-equiv="refresh" i]');
         if (refresh || /bm-verify|_bm_|akamai/i.test(url || '')) return 'interstitial';
-        if (path === '/s' || path.startsWith('/s/') || doc.querySelector(SEARCH_SELECTORS.searchPage)) return 'empty';
+        if (path === '/s' || path.startsWith('/s/') || doc.querySelector(SEARCH_SELECTORS.searchPage)) {
+            return hasNoResultsMarker(doc) ? 'empty' : 'unreadable';
+        }
         return 'unknown';
     }
 
@@ -344,8 +357,8 @@ const Parsers = (() => {
      * Parses one search page.
      *
      * kind is 'results' when there is a next page, 'last' when there is not,
-     * and otherwise what classifyPage says (empty, captcha, interstitial,
-     * signin or unknown). nextHref follows the page's own Next link.
+     * and otherwise what classifyPage says (empty, unreadable, captcha,
+     * interstitial, signin or unknown). nextHref follows the page's own Next link.
      * products holds each ASIN once; placements counts the cards.
      *
      * @param {Document} doc

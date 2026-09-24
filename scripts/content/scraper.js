@@ -72,9 +72,20 @@ async function initialize() {
     if (!Run.owns(run, tabId)) return;
     myTabId = tabId;
 
+    // The tab went quiet for too long (it left Amazon, or the browser slept).
+    if (Run.isStale(run)) {
+        finishRun(run.runId, 'interrupted');
+        return;
+    }
     // A reload of a page already scraped: go on from where the run was.
     if (run.lastUrl === location.href) {
         if (run.nextHref) scheduleNext(run.runId, run.nextHref);
+        return;
+    }
+    // Only the page the run opened is scraped. A search the user typed in
+    // this tab ends the run instead of joining it.
+    if (!Run.expects(run, location.href)) {
+        finishRun(run.runId, 'interrupted');
         return;
     }
     scrapeCurrentPage(run.runId);

@@ -56,7 +56,8 @@ describe('Run.outcome', () => {
 
   test.each([
     ['last', 'complete'],
-    ['empty', 'complete'],
+    ['empty', 'selectors_broken'],
+    ['unreadable', 'selectors_broken'],
     ['captcha', 'blocked'],
     ['interstitial', 'blocked'],
     ['signin', 'blocked'],
@@ -64,6 +65,12 @@ describe('Run.outcome', () => {
     ['nonsense', 'selectors_broken'],
   ])('a %s page ends the run as %s', (kind, reason) => {
     expect(Run.outcome(page(kind, kind === 'last' ? {} : { products: [] }), 2, 20)).toBe(reason);
+  });
+
+  test('"no results" ends the run as complete only on its first page', () => {
+    expect(Run.outcome(page('empty', { products: [] }), 1, 20)).toBe('complete');
+    expect(Run.outcome(page('empty', { products: [] }), 3, 20)).toBe('selectors_broken');
+    expect(Run.outcome(page('unreadable', { products: [] }), 1, 20)).toBe('selectors_broken');
   });
 
   test('cards that all fail to parse mean the selectors broke, even on the last page', () => {
@@ -97,5 +104,27 @@ describe('Run text', () => {
     expect(Run.refusal('captcha')).toMatch(/captcha/);
     expect(Run.refusal('signin')).toMatch(/sign-in/);
     expect(Run.refusal('unknown')).toMatch(/search or storefront/);
+    expect(Run.refusal('unreadable')).toMatch(/could not read/);
+  });
+});
+
+describe('Run.expects', () => {
+  const run = { ...Run.create({ runId: 'r', tabId: 1 }), nextHref: 'https://www.amazon.com/s?k=yoga+mat&page=2&qid=111&ref=sr_pg_1' };
+
+  test('the next page matches, with Amazon rewriting qid and ref', () => {
+    expect(Run.expects(run, 'https://www.amazon.com/s?k=yoga+mat&page=2&qid=999&ref=sr_pg_2')).toBe(true);
+    expect(Run.expects(run, 'https://www.amazon.com/s/ref=sr_pg_2?k=yoga+mat&page=2')).toBe(true);
+  });
+
+  test('a new search, another page or another site does not', () => {
+    expect(Run.expects(run, 'https://www.amazon.com/s?k=garden+hose')).toBe(false);
+    expect(Run.expects(run, 'https://www.amazon.com/s?k=yoga+mat&page=3')).toBe(false);
+    expect(Run.expects(run, 'https://www.amazon.com/s?k=yoga+mat')).toBe(false);
+    expect(Run.expects(run, 'https://example.com/s?k=yoga+mat&page=2')).toBe(false);
+  });
+
+  test('a run with no next page, or not running, expects nothing', () => {
+    expect(Run.expects({ ...run, nextHref: null }, run.nextHref)).toBe(false);
+    expect(Run.expects(Run.finish(run, 'complete'), run.nextHref)).toBe(false);
   });
 });

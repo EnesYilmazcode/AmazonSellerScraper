@@ -49,7 +49,7 @@ afterEach(() => {
 });
 
 async function scrapeTwoPages(lastValues, flags = { CLOUD_SYNC: true }) {
-  const run = Run.create({ runId: 'r1', tabId: 5 });
+  const run = { ...Run.create({ runId: 'r1', tabId: 5 }), nextHref: URL1 };
   chrome.storage.local.set({ run, scrapeRunId: 'r1', scrapeRunPageIndex: 0, isScrapingActive: true, lastValues });
   loadContentScript('scripts/content/scraper.js', PAGE1, URL1, { flags });
   await settle();
@@ -114,7 +114,7 @@ test('a repeat in the same run keeps the delta against the last run', async () =
 });
 
 test('a card with no rating gives a null delta, not a fake drop (F-28)', async () => {
-  const run = Run.create({ runId: 'r1', tabId: 5 });
+  const run = { ...Run.create({ runId: 'r1', tabId: 5 }), nextHref: URL1 };
   chrome.storage.local.set({ run, scrapeRunId: 'r1', scrapeRunPageIndex: 0, isScrapingActive: true, lastValues: { B0B: prevRun(200) } });
   loadContentScript('scripts/content/scraper.js', page(card('B0B', '$2.00', { rating: false }), null), URL1);
   await settle();
@@ -125,7 +125,7 @@ test('a card with no rating gives a null delta, not a fake drop (F-28)', async (
 
 test('organic ranks start at 1 even when an older run is still stored', async () => {
   const old = { asin: 'B0Z', runId: 'r0', placements: [{ page: 1, position: 1, sponsored: false, rank: 1 }] };
-  const run = Run.create({ runId: 'r1', tabId: 5 });
+  const run = { ...Run.create({ runId: 'r1', tabId: 5 }), nextHref: URL1 };
   chrome.storage.local.set({ run, scrapeRunId: 'r1', scrapeRunPageIndex: 0, isScrapingActive: true, results: [old] });
   loadContentScript('scripts/content/scraper.js', page(card('B0B', '$2.00') + card('B0Z', '$1.00'), null), URL1);
   await settle();

@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 function seedRun(extra = {}) {
-  const run = { ...Run.create({ runId: 'r1', tabId: 5 }), ...extra };
+  const run = { ...{ ...Run.create({ runId: 'r1', tabId: 5 }), nextHref: URL1 }, ...extra };
   chrome.storage.local.set({ run, scrapeRunId: 'r1', scrapeRunPageIndex: 0, isScrapingActive: true });
   return run;
 }
@@ -133,4 +133,27 @@ test('PING answers with the page kind', () => {
   const respond = jest.fn();
   listener({ type: 'PING' }, {}, respond);
   expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, kind: 'results' }));
+});
+
+test('a different search typed in the run tab ends the run instead of joining it', async () => {
+  seedRun({ page: 1, lastUrl: URL1, nextHref: 'https://www.amazon.com/s?k=widget&page=2&ref=sr_pg_1' });
+  tabIdForWorker = 5;
+  loadContentScript('scripts/content/scraper.js', html, 'https://www.amazon.com/s?k=garden+hose');
+  await settle();
+  const store = chrome.storage.local._getStore();
+  expect(store.results).toBeUndefined();
+  expect(store.run.status).toBe('interrupted');
+  expect(store.isScrapingActive).toBe(false);
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+test('a stale run is ended, not resumed, when its tab loads Amazon again', async () => {
+  seedRun({ heartbeat: Date.now() - Run.STALE_MS - 1000 });
+  tabIdForWorker = 5;
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  const store = chrome.storage.local._getStore();
+  expect(store.results).toBeUndefined();
+  expect(store.run.status).toBe('interrupted');
+  expect(jest.getTimerCount()).toBe(0);
 });

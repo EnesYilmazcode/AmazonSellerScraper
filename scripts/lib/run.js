@@ -26,8 +26,8 @@ const Run = (() => {
         complete: 'Scraping complete!',
         stopped: 'Scraping stopped.',
         blocked: 'Amazon showed a captcha or a sign-in page, so the run stopped. Solve it in the tab, then start again.',
-        selectors_broken: 'ProScan could not read this page. Amazon may have changed its layout.',
-        storage_full: 'Browser storage is full, so the run stopped. Download your results, then clear them.',
+        selectors_broken: 'ProScan could not read this page. Amazon may have shown an error or changed its layout.',
+        storage_full: 'Browser storage is full, so the run stopped. Download your results. Starting a new scan clears them.',
         interrupted: 'The run ended early because its tab was closed or left the search.',
         updated: 'ProScan was updated during the run, so it stopped. The products found before the update are kept.'
     };
@@ -68,6 +68,31 @@ const Run = (() => {
         return isActive(run) && typeof tabId === 'number' && run.tabId === tabId;
     }
 
+    // Query params that name a search page. Amazon rewrites the others
+    // (qid, ref, crid, ...) on the way, so they are not compared.
+    const PAGE_PARAMS = ['k', 'page', 'me', 'rh', 'i', 'node', 'srs', 'field-keywords'];
+
+    /** True when `a` and `b` are the same search page, ignoring tracking params. */
+    function samePage(a, b) {
+        let x;
+        let y;
+        try {
+            x = new URL(a);
+            y = new URL(b);
+        } catch (e) {
+            return false;
+        }
+        const path = (u) => u.pathname.replace(/\/ref=[^/]*$/, '').replace(/\/$/, '');
+        if (x.hostname !== y.hostname || path(x) !== path(y)) return false;
+        const param = (u, p) => u.searchParams.get(p) || (p === 'page' ? '1' : '');
+        return PAGE_PARAMS.every((p) => param(x, p) === param(y, p));
+    }
+
+    /** True when `href` is the page the run navigated to next. */
+    function expects(run, href) {
+        return isActive(run) && !!run.nextHref && samePage(run.nextHref, href);
+    }
+
     function finish(run, status, now = Date.now()) {
         return { ...run, status, finishedAt: now, nextHref: null };
     }
@@ -88,7 +113,9 @@ const Run = (() => {
             case 'unknown':
                 return 'interrupted';
             case 'empty':
-                return 'complete';
+                // Every page after the first was reached through a Next
+                // link, so "no results" there is not a real end.
+                return pageNumber > 1 ? 'selectors_broken' : 'complete';
             case 'last':
             case 'results':
                 break;
@@ -117,6 +144,8 @@ const Run = (() => {
                 return 'This tab is on an Amazon sign-in page. Sign in, open a search, then start again.';
             case 'empty':
                 return 'This search has no results to scrape.';
+            case 'unreadable':
+                return 'ProScan could not read the results on this page. Reload it, then start again.';
             default:
                 return 'Open an Amazon search or storefront page, then start.';
         }
@@ -141,6 +170,8 @@ const Run = (() => {
         isActive,
         isStale,
         owns,
+        samePage,
+        expects,
         finish,
         outcome,
         pageDelay,
