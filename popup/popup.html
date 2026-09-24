@@ -69,6 +69,25 @@
             </div>
         </div>
 
+        <!-- AI chat settings: the user's own Gemini key -->
+        <details class="auth-panel ai-settings" id="aiSettings">
+            <summary class="auth-title">
+                <i class="fas fa-robot"></i> AI chat settings
+            </summary>
+            <input type="password" id="geminiKeyInput" class="auth-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false">
+            <div class="ai-key-actions">
+                <button id="geminiKeySave" class="auth-button">
+                    <i class="fas fa-key"></i> Save key
+                </button>
+                <button id="geminiKeyClear" class="auth-signout hidden">Remove</button>
+            </div>
+            <div class="ai-key-status" id="geminiKeyStatus"></div>
+            <div class="ai-key-help">
+                Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+                It stays on this computer and is sent only to Google.
+            </div>
+        </details>
+
         <div class="status" id="status">
             <i class="fas fa-info-circle"></i> Ready to start
         </div>
@@ -121,6 +140,7 @@
         </button>
 
     </div>
+    <script src="ai-key.js"></script>
     <script src="popup.js"></script>
 </body>
 </html>

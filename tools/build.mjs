@@ -24,6 +24,7 @@ const DIST = path.join(ROOT, 'dist');
 export const COPY_FILES = [
   'popup/popup.html',
   'popup/popup.js',
+  'popup/ai-key.js',
   'popup/popup.css',
   'scripts/content/scraper.js',
   'scripts/content/chatbot.js',
