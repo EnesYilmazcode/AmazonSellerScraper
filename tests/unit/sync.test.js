@@ -196,6 +196,19 @@ test('an entry whose run is gone is dropped', async () => {
   expect(await store.count('outbox')).toBe(0);
 });
 
+test('an entry that fails validation is dropped instead of blocking the queue', async () => {
+  const store = await DB.open({ name: `sync-test-${++dbCount}` });
+  // A run from before 2.3: its id does not start with its source id.
+  await store.write([
+    { store: 'runs', put: { runId: '1717000000000-abc1234', state: 'updated', reason: 'updated', startedAt: 1717000000000, finishedAt: 1717000100000, maxPages: 5, page: 1, source: { type: 'keyword', keyword: 'lamp', sourceId: 'k_lamp' } } },
+    { store: 'outbox', put: { runId: '1717000000000-abc1234', kind: 'run', uid: 'u1' } }
+  ]);
+  const cloud = fakeFirestore();
+  const sync = createSync({ db: {}, openStore: async () => store, fs: cloud.fs, log: quiet });
+  expect(await sync.flush('u1')).toMatchObject({ entries: 1, writes: 0 });
+  expect(await store.count('outbox')).toBe(0);
+});
+
 test('auth errors are told apart from network and rules errors', () => {
   expect(isAuthError({ code: 'permission-denied' })).toBe(false);
   expect(isAuthError({ code: 'unauthenticated' })).toBe(true);

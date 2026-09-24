@@ -83,7 +83,14 @@ export function createSync({ db, openStore, fs = FIRESTORE, batchLimit = BATCH_L
     if (!run) return null;
     const [products, pages] = await Promise.all([store.runProducts(entry.runId), store.runPages(entry.runId)]);
     const missing = await missingOf(entry.uid, firstSeenCandidates(entry, products));
-    const writes = planEntry({ entry, run, products, pages, missing, time, union });
+    let writes;
+    try {
+      writes = planEntry({ entry, run, products, pages, missing, time, union });
+    } catch (err) {
+      // Planning is pure, so a retry would fail the same way and hold up the queue.
+      log.warn('[ProScan] Dropped an outbox entry that cannot be written:', err.message);
+      return null;
+    }
 
     for (let i = 0; i < writes.length; i += batchLimit) {
       const batch = fs.writeBatch(db);
