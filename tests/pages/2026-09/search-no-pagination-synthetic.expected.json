@@ -1,0 +1,22 @@
+{
+  "type": "search",
+  "synthetic": true,
+  "url": "https://www.amazon.com/s?k=rare+widget",
+  "source": "A results page with no pagination strip at all.",
+  "kind": "last",
+  "asins": [
+    "B0ONLYONE1",
+    "B0ONLYONE2"
+  ],
+  "placements": 2,
+  "sponsored": 0,
+  "next": null,
+  "total": 0,
+  "minFill": 1,
+  "spot": {
+    "B0ONLYONE2": {
+      "name": "Rare Widget, second result",
+      "priceCents": 124900
+    }
+  }
+}

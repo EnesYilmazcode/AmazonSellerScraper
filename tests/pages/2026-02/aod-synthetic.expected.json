@@ -1,0 +1,15 @@
+{
+  "type": "offers",
+  "synthetic": true,
+  "url": "https://www.amazon.com/gp/aod/ajax?asin=B0TEST001",
+  "source": "Copy of tests/fixtures/amazon-offer-aod.html. Invented markup (F-82): real AOD responses have no .aod-information-block.",
+  "offers": {
+    "prices": [
+      24.99,
+      31.5,
+      27,
+      22.99,
+      35
+    ]
+  }
+}

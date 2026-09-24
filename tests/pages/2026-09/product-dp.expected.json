@@ -1,0 +1,14 @@
+{
+  "type": "search",
+  "url": "https://www.amazon.com/dp/B09B8V1LZ3",
+  "source": "Live logged-out product page GET on 2026-09-23 (audit lane offers-price), sanitized. Also what the classic offer-listing fallback redirects to.",
+  "kind": "unknown",
+  "asins": [],
+  "placements": 0,
+  "sponsored": 0,
+  "next": null,
+  "total": 0,
+  "offers": {
+    "prices": []
+  }
+}
