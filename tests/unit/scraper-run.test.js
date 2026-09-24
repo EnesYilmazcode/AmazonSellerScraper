@@ -117,6 +117,22 @@ test('a page is reported once per run, however often it is asked', async () => {
   expect(types().filter((t) => t === 'PAGE_RESULT')).toHaveLength(1);
 });
 
+test('a page whose report never got through is reported again when asked', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 1 };
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  for (let i = 0; i < 3; i++) {
+    jest.advanceTimersByTime(1000);
+    await settle();
+  }
+  expect(types().filter((t) => t === 'PAGE_RESULT')).toHaveLength(3);
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  listener({ type: 'PARSE_PAGE', runId: 'r1', page: 1 }, {}, jest.fn());
+  jest.advanceTimersByTime(0);
+  await settle();
+  expect(types().filter((t) => t === 'PAGE_RESULT')).toHaveLength(4);
+});
+
 test('with no answer from a starting worker it tries again', async () => {
   loadContentScript('scripts/content/scraper.js', html, URL1);
   await settle();

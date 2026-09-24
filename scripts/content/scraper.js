@@ -100,6 +100,8 @@ async function report(message, tries) {
     if (!reply) {
         // The worker may be starting up; it drops a page it already has.
         if (tries > 1 && alive()) setTimeout(() => report(message, tries - 1), RETRY_MS);
+        // Never got through, so a later PARSE_PAGE may try again.
+        else reported.delete(message.runId + ':' + message.page);
         return;
     }
     if (reply.next === 'wait') startHeartbeat(message.runId);
