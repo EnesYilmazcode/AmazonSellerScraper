@@ -177,6 +177,26 @@ test('a product page opened mid-run does not end the run', async ({ ext }) => {
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('gamma', [1, 2, 3]));
 });
 
+for (const [where, url] of [['an Amazon product page', 'https://www.amazon.com/dp/B09B8V1LZ3'], ['another site', 'https://example.com/']]) {
+  test(`the run tab taken to ${where} ends the run and is not pulled back`, async ({ ext }) => {
+    const served = await serveAmazon(ext.context, simplePlan(4));
+    const tab = await openSearch(ext, 'wander');
+    const store = await extPage(ext);
+    await clickStart(ext, tab);
+    await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
+    // Nothing leaves the machine: the other site is served here too.
+    await ext.context.route('https://example.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>elsewhere</p>' }));
+    await tab.goto(url);
+    await sleep(6000);
+    const s = await getState(store);
+
+    expect(tab.url()).toBe(url);
+    expect(pagesOf(served, 'wander')).toEqual([1]);
+    expect(endReason(s)).toBe('interrupted');
+    expect(s.results.map((r) => r.asin)).toEqual(allAsins('wander', [1]));
+  });
+}
+
 test('a slow page is scraped once and the run still completes', async ({ ext }) => {
   const served = await serveAmazon(ext.context, ({ keyword, page }) =>
     ({ body: searchPage(keyword, page, { last: page >= 3 }), delayMs: page === 2 ? 4000 : 0 }));
