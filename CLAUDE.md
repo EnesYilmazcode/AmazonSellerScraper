@@ -21,6 +21,7 @@ AmazonSellerScraper/
 │   │   └── offer-fetcher.js  # Seller price fetching for spread analysis
 │   ├── lib/
 │   │   ├── parsers.js        # Pure search/offer parsing (global Parsers)
+│   │   ├── run.js            # Scrape run record, bound to one tab (global Run)
 │   │   └── chat.js           # Gemini request builder, run scoping, error text
 │   ├── background/
 │   │   └── service-worker.js # Message routing + Gemini API calls
@@ -71,12 +72,14 @@ AmazonSellerScraper/
 ### Scraping
 
 1. User clicks "Start Scraping" in popup
-2. `popup.js` sends `START_SCRAPING` via Chrome runtime
-3. `scraper.js` extracts products from Amazon page
-4. Results stored in `chrome.storage.local` via `storage.js`
-5. Auto-navigates to next page (2s delay) until complete
-6. `analyzer.js` generates insights and opportunity scores
-7. User exports via `exporter.js` (Excel/CSV/JSON)
+2. `popup.js` pings the tab; with no answer it offers `chrome.tabs.reload` and starts after the reload
+3. `popup.js` writes a run record (`scripts/lib/run.js`, key `run`) bound to the tab id, then sends `START_SCRAPING`
+4. `scraper.js` classifies the page (results, last, empty, captcha, interstitial, signin, unknown) and extracts products
+5. Results and run progress stored in `chrome.storage.local` in one write per page
+6. Follows the page's Next link after 2 to 4 seconds, up to `settings.maxPages`; on each load the content script asks the SW for its tab id (`WHO_AM_I`) and acts only if its tab owns the run
+7. The run ends with a reason; Stop goes to the run's tab and cancels the pending navigation
+8. `analyzer.js` generates insights and opportunity scores
+9. User exports via `exporter.js` (Excel/CSV/JSON)
 
 ### AI Chatbot (client-side, no server)
 

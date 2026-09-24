@@ -58,11 +58,14 @@ ProScan is a Chrome extension that scrapes Amazon product listings across multip
 
 ```
 User clicks "Start Scraping"
-  → popup.js sends START_SCRAPING message
-  → scraper.js extracts products from DOM using cascading selectors
-  → Results stored in chrome.storage.local
-  → Auto-navigates to next page (2s delay for rate limiting)
-  → Repeats until no more pages
+  → popup.js pings the tab (offers a reload if ProScan is not loaded there)
+  → popup.js creates a run bound to that tab and sends START_SCRAPING
+  → scraper.js classifies the page, then extracts products
+  → Results and run progress stored in chrome.storage.local
+  → Follows the page's Next link after a 2 to 4 second delay
+  → Repeats until the last page or the page cap (settings.maxPages, default 20)
+  → The run ends with a reason: complete, stopped, blocked (captcha,
+    bot check, sign-in), selectors_broken, storage_full or interrupted
   → analyzer.js generates insights and opportunity scores
   → User exports via exporter.js (Excel/CSV/JSON)
 ```
@@ -190,6 +193,7 @@ AmazonSellerScraper/
 │   │   └── offer-fetcher.js      # Seller offer page fetching for spread analysis
 │   ├── lib/
 │   │   ├── parsers.js            # Pure search and offer page parsing
+│   │   ├── run.js                # The scrape run record and its end reasons
 │   │   └── chat.js               # Gemini request builder and run scoping
 │   ├── background/
 │   │   └── service-worker.js     # Message routing + Gemini API
