@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { test as base, expect } from '@playwright/test';
 import {
   launch, extPage, getState, clickStart, aimPopupAt, waitForState, endReason,
-  runMetaFor, killServiceWorker, sleep,
+  runMetaFor, killServiceWorker, enableDeveloperMode, sleep,
 } from './lib/extension.mjs';
 import { serveAmazon, simplePlan, searchPage, card, asinFor, corpusPage, CAPTCHA } from './lib/amazon.mjs';
 
@@ -95,7 +95,6 @@ test('a captcha at page 2 ends the run as blocked', async ({ ext }) => {
   expect(pagesOf(served, 'usb cable')).toEqual([1, 2]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('usb cable', [1]));
 
-  bug('F-12', 'a captcha page ends the run as complete');
   expect(endReason(s)).toBe('blocked');
 });
 
@@ -136,7 +135,6 @@ test('Stop halts the run before the next page loads', async ({ ext }) => {
   expect(s.isScrapingActive).toBe(false);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('stop me', [1]));
 
-  bug('F-13', 'the pending navigation still fires and the run is never finalized as stopped');
   expect(pagesOf(served, 'stop me')).toEqual([1]);
   expect(endReason(s)).toBe('stopped');
 });
@@ -154,7 +152,6 @@ test('a second search tab opened mid-run does not join the run', async ({ ext })
 
   expect(pagesOf(served, 'beta')[0]).toBe(1);
 
-  bug('F-11', 'every Amazon tab reads the one global flag and scrapes into the run');
   expect(s.results.filter((r) => r.name.startsWith('beta'))).toEqual([]);
   expect(pagesOf(served, 'alpha')).toEqual([1, 2, 3]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('alpha', [1, 2, 3]));
@@ -173,7 +170,6 @@ test('a product page opened mid-run does not end the run', async ({ ext }) => {
 
   expect(await product.title()).not.toBe('');
 
-  bug('F-11', 'a tab with zero listings ends the run for everyone');
   expect(pagesOf(served, 'gamma')).toEqual([1, 2, 3]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('gamma', [1, 2, 3]));
 });
@@ -211,12 +207,11 @@ test('a full storage quota fails the run loudly', async ({ ext }) => {
 
   const tab = await openSearch(ext, 'full disk');
   await clickStart(ext, tab);
-  const s = await waitForState(store, (x) => !x.isScrapingActive, { timeout: 30000 });
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
   await sleep(2500);
 
   expect(pagesOf(served, 'full disk').length).toBeGreaterThanOrEqual(1);
 
-  bug('F-26', 'storage writes ignore lastError, so the run reports complete with nothing saved');
   expect(endReason(s)).toBe('storage_full');
 });
 
@@ -258,5 +253,62 @@ test('a service worker stopped between pages does not break the run', async ({ e
   const s = await waitForState(store, (x) => x.scrapeRunPages?.length >= 3 && !x.isScrapingActive, { timeout: 30000 });
   expect(pagesOf(served, 'sleepy')).toEqual([1, 2, 3]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('sleepy', [1, 2, 3]));
+  expect(endReason(s)).toBe('complete');
+});
+
+test('the page cap in settings ends the run as complete', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(5));
+  const store = await extPage(ext);
+  await store.evaluate(() => chrome.storage.local.set({ settings: { pageDelay: 2000, maxPages: 2 } }));
+  const tab = await openSearch(ext, 'capped');
+  await clickStart(ext, tab);
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+  await sleep(4500);
+
+  expect(pagesOf(served, 'capped')).toEqual([1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('capped', [1, 2]));
+  expect(endReason(s)).toBe('complete');
+});
+
+test('Start on a captcha page changes nothing and says why', async ({ ext }) => {
+  await serveAmazon(ext.context, () => ({ body: CAPTCHA() }));
+  const store = await extPage(ext);
+  await store.evaluate(() => chrome.storage.local.set({ results: [{ asin: 'B0KEEP0001', name: 'kept' }] }));
+  const tab = await openSearch(ext, 'robot');
+  const popup = await clickStart(ext, tab);
+  await sleep(1000);
+  const s = await getState(store);
+
+  expect(s.results.map((r) => r.asin)).toEqual(['B0KEEP0001']);
+  expect(s.run).toBeUndefined();
+  expect(s.isScrapingActive).toBeFalsy();
+  expect(await popup.textContent('#status')).toMatch(/captcha/);
+});
+
+test('Start on a tab left over from an update offers a reload, then runs', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(2));
+  const tab = await openSearch(ext, 'orphan');
+  const before = await extPage(ext);
+  await before.evaluate(() => chrome.storage.local.set({ results: [{ asin: 'B0KEEP0001', name: 'kept' }] }));
+
+  // Reloading the extension orphans the content script already in the tab,
+  // as a Chrome Web Store update does.
+  await enableDeveloperMode(ext);
+  await ext.sw.evaluate(() => chrome.runtime.reload()).catch(() => {});
+  await sleep(3000);
+  const store = await extPage(ext);
+  const popup = await clickStart(ext, tab);
+  await sleep(1000);
+  let s = await getState(store);
+
+  expect(s.results.map((r) => r.asin)).toEqual(['B0KEEP0001']);
+  expect(s.isScrapingActive).toBeFalsy();
+  expect(await popup.isVisible('#reloadTabButton')).toBe(true);
+
+  await popup.click('#reloadTabButton');
+  s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+
+  expect(pagesOf(served, 'orphan')).toEqual([1, 1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('orphan', [1, 2]));
   expect(endReason(s)).toBe('complete');
 });

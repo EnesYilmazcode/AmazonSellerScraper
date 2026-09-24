@@ -84,7 +84,6 @@ test('a scrape running during the update is stopped, not resumed without a run',
 
     expect(s.results.length).toBeGreaterThanOrEqual(4);
 
-    bug('F-101', 'the new content script resumes the old run with no runId');
     expect((s.syncQueue || []).filter((p) => !p.runId).map((p) => p.asin)).toEqual([]);
     expect((s.scrapeRunPages || []).filter((p) => !p.runId)).toEqual([]);
   } finally {
