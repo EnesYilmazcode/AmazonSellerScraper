@@ -8,6 +8,7 @@ import { syncToCloud } from './sync.js';
 import Chat from '../lib/chat.js';
 import Run from '../lib/run.js';
 import Flags from '../lib/flags.js';
+import Migrate from '../lib/migrate.js';
 
 /**
  * @fileoverview Background Service Worker
@@ -65,10 +66,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
 });
 
+/** Brings stored data to the current schema. Safe to call any number of times. */
+function migrate() {
+    return Migrate.run(chrome.storage.local).then((done) => {
+        if (done) console.log(`[ProScan] Storage migrated from schema ${done.from} to ${done.to}`);
+    }, (err) => {
+        console.error('[ProScan] Storage migration failed, will retry:', err && err.message);
+    });
+}
+
 /**
  * Handle extension installation and update events.
  * On fresh install, initializes chrome.storage with default values.
- * On update, logs the new version number.
+ * On update, migrates what the previous version stored.
  */
 chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
@@ -82,10 +92,12 @@ chrome.runtime.onInstalled.addListener((details) => {
             settings: {
                 pageDelay: 2000,
                 maxPages: Run.DEFAULT_MAX_PAGES
-            }
+            },
+            schemaVersion: Migrate.CURRENT
         });
     } else if (details.reason === 'update') {
         console.log('[ProScan] Extension updated to version', chrome.runtime.getManifest().version);
+        migrate();
     }
 });
 
@@ -102,6 +114,7 @@ async function endRunIf(test, reason) {
  * A run cannot survive a browser restart, since its tab id is gone.
  */
 chrome.runtime.onStartup.addListener(() => {
+    migrate();
     chrome.storage.local.set({ isScrapingActive: false });
     endRunIf(() => true, 'interrupted');
 });
