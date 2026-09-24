@@ -1,11 +1,14 @@
 /**
- * @fileoverview The scrape run record.
+ * @fileoverview The scrape run record and its state machine.
  *
- * One run at a time, bound to the tab it started in. It is kept in
- * chrome.storage.local under `run` so the popup, the service worker and the
- * content script all see the same thing. The popup starts and stops it, the
- * content script in that tab moves it page by page and ends it with a
- * reason, and the service worker ends it if the tab goes away.
+ * One run at a time, bound to the tab it started in. The service worker is
+ * the only writer: it keeps the live record in chrome.storage.session under
+ * `run` and a durable copy in IndexedDB. The popup reads it to render, and
+ * content scripts never see it.
+ *
+ * States: idle (no run), starting, running, stopping, and the ends stopped,
+ * blocked, failed and done. `reason` says why a run ended; `END_STATE` maps
+ * each reason to its end state.
  *
  * Loaded as a plain global (`Run`) in the popup and content scripts, and as
  * a CommonJS module in Jest and the bundled service worker.
@@ -29,7 +32,36 @@ const Run = (() => {
         selectors_broken: 'ProScan could not read this page. Amazon may have shown an error or changed its layout.',
         storage_full: 'Browser storage is full, so the run stopped. Download your results. Starting a new scan clears them.',
         interrupted: 'The run ended early because its tab was closed or left the search.',
+        storage_error: 'ProScan could not save a page, so the run stopped.',
         updated: 'ProScan was updated during the run, so it stopped. The products found before the update are kept.'
+    };
+
+    /** The state each end reason leaves a run in. */
+    const END_STATE = {
+        complete: 'done',
+        stopped: 'stopped',
+        blocked: 'blocked',
+        selectors_broken: 'failed',
+        storage_full: 'failed',
+        storage_error: 'failed',
+        interrupted: 'failed',
+        updated: 'failed'
+    };
+
+    const STATES = ['idle', 'starting', 'running', 'stopping', 'stopped', 'blocked', 'failed', 'done'];
+    const ENDS = ['stopped', 'blocked', 'failed', 'done'];
+    const LIVE = ['starting', 'running', 'stopping'];
+
+    /** Where each state may go. An ended run is never reopened; a new run is a new record. */
+    const TRANSITIONS = {
+        idle: ['starting'],
+        starting: ['running', 'stopping', ...ENDS],
+        running: ['stopping', ...ENDS],
+        stopping: ENDS,
+        stopped: [],
+        blocked: [],
+        failed: [],
+        done: []
     };
 
     /** Page kinds a run can start on. */
@@ -40,30 +72,55 @@ const Run = (() => {
         return Number.isInteger(v) && v > 0 ? Math.min(v, MAX_PAGES_LIMIT) : DEFAULT_MAX_PAGES;
     }
 
-    function create({ runId, tabId, maxPages, now = Date.now() }) {
+    function create({ runId, tabId, maxPages, source = null, now = Date.now() }) {
         return {
             runId,
             tabId,
-            status: 'running',
+            state: 'starting',
+            reason: null,
+            source,
             page: 0,
+            itemCount: 0,
             maxPages: clampMaxPages(maxPages),
             startedAt: now,
             heartbeat: now,
             finishedAt: null,
             lastUrl: null,
-            nextHref: null
+            nextHref: null,
+            navAt: null,
+            awaiting: false
         };
     }
 
+    /** The state of `run`, or idle when there is none. */
+    function stateOf(run) {
+        return run && STATES.includes(run.state) ? run.state : 'idle';
+    }
+
+    function canTransition(from, to) {
+        return (TRANSITIONS[from] || []).includes(to);
+    }
+
+    /** `run` moved to state `to` with `patch` applied. Throws on a move the machine does not allow. */
+    function transition(run, to, patch = {}) {
+        const from = stateOf(run);
+        if (!canTransition(from, to)) throw new Error(`run cannot go from ${from} to ${to}`);
+        return { ...run, ...patch, state: to };
+    }
+
     function isActive(run) {
-        return !!run && run.status === 'running';
+        return LIVE.includes(stateOf(run));
+    }
+
+    function isEnded(run) {
+        return ENDS.includes(stateOf(run));
     }
 
     function isStale(run, now = Date.now()) {
         return isActive(run) && now - (run.heartbeat || 0) > STALE_MS;
     }
 
-    /** True when `tabId` is the tab this running run belongs to. */
+    /** True when `tabId` is the tab this live run belongs to. */
     function owns(run, tabId) {
         return isActive(run) && typeof tabId === 'number' && run.tabId === tabId;
     }
@@ -93,8 +150,10 @@ const Run = (() => {
         return isActive(run) && !!run.nextHref && samePage(run.nextHref, href);
     }
 
-    function finish(run, status, now = Date.now()) {
-        return { ...run, status, finishedAt: now, nextHref: null };
+    /** `run` ended for `reason`. */
+    function finish(run, reason, now = Date.now()) {
+        const to = END_STATE[reason] || 'failed';
+        return transition(run, to, { reason, finishedAt: now, nextHref: null, navAt: null, awaiting: false });
     }
 
     /**
@@ -129,6 +188,20 @@ const Run = (() => {
         return null;
     }
 
+    /** What a search URL scans: a storefront (me=) or a keyword (k=). */
+    function sourceOf(url, now = Date.now()) {
+        let type = 'keyword';
+        let sellerId = null;
+        let keyword = null;
+        try {
+            const u = new URL(url);
+            const me = u.searchParams.get('me');
+            const k = u.searchParams.get('k');
+            if (me) { type = 'storefront'; sellerId = me; } else if (k) keyword = k;
+        } catch (e) { /* not a URL */ }
+        return { type, sellerId, keyword, url: url || null, startedAt: new Date(now).toISOString() };
+    }
+
     /** Wait before the next page: 2 to 4 seconds. */
     function pageDelay(rand = Math.random()) {
         return 2000 + Math.floor(rand * 2000);
@@ -155,8 +228,8 @@ const Run = (() => {
     function describe(run, count) {
         if (!run) return null;
         if (isActive(run)) return { text: 'Scraping in progress... ' + count + ' items', type: 'info' };
-        const text = (MESSAGES[run.status] || 'Scraping ended.') + ' ' + count + ' products found.';
-        return { text, type: run.status === 'complete' ? 'success' : 'warning' };
+        const text = (MESSAGES[run.reason] || 'Scraping ended.') + ' ' + count + ' products found.';
+        return { text, type: run.reason === 'complete' ? 'success' : 'warning' };
     }
 
     return {
@@ -164,10 +237,16 @@ const Run = (() => {
         DEFAULT_MAX_PAGES,
         STALE_MS,
         MESSAGES,
+        END_STATE,
+        STATES,
         STARTABLE,
         clampMaxPages,
         create,
+        stateOf,
+        canTransition,
+        transition,
         isActive,
+        isEnded,
         isStale,
         owns,
         samePage,
@@ -175,6 +254,7 @@ const Run = (() => {
         finish,
         outcome,
         pageDelay,
+        sourceOf,
         refusal,
         describe
     };
