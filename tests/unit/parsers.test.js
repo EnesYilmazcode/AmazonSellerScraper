@@ -184,7 +184,15 @@ describe('Parsers.scrapeProduct fields', () => {
 
   test('a card with no title, rating or reviews has nulls, not 0 or N/A', () => {
     const p = Parsers.scrapeProduct(one('<div class="s-result-item" data-asin="B0BARE"></div>'));
-    expect(p).toMatchObject({ name: null, price: null, priceCents: null, rating: null, reviewCount: null });
+    expect(p).toMatchObject({ name: null, price: null, priceCents: null, rating: null, reviewCount: null, img: null });
+  });
+
+  test('the image comes from Amazon\'s image host only (F-25)', () => {
+    const img = (src) => `<div class="s-result-item" data-asin="B0IMG"><img class="s-image" src="${src}"></div>`;
+    const good = 'https://m.media-amazon.com/images/I/81s9TLcupfL._AC_UL320_.jpg';
+    expect(Parsers.scrapeProduct(one(img(good))).img).toBe(good);
+    expect(Parsers.scrapeProduct(one(img('data:image/gif;base64,R0lGOD'))).img).toBeNull();
+    expect(Parsers.scrapeProduct(one(img('https://evil.example/x.jpg'))).img).toBeNull();
   });
 });
 
