@@ -285,6 +285,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-lastpage 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 1,
           "rank": 1,
           "sponsored": false,
@@ -345,6 +346,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 1,
           "rank": 1,
           "sponsored": false,
@@ -374,6 +376,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 2,
           "rank": 2,
           "sponsored": false,
@@ -403,6 +406,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 3,
           "rank": 3,
           "sponsored": false,
@@ -432,6 +436,7 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 4,
           "rank": 4,
           "sponsored": false,
@@ -569,6 +574,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 1,
           "rank": 1,
           "sponsored": false,
@@ -598,6 +604,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 2,
           "rank": 2,
           "sponsored": false,
@@ -658,11 +665,13 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 1,
           "rank": null,
           "sponsored": true,
         },
         {
+          "page": 1,
           "position": 4,
           "rank": 3,
           "sponsored": false,
@@ -692,6 +701,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 2,
           "rank": 1,
           "sponsored": false,
@@ -721,6 +731,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 3,
           "rank": 2,
           "sponsored": false,
@@ -780,6 +791,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 1,
           "rank": null,
           "sponsored": true,
@@ -809,11 +821,13 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 2,
           "rank": null,
           "sponsored": true,
         },
         {
+          "page": 1,
           "position": 18,
           "rank": 10,
           "sponsored": false,
@@ -843,6 +857,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 3,
           "rank": null,
           "sponsored": true,
@@ -872,6 +887,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 4,
           "rank": null,
           "sponsored": true,
@@ -901,6 +917,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 5,
           "rank": 1,
           "sponsored": false,
@@ -930,6 +947,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 6,
           "rank": 2,
           "sponsored": false,
@@ -959,6 +977,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 7,
           "rank": 3,
           "sponsored": false,
@@ -988,6 +1007,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 8,
           "rank": 4,
           "sponsored": false,
@@ -1017,6 +1037,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 9,
           "rank": 5,
           "sponsored": false,
@@ -1046,6 +1067,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 10,
           "rank": 6,
           "sponsored": false,
@@ -1075,6 +1097,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 11,
           "rank": null,
           "sponsored": true,
@@ -1104,6 +1127,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 12,
           "rank": null,
           "sponsored": true,
@@ -1133,6 +1157,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 13,
           "rank": null,
           "sponsored": true,
@@ -1162,6 +1187,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 14,
           "rank": null,
           "sponsored": true,
@@ -1191,6 +1217,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 15,
           "rank": 7,
           "sponsored": false,
@@ -1220,6 +1247,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 16,
           "rank": 8,
           "sponsored": false,
@@ -1249,6 +1277,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 17,
           "rank": 9,
           "sponsored": false,
@@ -1278,6 +1307,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 19,
           "rank": null,
           "sponsored": true,
@@ -1307,6 +1337,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 20,
           "rank": null,
           "sponsored": true,
@@ -1336,6 +1367,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 21,
           "rank": null,
           "sponsored": true,
@@ -1365,6 +1397,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 22,
           "rank": null,
           "sponsored": true,
@@ -1394,6 +1427,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 23,
           "rank": 11,
           "sponsored": false,
@@ -1423,6 +1457,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 24,
           "rank": 12,
           "sponsored": false,
@@ -1452,6 +1487,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 25,
           "rank": 13,
           "sponsored": false,
@@ -1481,6 +1517,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 26,
           "rank": 14,
           "sponsored": false,
@@ -1510,6 +1547,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 27,
           "rank": 15,
           "sponsored": false,
@@ -1539,6 +1577,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 28,
           "rank": 16,
           "sponsored": false,
@@ -1568,6 +1607,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 29,
           "rank": 17,
           "sponsored": false,
@@ -1597,6 +1637,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 30,
           "rank": 18,
           "sponsored": false,
@@ -1626,6 +1667,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 31,
           "rank": 19,
           "sponsored": false,
@@ -1655,6 +1697,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 32,
           "rank": 20,
           "sponsored": false,
@@ -1684,6 +1727,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 33,
           "rank": 21,
           "sponsored": false,
@@ -1713,6 +1757,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 34,
           "rank": 22,
           "sponsored": false,
@@ -1742,6 +1787,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 35,
           "rank": 23,
           "sponsored": false,
@@ -1771,6 +1817,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 36,
           "rank": 24,
           "sponsored": false,
@@ -1800,6 +1847,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 37,
           "rank": 25,
           "sponsored": false,
@@ -1829,6 +1877,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 38,
           "rank": 26,
           "sponsored": false,
@@ -1858,6 +1907,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 39,
           "rank": 27,
           "sponsored": false,
@@ -1887,6 +1937,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 40,
           "rank": 28,
           "sponsored": false,
@@ -1916,6 +1967,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 41,
           "rank": 29,
           "sponsored": false,
@@ -1945,6 +1997,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 42,
           "rank": 30,
           "sponsored": false,
@@ -1974,6 +2027,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 43,
           "rank": 31,
           "sponsored": false,
@@ -2003,6 +2057,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 44,
           "rank": 32,
           "sponsored": false,
@@ -2032,6 +2087,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 45,
           "rank": 33,
           "sponsored": false,
@@ -2061,6 +2117,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 46,
           "rank": 34,
           "sponsored": false,
@@ -2090,6 +2147,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 47,
           "rank": 35,
           "sponsored": false,
@@ -2119,6 +2177,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 48,
           "rank": 36,
           "sponsored": false,
@@ -2148,6 +2207,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 49,
           "rank": 37,
           "sponsored": false,
@@ -2177,6 +2237,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 50,
           "rank": 38,
           "sponsored": false,
@@ -2206,6 +2267,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 51,
           "rank": 39,
           "sponsored": false,
@@ -2235,6 +2297,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 52,
           "rank": 40,
           "sponsored": false,
@@ -2264,6 +2327,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 53,
           "rank": 41,
           "sponsored": false,
@@ -2293,6 +2357,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 54,
           "rank": 42,
           "sponsored": false,
@@ -2322,6 +2387,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 55,
           "rank": 43,
           "sponsored": false,
@@ -2351,6 +2417,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 56,
           "rank": 44,
           "sponsored": false,
@@ -2380,6 +2447,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 57,
           "rank": 45,
           "sponsored": false,
@@ -2409,6 +2477,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 58,
           "rank": 46,
           "sponsored": false,
@@ -2438,6 +2507,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 59,
           "rank": 47,
           "sponsored": false,
@@ -2467,6 +2537,7 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
       "pageIndex": 1,
       "placements": [
         {
+          "page": 1,
           "position": 60,
           "rank": 48,
           "sponsored": false,

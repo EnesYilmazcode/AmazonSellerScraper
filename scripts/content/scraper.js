@@ -132,35 +132,42 @@ function scrapeCurrentPage(runId) {
                 return;
             }
 
+            const runKey = data.scrapeRunId || runId;
+            const runResults = data.results || [];
+            const syncQueue = data.syncQueue || [];
+            const fresh = mergeRepeats(results, pageIndex, runKey, runResults, syncQueue);
+
             chrome.runtime.sendMessage({
                 type: 'UPDATE_PROGRESS',
-                itemCount: results.length,
-                results: results
+                itemCount: fresh.length,
+                results: fresh
             });
 
-            // Stamp each product with run context + deltas vs its prior snapshot,
-            // then roll its values forward into lastValues for the next run.
+            // Only an ASIN's first sighting in the run gets a delta, taken
+            // against the last run's snapshot, and rolls lastValues forward.
             const lastValues = data.lastValues || {};
             const stampedAt = new Date().toISOString();
-            results.forEach(product => {
-                product.runId = data.scrapeRunId || runId;
+            fresh.forEach(product => {
+                product.runId = runKey;
                 product.pageIndex = pageIndex;
                 product.delta = Delta.computeDeltas(product, lastValues[product.asin] || null);
                 lastValues[product.asin] = Delta.snapshot(product);
             });
 
-            const newCount = previousCount + results.length;
-            const syncQueue = data.syncQueue || [];
-            syncQueue.push(...results);
+            const newCount = previousCount + fresh.length;
+            syncQueue.push(...fresh);
             const runPages = data.scrapeRunPages || [];
-            runPages.push({ runId: data.scrapeRunId || runId, pageIndex, count: results.length, scrapedAt: stampedAt, url: location.href });
+            runPages.push({
+                runId: runKey, pageIndex, count: fresh.length, placements: page.placements,
+                scrapedAt: stampedAt, url: location.href
+            });
 
             const now = Date.now();
             let nextRun = { ...run, page: pageIndex, heartbeat: now, lastUrl: location.href, nextHref: page.nextHref };
             if (ending) nextRun = Run.finish(nextRun, ending, now);
 
             chrome.storage.local.set({
-                results: [...(data.results || []), ...results],
+                results: [...runResults, ...fresh],
                 currentItemCount: newCount,
                 scrapeRunPageIndex: pageIndex,
                 lastValues: lastValues,
@@ -187,6 +194,46 @@ function scrapeCurrentPage(runId) {
             });
         }
     );
+}
+
+/**
+ * Folds this page's products into the run. Placements get the page number
+ * and a run-wide organic rank. An ASIN already in the run only adds its
+ * placements to the stored record (and its sync queue copy); the rest are
+ * returned as new.
+ */
+function mergeRepeats(products, pageIndex, runKey, runResults, syncQueue) {
+    const organicBefore = runResults.reduce(
+        (n, r) => n + (r.placements || []).filter(pl => !pl.sponsored).length, 0);
+    const known = new Map();
+    runResults.forEach(r => { if (r.runId === runKey) known.set(r.asin, r); });
+
+    const fresh = [];
+    products.forEach(product => {
+        const placements = (product.placements || []).map(pl => ({
+            page: pageIndex,
+            ...pl,
+            rank: pl.rank === null ? null : pl.rank + organicBefore
+        }));
+        const firstRank = (placements.find(pl => pl.rank !== null) || {}).rank;
+        product.placements = placements;
+        product.organicRank = firstRank === undefined ? null : firstRank;
+
+        const seen = known.get(product.asin);
+        if (!seen) {
+            fresh.push(product);
+            return;
+        }
+        const queued = syncQueue.find(q => q.asin === product.asin && q.runId === runKey);
+        // The two can be one object when storage hands back shared references
+        new Set([seen, queued]).forEach(rec => {
+            if (!rec) return;
+            rec.placements = [...(rec.placements || []), ...placements];
+            rec.sponsored = !!rec.sponsored || product.sponsored;
+            if (rec.organicRank == null) rec.organicRank = product.organicRank;
+        });
+    });
+    return fresh;
 }
 
 /**
