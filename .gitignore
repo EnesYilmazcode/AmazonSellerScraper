@@ -10,3 +10,8 @@ dist/
 build/
 *.zip
 dist-zips/
+
+# e2e harness output
+tests/e2e/.build/
+tests/e2e/.results/
+tests/e2e/.report/
