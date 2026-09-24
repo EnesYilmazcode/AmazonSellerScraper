@@ -85,6 +85,31 @@ test('Stop cancels the pending page and records the run as stopped', async () =>
   expect(chrome.storage.local._getStore().isScrapingActive).toBe(false);
 });
 
+test('Stop during a page save still ends the run as stopped', async () => {
+  seedRun();
+  tabIdForWorker = 5;
+  const realSet = chrome.storage.local.set;
+  let held = null;
+  chrome.storage.local.set = (items, cb) => {
+    if (items.results && !held) { held = () => realSet.call(chrome.storage.local, items, cb); return; }
+    return realSet.call(chrome.storage.local, items, cb);
+  };
+  try {
+    loadContentScript('scripts/content/scraper.js', html, URL1);
+    await settle();
+    expect(held).not.toBeNull();
+    const respond = jest.fn();
+    listener({ type: 'STOP_SCRAPING', runId: 'r1' }, {}, respond);
+    await settle();
+    held();
+    await settle();
+  } finally {
+    chrome.storage.local.set = realSet;
+  }
+  expect(chrome.storage.local._getStore().run.status).toBe('stopped');
+  expect(jest.getTimerCount()).toBe(0);
+});
+
 test('the page cap ends the run on that page', async () => {
   seedRun({ maxPages: 1 });
   tabIdForWorker = 5;

@@ -28,6 +28,8 @@ let myTabId = null;
 let navTimer = null;
 /** Runs this document has already scraped, so no page is scraped twice. */
 const scrapedRuns = new Set();
+/** Runs stopped while this page was being saved. */
+const stoppedRuns = new Set();
 
 /** False once the extension was updated or removed under this page. */
 function alive() {
@@ -174,7 +176,10 @@ function scrapeCurrentPage(runId) {
                 }
                 chrome.runtime.sendMessage({ type: 'ENQUEUE_SYNC', runId: data.scrapeRunId || runId, pageIndex: pageIndex });
 
-                if (ending) {
+                // Stop landed between the read and this write, which put the run back.
+                if (!ending && stoppedRuns.has(runId)) {
+                    finishRun(runId, 'stopped');
+                } else if (ending) {
                     announceEnd(ending, newCount);
                 } else {
                     scheduleNext(runId, page.nextHref);
@@ -257,6 +262,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         navTimer = null;
         getRun().then(run => {
             const runId = request.runId || (run && run.runId);
+            if (runId) stoppedRuns.add(runId);
             return finishRun(runId, 'stopped');
         }).then(() => sendResponse({ stopped: true }));
         return true;
