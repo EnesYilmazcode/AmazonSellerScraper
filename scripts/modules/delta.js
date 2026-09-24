@@ -86,6 +86,38 @@ const Delta = {
         }
         if (Object.keys(carried).length) snap.carried = carried;
         return snap;
+    },
+
+    /** lastValues keeps at most this many ASINs... */
+    MAX_ENTRIES: 5000,
+    /** ...none last seen more than this many days ago. */
+    MAX_AGE_DAYS: 180,
+
+    /**
+     * Bound lastValues so it cannot fill the storage quota (F-26). Drops
+     * snapshots older than MAX_AGE_DAYS, then keeps the MAX_ENTRIES most
+     * recently seen. A snapshot with no date counts as oldest but is not
+     * dropped for age alone.
+     *
+     * @param {Object} lastValues - asin -> snapshot
+     * @param {{max?: number, maxAgeDays?: number, now?: number}} [opts]
+     * @returns {Object} A new, bounded map
+     */
+    prune(lastValues, { max = this.MAX_ENTRIES, maxAgeDays = this.MAX_AGE_DAYS, now = Date.now() } = {}) {
+        const cutoff = now - maxAgeDays * 86400000;
+        const seen = (snap) => {
+            const t = Date.parse((snap && snap.scrapedAt) || '');
+            return Number.isNaN(t) ? null : t;
+        };
+        let entries = Object.entries(lastValues || {}).filter(([, snap]) => {
+            const t = seen(snap);
+            return t === null || t >= cutoff;
+        });
+        if (entries.length > max) {
+            entries.sort((a, b) => (seen(b[1]) ?? -Infinity) - (seen(a[1]) ?? -Infinity));
+            entries = entries.slice(0, max);
+        }
+        return Object.fromEntries(entries);
     }
 };
 

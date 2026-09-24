@@ -70,4 +70,43 @@ describe('delta.js', () => {
       expect(fourth.carried).toBeUndefined();
     });
   });
+
+  describe('prune (F-26)', () => {
+    const NOW = Date.parse('2026-09-24T00:00:00Z');
+    const at = (daysAgo) => ({ priceCents: 100, rating: 4, reviewCount: 1, runId: 'r',
+      scrapedAt: new Date(NOW - daysAgo * 86400000).toISOString() });
+
+    test('keeps a small map as it is', () => {
+      const lv = { B01: at(1), B02: at(30) };
+      expect(Delta.prune(lv, { now: NOW })).toEqual(lv);
+    });
+
+    test('drops snapshots older than the age limit', () => {
+      const lv = { NEW: at(10), OLD: at(181) };
+      expect(Object.keys(Delta.prune(lv, { now: NOW }))).toEqual(['NEW']);
+    });
+
+    test('keeps the most recently seen ASINs past the cap', () => {
+      const lv = { A: at(5), B: at(1), C: at(3), D: { priceCents: 1, scrapedAt: null } };
+      expect(Object.keys(Delta.prune(lv, { max: 2, now: NOW })).sort()).toEqual(['B', 'C']);
+    });
+
+    test('an undated snapshot survives the age limit but goes first at the cap', () => {
+      const lv = { U: { priceCents: 1, scrapedAt: null }, A: at(2) };
+      expect(Object.keys(Delta.prune(lv, { now: NOW })).sort()).toEqual(['A', 'U']);
+      expect(Object.keys(Delta.prune(lv, { max: 1, now: NOW }))).toEqual(['A']);
+    });
+
+    test('20,000 ASINs come down to the default cap', () => {
+      const lv = {};
+      for (let i = 0; i < 20000; i++) lv['B' + String(i).padStart(9, '0')] = at(i % 150);
+      const out = Delta.prune(lv, { now: NOW });
+      expect(Object.keys(out)).toHaveLength(Delta.MAX_ENTRIES);
+      expect(JSON.stringify(out).length).toBeLessThan(1024 * 1024);
+    });
+
+    test('handles a missing map', () => {
+      expect(Delta.prune(undefined)).toEqual({});
+    });
+  });
 });

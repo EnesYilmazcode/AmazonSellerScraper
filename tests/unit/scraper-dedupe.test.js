@@ -95,6 +95,14 @@ test('a queue left by an older build is not grown while sync is off', async () =
   expect(store.syncQueue).toEqual([{ asin: 'B0OLD', runId: 'r0' }]);
 });
 
+test('each page write drops lastValues older than the age limit (F-26)', async () => {
+  const stale = { priceCents: 1, rating: null, reviewCount: null, runId: 'r0',
+    scrapedAt: new Date(Date.now() - 400 * 86400000).toISOString() };
+  const store = await scrapeTwoPages({ B0GONE: stale });
+  expect(store.lastValues).not.toHaveProperty('B0GONE');
+  expect(Object.keys(store.lastValues).sort()).toEqual(['B0A', 'B0B', 'B0C']);
+});
+
 test('a repeat in the same run keeps the delta against the last run', async () => {
   const store = await scrapeTwoPages({ B0A: prevRun(600), B0B: prevRun(250) });
   const [a, b] = store.results;

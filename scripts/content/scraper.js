@@ -174,7 +174,7 @@ function scrapeCurrentPage(runId) {
                 results: [...runResults, ...fresh],
                 currentItemCount: newCount,
                 scrapeRunPageIndex: pageIndex,
-                lastValues: lastValues,
+                lastValues: Delta.prune(lastValues),
                 scrapeRunPages: runPages,
                 [Run.KEY]: nextRun,
                 isScrapingActive: !ending
