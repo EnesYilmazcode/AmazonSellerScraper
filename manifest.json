@@ -9,14 +9,7 @@
     ],
     "host_permissions": [
         "*://*.amazon.com/*",
-        "https://generativelanguage.googleapis.com/*",
-        "https://identitytoolkit.googleapis.com/*",
-        "https://securetoken.googleapis.com/*",
-        "https://firestore.googleapis.com/*",
-        "https://www.googleapis.com/*",
-        "https://*.firebaseapp.com/*",
-        "http://127.0.0.1/*",
-        "http://localhost/*"
+        "https://generativelanguage.googleapis.com/*"
     ],
     "action": {
         "default_popup": "popup/popup.html",
@@ -45,7 +38,7 @@
         }
     ],
     "content_security_policy": {
-        "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://www.googleapis.com https://*.firebaseapp.com http://127.0.0.1:* http://localhost:*"
+        "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://generativelanguage.googleapis.com"
     },
     "background": {
         "service_worker": "scripts/background/service-worker.js"
