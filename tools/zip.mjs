@@ -39,7 +39,7 @@ if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
 const archivePaths = listFilesRecursive(DIST).sort();
 
 // ---- Gate 1: ALLOWLIST -----------------------------------------------------
-const ALLOWLIST = new Set([...COPY_FILES, BUNDLE_ENTRY]);
+const ALLOWLIST = new Set([...COPY_FILES, BUNDLE_ENTRY, 'manifest.json']);
 const notAllowed = archivePaths.filter((p) => !ALLOWLIST.has(p));
 if (notAllowed.length > 0) {
   fail('ALLOWLIST', notAllowed.map((p) => `unexpected file in dist/: ${p}`));

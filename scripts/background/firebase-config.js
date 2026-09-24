@@ -1,15 +1,21 @@
 /**
  * @fileoverview Firebase config for the ProScan extension.
  *
- * Same Firebase project (proscanbot) for dev and prod — only the emulator
- * wiring differs, gated by PROSCAN_ENV which esbuild inlines at build time
- * (see tools/build.mjs `define`). Web API keys are public identifiers, not
- * secrets; access is governed entirely by Firestore security rules.
+ * Prod talks to the proscanbot project. The dev build
+ * (`PROSCAN_ENV=dev npm run build`) sets the literal __PROSCAN_EMULATOR__
+ * through esbuild `define` and points at the local emulator suite under the
+ * demo-proscan project, the same id the dashboard dev build uses. Web API
+ * keys are public identifiers, not secrets; access is governed by the
+ * Firestore security rules.
  *
  * @module FirebaseConfig
  */
 
-export const FIREBASE_CONFIG = {
+/* global __PROSCAN_EMULATOR__ */
+export const USE_EMULATOR =
+  typeof __PROSCAN_EMULATOR__ !== 'undefined' && __PROSCAN_EMULATOR__ === true;
+
+const PROD_CONFIG = {
   apiKey: 'AIzaSyAp0HrcvFwpMxrlqbxa9xjUvwGoTa7QpUU',
   authDomain: 'proscanbot.firebaseapp.com',
   projectId: 'proscanbot',
@@ -18,10 +24,17 @@ export const FIREBASE_CONFIG = {
   messagingSenderId: '886322190589',
 };
 
-// Build dev with `PROSCAN_ENV=dev npm run build` to point at the local emulator.
-export const USE_EMULATOR =
-  typeof process !== 'undefined' &&
-  process.env &&
-  process.env.PROSCAN_ENV === 'dev';
+// demo-* projects only ever talk to the emulators. Written inline so the
+// prod build folds them away.
+export const FIREBASE_CONFIG = USE_EMULATOR
+  ? {
+      ...PROD_CONFIG,
+      authDomain: 'demo-proscan.firebaseapp.com',
+      projectId: 'demo-proscan',
+      storageBucket: 'demo-proscan.appspot.com',
+    }
+  : PROD_CONFIG;
 
-export const EMULATOR = { host: '127.0.0.1', authPort: 9099, firestorePort: 8080 };
+export const EMULATOR = USE_EMULATOR
+  ? { host: '127.0.0.1', authPort: 9099, firestorePort: 8080 }
+  : null;
