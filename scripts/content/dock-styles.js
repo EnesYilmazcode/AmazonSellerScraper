@@ -165,13 +165,27 @@ svg { display: block; flex: none; }
 .count b { font-weight: 620; }
 .endline { color: var(--muted); font-size: 12.5px; margin: 0; }
 
+/* the count, its pages strip and one quiet line */
+.hero { display: flex; flex-direction: column; gap: 10px; }
+.tally { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; }
+.num { margin: 0; font-size: 15px; color: var(--muted); }
+.num b { font-size: 30px; line-height: 1; font-weight: 680; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; margin-right: 2px; }
+.hero .ticks { margin: 0; }
+.meta { margin: 0; color: var(--muted); font-size: 13px; }
+.meta.warn { color: var(--warn); }
+.row .label { font-weight: 580; font-size: 14px; }
+/* Download Excel, with the other formats unfolding under it */
+.dl-row { display: flex; gap: 2px; }
+.dl-main { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
+.dl-more { width: 46px; flex: none; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+.dl-more svg { width: 14px; height: 14px; }
+.dl-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.menu { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.menu button { height: 36px; border-radius: 10px; border: 1px solid var(--line-strong); display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 580; font-size: 13.5px; }
+.menu button:hover { background: var(--sunken); }
+.menu svg { width: 14px; height: 14px; color: var(--muted); }
+
 /* results */
-.facts { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; }
-.facts div { display: flex; flex-direction: column; padding: 0 12px; border-left: 1px solid var(--line); min-width: 0; }
-.facts div:first-child { padding-left: 0; border-left: 0; }
-.facts dt { color: var(--muted); font-size: 12.5px; order: 2; }
-.facts dd { margin: 0; font-weight: 640; font-size: 17px; order: 1; }
-.formats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .linkrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; width: 100%; }
 .linkrow:hover { background: var(--sunken); }
 .linkrow .l { display: flex; flex-direction: column; line-height: 1.3; margin-right: auto; min-width: 0; }

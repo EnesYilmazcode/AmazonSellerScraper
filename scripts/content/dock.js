@@ -30,7 +30,6 @@
     if (document.getElementById('proscan-dock-host')) return;
 
     const POLL_MS = 2000;
-    const SEC_PER_PAGE = 6;
     const SEC_PER_OFFER = 2.5;
     const RECENT_MS = 30 * 60 * 1000;
     const MAX_HISTORY = 6;
@@ -61,7 +60,8 @@
         scan: SVG('<rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M2 5.5h12"/>', { w: 1.5 }),
         ext: SVG('<path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M12 9.5v3.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-8a.5.5 0 0 1 .5-.5H7"/>', { w: 1.6 }),
         minus: SVG('<path d="M3.5 8h9"/>', { w: 2 }),
-        plus: SVG('<path d="M3.5 8h9M8 3.5v9"/>', { w: 2 })
+        plus: SVG('<path d="M3.5 8h9M8 3.5v9"/>', { w: 2 }),
+        again: SVG('<path d="M13 8a5 5 0 1 1-1.5-3.6"/><path d="M13 2.5v3h-3"/>', { w: 1.6 })
     };
 
     // ── Small helpers ───────────────────────────────────────────
@@ -104,10 +104,6 @@
         if (seconds < 60) return 'Under a minute';
         const m = Math.round(seconds / 60);
         return `About ${m} ${m === 1 ? 'minute' : 'minutes'}`;
-    }
-
-    function clock(ms) {
-        try { return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; }
     }
 
     /**
@@ -203,6 +199,7 @@
         notice: null,
         busy: null,
         fresh: false,
+        menu: false,
         spread: null,
         notNow: readFlag(KEY_NOT_NOW),
         chat: { status: null, messages: [], draft: '', sending: false }
@@ -416,34 +413,31 @@
         return m;
     }
 
-    /** The pages strip: done, the one in progress, and pages the run never needed (hatched). */
+    /**
+     * The pages strip, one segment per page. While a run goes it spans the
+     * page limit; once it ends it shows only the pages it scraped.
+     */
     function ticks(r) {
-        const max = Math.max(1, r.maxPages || 1);
+        const live = isLive(r);
+        const done = r.page || 0;
+        const max = Math.max(1, live ? (r.maxPages || 1) : done);
         const n = Math.min(max, 20);
         const per = max / n;
-        const done = r.page || 0;
-        const live = isLive(r);
-        const early = !live && r.reason === 'complete' && done < max;
-        const row = h('div', { class: 'ticks', 'aria-hidden': 'true' });
+        const row = h('div', { class: 'ticks', title: plural(done, 'page'), 'aria-hidden': 'true' });
         for (let i = 0; i < n; i++) {
-            const from = i * per;
-            const to = (i + 1) * per;
-            let cls = '';
-            if (done >= to - 1e-9) cls = 'done';
-            else if (live && done >= from - 1e-9) cls = 'now';
-            else if (!live && done > from) cls = 'done';
-            else if (early) cls = 'skip';
-            row.appendChild(h('i', { class: cls || null }));
+            let cls = null;
+            if (done >= (i + 1) * per - 1e-9) cls = 'done';
+            else if (live && done >= i * per - 1e-9) cls = 'now';
+            row.appendChild(h('i', { class: cls }));
         }
         return row;
     }
 
-    function endLine(r) {
-        if (r.reason !== 'complete') return null;
-        if ((r.page || 0) < r.maxPages) {
-            return `Page ${fmt(r.page)} was the last one, so the run ended early.`;
-        }
-        return `Stopped at your ${fmt(r.maxPages)}-page limit.`;
+    /** The count as the one big number, with an optional control on its right. */
+    function tally(n, extra) {
+        return h('div', { class: 'tally' },
+            h('p', { class: 'num' }, h('b', { text: fmt(n) }), ` ${n === 1 ? 'product' : 'products'}`),
+            extra || null);
     }
 
     function noticeEl() {
@@ -454,14 +448,21 @@
             n.action ? h('button', { text: n.action.label, 'data-k': 'notice', onclick: n.action.run }) : null);
     }
 
+    /** Download Excel, with CSV and JSON behind the arrow on its right. */
     function downloads(count) {
-        const busy = (f) => ui.busy === f;
-        return h('div', { class: 'actions' },
-            h('button', { class: 'primary', 'data-k': 'xlsx', 'data-first': true, disabled: !!ui.busy, onclick: () => download('xlsx') },
-                icon('down'), busy('xlsx') ? 'Making the Excel file' : 'Download Excel'),
-            h('div', { class: 'formats' },
-                h('button', { class: 'secondary', 'data-k': 'csv', disabled: !!ui.busy, 'aria-label': `Download ${plural(count, 'product')} as CSV`, onclick: () => download('csv') }, icon('file'), 'CSV'),
-                h('button', { class: 'secondary', 'data-k': 'json', disabled: !!ui.busy, 'aria-label': `Download ${plural(count, 'product')} as JSON`, onclick: () => download('json') }, icon('file'), 'JSON')));
+        const pick = (f) => { ui.menu = false; download(f); };
+        const item = (f) => h('button', {
+            role: 'menuitem', 'data-k': f, disabled: !!ui.busy, 'aria-label': `Download ${plural(count, 'product')} as ${FORMAT_LABEL[f]}`, onclick: () => pick(f)
+        }, icon('file'), FORMAT_LABEL[f]);
+        return h('div', { class: 'dl' },
+            h('div', { class: 'dl-row' },
+                h('button', { class: 'primary dl-main', 'data-k': 'xlsx', 'data-first': true, disabled: !!ui.busy, onclick: () => pick('xlsx') },
+                    icon('down'), ui.busy === 'xlsx' ? 'Downloading' : 'Download Excel'),
+                h('button', {
+                    class: 'primary dl-more', 'data-k': 'formats', 'aria-label': 'Other formats', 'aria-haspopup': 'menu', 'aria-expanded': String(!!ui.menu),
+                    disabled: !!ui.busy, onclick: () => { ui.menu = !ui.menu; pendingFocus = ui.menu ? 'csv' : 'formats'; render(); }
+                }, icon('min'))),
+            ui.menu ? h('div', { class: 'menu', role: 'menu', 'aria-label': 'Other formats' }, item('csv'), item('json')) : null);
     }
 
     function spreadBlock(st) {
@@ -517,16 +518,14 @@
         const suggest = settings().suggest !== false && !ui.notNow;
         if (isEnded(r) && r.thisTab && recent(r) && !ui.notNow && st && st.count > 0) {
             return launcherShell('done',
-                mainButton('Open ProScan', `${plural(st.count, 'product')} saved`, 'Ready to download', mark({ badge: r.reason === 'complete' })),
+                mainButton('Open ProScan', plural(st.count, 'product'), null, mark({ badge: r.reason === 'complete' })),
                 h('button', { class: 'pill', 'data-k': 'xlsx-quick', 'aria-label': 'Download Excel', disabled: !!ui.busy, onclick: () => download('xlsx') }, icon('down'), 'Excel'),
                 chatButton(),
                 hideButton('Hide for this tab'));
         }
         if (suggest && scrapable && page.startable) {
             const title = page.name || (page.kind === 'storefront' ? 'This storefront' : 'These results');
-            const sub = page.kind === 'storefront' && page.total
-                ? `${plural(page.total, 'product')} on this storefront`
-                : `${plural(page.count, 'product')} on this page`;
+            const sub = plural(page.kind === 'storefront' && page.total ? page.total : page.count, 'product');
             return launcherShell('suggest',
                 mainButton(`Open ProScan for ${title}`, title, sub, mark()),
                 h('button', { class: 'pill', 'data-k': 'scrape-quick', disabled: ui.busy === 'start', onclick: () => startHere() }, icon('play'), 'Scrape'),
@@ -535,7 +534,7 @@
         }
         if (suggest && (page.kind === 'seller' || page.kind === 'store') && page.sellerId) {
             return launcherShell('suggest',
-                mainButton('Open ProScan', page.name || 'This seller', 'Has a storefront to scrape', mark()),
+                mainButton('Open ProScan', page.name || 'This seller', null, mark()),
                 h('a', { class: 'pill', 'data-k': 'storefront', href: PageKind.storefrontUrl(page.sellerId) }, 'Open storefront'),
                 chatButton(),
                 hideButton('Not now, hide for this tab'));
@@ -604,122 +603,75 @@
 
     function readyView() {
         const pages = ui.pages || settings().maxPages;
-        const willScrape = page.pagesAvail ? Math.min(pages, page.pagesAvail) : pages;
         const isStore = page.kind === 'storefront';
-        const title = isStore ? `Scrape ${page.name || 'this storefront'}` : page.keyword ? `Scrape "${page.keyword}"` : 'Scrape these results';
-        let sub;
-        if (isStore && page.total) sub = `Seller storefront with ${plural(page.total, 'product')}${page.pagesAvail ? ` across about ${plural(page.pagesAvail, 'page')}` : ''}.`;
-        else if (page.pagesAvail && page.pagesAvail > 1) sub = `${plural(page.count, 'product')} on this page, about ${plural(page.pagesAvail, 'page')} in all.`;
-        else sub = `${plural(page.count, 'product')} on this page.`;
+        const title = isStore ? (page.name || 'This storefront') : page.keyword ? `"${page.keyword}"` : 'These results';
+        const total = isStore && page.total ? page.total : null;
+        const sub = total ? plural(total, 'product')
+            : page.pagesAvail > 1 ? `About ${plural(page.pagesAvail, 'page')}` : plural(page.count, 'product');
         const busy = ui.busy === 'start';
         return [
             lede(title, sub),
-            h('div', { class: 'panel' },
-                h('div', { class: 'row' },
-                    h('div', { class: 'l' }, h('b', { text: 'Pages to scrape' }), h('span', { text: `${aboutTime(willScrape * SEC_PER_PAGE)} for ${plural(willScrape, 'page')}` })),
-                    stepper(pages, (v) => { ui.pages = v; render(); }, 'Pages to scrape'))),
+            h('div', { class: 'row' },
+                h('span', { class: 'label', text: 'Pages' }),
+                stepper(pages, (v) => { ui.pages = v; render(); }, 'Pages to scrape')),
             noticeEl(),
-            h('div', { class: 'actions' },
-                h('button', { class: 'primary', 'data-k': 'scrape', 'data-first': true, disabled: busy || !!ui.spread, onclick: () => startHere(ui.pages || settings().maxPages) },
-                    icon('play'), busy ? 'Starting' : isStore ? 'Scrape this storefront' : 'Scrape this search'),
-                h('div', { class: 'split' },
-                    h('p', { class: 'note' }, icon('info'), h('span', { text: 'ProScan turns the pages in this tab.' })),
-                    h('button', { class: 'quiet', 'data-k': 'notnow-card', onclick: notNow, text: 'Not now' })))
+            h('button', { class: 'primary', 'data-k': 'scrape', 'data-first': true, disabled: busy || !!ui.spread, onclick: () => startHere(ui.pages || settings().maxPages) },
+                icon('play'), busy ? 'Starting' : 'Scrape')
         ];
     }
 
     function runningView(r) {
         const cur = Math.min((r.page || 0) + 1, r.maxPages);
-        let left = '';
-        if (r.page > 0 && r.startedAt) {
-            const per = (Date.now() - r.startedAt) / 1000 / r.page;
-            const secs = Math.max(0, (r.maxPages - r.page) * per);
-            left = secs < 60 ? 'Under a minute left' : `About ${Math.round(secs / 60)} min left`;
-        }
+        const stop = h('button', {
+            class: 'secondary compact', 'data-k': 'stop', 'data-first': true, disabled: ui.busy === 'stop',
+            'aria-label': `Stop and keep ${plural(r.itemCount, 'product')}`, onclick: stopRun
+        }, icon('stop'), ui.busy === 'stop' ? 'Stopping' : 'Stop');
         return [
-            lede(`Scraping ${runLabel(r)}`, r.thisTab ? 'Keep this tab open. You can keep browsing in other tabs.' : 'This scrape runs in another tab. Keep that tab open.'),
-            h('div', { class: 'panel', role: 'status', 'aria-live': 'polite' },
-                h('div', { class: 'progress-top' }, h('b', { text: `Page ${fmt(cur)} of ${fmt(r.maxPages)}` }), left ? h('span', { text: left }) : null),
+            h('div', { class: 'hero', role: 'status', 'aria-live': 'polite' },
+                tally(r.itemCount, stop),
                 ticks(r),
-                h('div', { class: 'count' }, h('b', { text: fmt(r.itemCount) }), ` ${r.itemCount === 1 ? 'product' : 'products'} saved so far`)),
-            noticeEl(),
-            h('div', { class: 'actions' },
-                h('button', { class: 'secondary', 'data-k': 'stop', 'data-first': true, disabled: ui.busy === 'stop', onclick: stopRun },
-                    icon('stop'), ui.busy === 'stop' ? 'Stopping' : `Stop and keep ${plural(r.itemCount, 'product')}`))
+                h('p', { class: 'meta', text: `Page ${fmt(cur)} of ${fmt(r.maxPages)}${r.thisTab ? '' : ', in another tab'}` })),
+            noticeEl()
         ];
-    }
-
-    function facts(summary) {
-        if (!summary) return null;
-        const items = [];
-        if (summary.medianCents !== null) items.push([`$${(summary.medianCents / 100).toFixed(2)}`, 'Median price']);
-        if (summary.avgRating !== null) items.push([summary.avgRating.toFixed(1), 'Avg rating']);
-        if (summary.sponsoredPct !== null) items.push([`${summary.sponsoredPct}%`, 'Sponsored']);
-        if (!items.length) return null;
-        return h('dl', { class: 'facts' }, items.map(([v, l]) => h('div', {}, h('dt', { text: l }), h('dd', { text: v }))));
     }
 
     function doneView(r, st) {
         const n = st.count || 0;
-        let title;
-        let sub;
-        let kind;
-        if (r.reason === 'complete') {
-            kind = 'ok';
-            title = `${plural(n, 'product')} saved`;
-            const at = r.finishedAt ? ` at ${clock(r.finishedAt)}` : '';
-            sub = (r.page || 0) < r.maxPages
-                ? `Reached the last page${at}.`
-                : `${plural(r.page, 'page')}, finished${at}.`;
-        } else if (r.reason === 'stopped') {
-            kind = 'neutral';
-            title = `Stopped with ${plural(n, 'product')}`;
-            sub = `You stopped it after page ${fmt(r.page)} of ${fmt(r.maxPages)}.`;
-        } else {
-            kind = 'warn';
-            title = n > 0 ? `${plural(n, 'product')} saved` : 'Nothing was saved';
-            sub = (Run.MESSAGES && Run.MESSAGES[r.reason]) || 'The run ended early.';
-        }
-        const line = endLine(r);
+        let meta = null;
+        if (r.reason === 'stopped') meta = h('p', { class: 'meta', text: 'Stopped' });
+        else if (r.reason !== 'complete') meta = h('p', { class: 'meta warn', text: (Run.MESSAGES && Run.MESSAGES[r.reason]) || 'The run ended early.' });
+        const again = scrapable && page.startable && !ui.spread
+            ? h('button', {
+                class: 'icon-btn', 'data-k': 'again', 'aria-label': 'Scrape again', title: 'Scrape again',
+                onclick: () => { ui.fresh = true; ui.notice = null; ui.menu = false; pendingFocus = 'first'; render(); }
+            }, icon('again'))
+            : null;
         const out = [
-            lede(title, sub, stateIcon(kind)),
-            h('div', { class: 'panel' },
-                ticks(r),
-                line ? h('p', { class: 'endline', text: line }) : null,
-                n > 0 && facts(st.summary) ? h('div', { style: 'margin-top:12px' }, facts(st.summary)) : null),
+            h('div', { class: 'hero' }, tally(n, again), ticks(r), meta),
             noticeEl()
         ];
-        if (n > 0) {
-            out.push(downloads(n));
-            out.push(spreadBlock(st));
-        }
-        if (scrapable && page.startable && !ui.spread) {
-            out.push(h('div', { class: 'split' },
-                h('span', {}),
-                h('button', { class: 'quiet', 'data-k': 'again', onclick: () => { ui.fresh = true; ui.notice = null; pendingFocus = 'first'; render(); }, text: 'Scrape again' })));
-        }
+        if (n > 0) out.push(downloads(n));
+        // Compare seller prices stays hidden until the offer parser works on
+        // Amazon's current pages (audit F-30); a check already running still shows.
+        if (ui.spread) out.push(spreadBlock(st));
         return out;
     }
 
     function elsewhereView(st) {
         let title = 'Open a search or a storefront';
-        let sub = 'ProScan scrapes Amazon search results and seller storefronts. Open one and press Scrape.';
+        let sub = null;
         let action = null;
         if (scrapable && page.refusedKind) {
-            title = 'ProScan cannot scrape this page yet';
+            title = 'ProScan cannot scrape this page';
             sub = Run.refusal(page.refusedKind);
         } else if ((page.kind === 'seller' || page.kind === 'store') && page.sellerId) {
-            title = page.name ? `${page.name} has a storefront` : 'This seller has a storefront';
-            sub = 'Open it to scrape every product the seller lists.';
-            action = h('a', { class: 'primary', 'data-k': 'storefront-card', 'data-first': true, href: PageKind.storefrontUrl(page.sellerId) }, 'Open the storefront');
+            title = page.name || 'This seller';
+            action = h('a', { class: 'primary', 'data-k': 'storefront-card', 'data-first': true, href: PageKind.storefrontUrl(page.sellerId) }, 'Open storefront');
         }
         const out = [lede(title, sub), action, noticeEl()];
         const r = run();
         if (st && st.count > 0 && r) {
-            out.push(h('div', { class: 'panel' },
-                h('div', { class: 'progress-top' }, h('b', { text: 'Last scrape' }), h('span', { text: r.finishedAt ? clock(r.finishedAt) : '' })),
-                h('div', { class: 'count', style: 'margin-top:6px' }, h('b', { text: fmt(st.count) }), ` ${st.count === 1 ? 'product' : 'products'} from ${runLabel(r)}`),
-                ticks(r)));
+            out.push(h('div', { class: 'hero' }, tally(st.count), ticks(r), h('p', { class: 'meta', text: `Last scrape: ${runLabel(r)}` })));
             out.push(downloads(st.count));
         }
         return out;
@@ -883,7 +835,7 @@
         ['keydown', 'keyup', 'keypress'].forEach((type) => root.addEventListener(type, (e) => {
             if (type === 'keydown' && e.key === 'Escape' && ui.open) {
                 e.preventDefault();
-                setOpen(false);
+                if (ui.menu) { ui.menu = false; pendingFocus = 'formats'; render(); } else setOpen(false);
             }
             e.stopPropagation();
         }));

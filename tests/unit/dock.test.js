@@ -73,7 +73,7 @@ test('a search page suggests Scrape, and one click starts a run in this tab', as
   await flush();
   expect(d.$('.launcher.suggest')).not.toBeNull();
   expect(d.text()).toContain('"yoga mat"');
-  expect(d.text()).toMatch(/\d+ products on this page/);
+  expect(d.$('.launch-text span').textContent).toMatch(/^\d+ products$/);
 
   d.$('[data-k="scrape-quick"]').click();
   await flush();
@@ -81,9 +81,9 @@ test('a search page suggests Scrape, and one click starts a run in this tab', as
   expect(start).toBeDefined();
   expect(start).not.toHaveProperty('tabId');
   expect(d.$('.card')).not.toBeNull();
-  expect(d.text()).toContain('Scraping "yoga mat"');
+  expect(d.$('.num').textContent).toBe('0 products');
   expect(d.text()).toContain('Page 1 of 20');
-  expect(d.$('[data-k="stop"]').textContent).toContain('Stop and keep 0 products');
+  expect(d.$('[data-k="stop"]').getAttribute('aria-label')).toBe('Stop and keep 0 products');
 });
 
 test('a product page gets the plain launcher with Ask and no Scrape', async () => {
@@ -172,11 +172,12 @@ test('a run that ran out of pages hatches the rest and says so', async () => {
   };
   const d = mount(SEARCH, YOGA, { RUN_STATUS: done, DOWNLOAD: { ok: true, via: 'downloads', filename: 'x.xlsx' } }, { session: { 'proscan.dock.open': '1' } });
   await flush();
-  expect(d.text()).toContain('912 products saved');
-  expect(d.text()).toContain('Page 19 was the last one, so the run ended early.');
+  expect(d.$('.num').textContent).toBe('912 products');
+  // Once a run ends the strip shows only the pages it scraped.
+  expect(d.$$('.ticks i')).toHaveLength(19);
   expect(d.$$('.ticks i.done')).toHaveLength(19);
-  expect(d.$$('.ticks i.skip')).toHaveLength(1);
-  expect(d.text()).toContain('$27.40');
+  expect(d.text()).not.toContain('$27.40');
+  expect(d.$('[data-k="csv"]')).toBeNull();
   d.$('[data-k="xlsx"]').click();
   await flush();
   expect(d.sent.find((m) => m.type === 'DOWNLOAD')).toEqual({ type: 'DOWNLOAD', format: 'xlsx' });
@@ -194,7 +195,10 @@ test('a file too big for the worker to hand over is saved from the page', async 
   const clicks = [];
   d.w.HTMLAnchorElement.prototype.click = function () { clicks.push([this.getAttribute('download'), this.href]); };
   await flush();
-  expect(d.text()).toContain('Stopped with 2 products');
+  expect(d.$('.num').textContent).toBe('2 products');
+  expect(d.$('.meta').textContent).toBe('Stopped');
+  d.$('[data-k="formats"]').click();
+  expect(d.$('[data-k="formats"]').getAttribute('aria-expanded')).toBe('true');
   d.$('[data-k="csv"]').click();
   await flush();
   expect(clicks).toEqual([['big.csv', 'blob:x']]);

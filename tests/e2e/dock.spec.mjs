@@ -43,7 +43,7 @@ test('the dock suggests Scrape on a saved search page, with its product count', 
   const { parseDoc } = require('../setup/corpus.js');
   const n = Parsers.parseSearchPage(parseDoc(yoga, searchUrl('yoga mat')), searchUrl('yoga mat')).products.length;
   expect(await d.text('.launcher')).toContain(`"yoga mat"`);
-  expect(await d.text('.launcher')).toContain(`${n} products on this page`);
+  expect(await d.text('.launcher')).toContain(`${n} products`);
   expect(await d.attr('[data-k="notnow"]', 'aria-label')).toBe('Not now, hide for this tab');
 });
 
@@ -64,9 +64,9 @@ test('Scrape in the dock runs in that tab, page by page, and completes', async (
 
   // The last page's dock rebuilt itself from the worker and shows the result.
   const after = await dock(tab);
-  await after.waitForText(/12 products saved/, { timeout: 10000 });
-  await after.waitForText(/Reached the last page.*Page 3 was the last one/);
-  expect(await after.count('.ticks i.skip')).toBe(17);
+  await after.waitForText(/12 products/, { timeout: 10000 });
+  await after.waitFor('[data-k="xlsx"]');
+  expect(await after.count('.ticks i.done')).toBe(3);
 });
 
 test('Stop in the dock halts the run before the next page', async ({ ext }) => {
@@ -79,7 +79,7 @@ test('Stop in the dock halts the run before the next page', async ({ ext }) => {
   await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
   const live = await dock(tab);
   await live.waitFor('[data-k="stop"]');
-  expect(await live.text('[data-k="stop"]')).toMatch(/Stop and keep 4 products/);
+  expect(await live.attr('[data-k="stop"]', 'aria-label')).toBe('Stop and keep 4 products');
   await live.click('[data-k="stop"]');
   await sleep(4500);
   const s = await getState(store);
@@ -87,7 +87,7 @@ test('Stop in the dock halts the run before the next page', async ({ ext }) => {
   expect(s.isScrapingActive).toBe(false);
   expect(endReason(s)).toBe('stopped');
   expect(pagesOf(served, 'stop me')).toEqual([1]);
-  await live.waitForText(/Stopped with 4 products/);
+  await live.waitForText(/4 products.*Stopped/);
 });
 
 test('a product page gets the plain launcher and no Scrape; the cart gets no dock', async ({ ext }) => {
@@ -129,6 +129,7 @@ test('Download Excel in the dock saves the run through chrome.downloads', async 
   await done.waitFor('[data-k="xlsx"]', { timeout: 10000 });
   await done.click('[data-k="xlsx"]');
   await done.waitForText(/Excel download started/, { timeout: 15000 });
+  await done.click('[data-k="formats"]');
   await done.click('[data-k="csv"]');
   await done.waitForText(/CSV download started/, { timeout: 15000 });
 
