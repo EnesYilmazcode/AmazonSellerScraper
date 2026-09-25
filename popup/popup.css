@@ -4,31 +4,31 @@
 :root {
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, "Helvetica Neue", Arial, sans-serif;
     --bg: #ffffff;
-    --sunken: #f4f5f7;
-    --ink: #16181d;
-    --muted: #5c6270;
-    --line: #e3e5ea;
-    --line-strong: #cfd3da;
-    --primary: #3548d4;
-    --primary-hover: #2b3cc0;
+    --sunken: #f2f4f6;
+    --ink: #1c232b;
+    --muted: #5a6570;
+    --line: #e1e5e9;
+    --line-strong: #c9d0d7;
+    --primary: #2a343e;
+    --primary-hover: #1c242c;
     --on-primary: #ffffff;
-    --soft: #eceefc;
-    --soft-ink: #2a37a8;
+    --soft: #e8ecef;
+    --soft-ink: #2a343e;
     --ok: #1f7a4d;
     --ok-soft: #e3f3ea;
     --warn: #8a4b08;
     --warn-soft: #fbf0e1;
     --bad: #a1261b;
     --bad-soft: #fbe9e7;
-    --ring: #16181d;
+    --ring: #2a343e;
     color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
     :root {
-        --bg: #1a1c21; --sunken: #23262d; --ink: #eceef2; --muted: #a2a8b4; --line: #30343c; --line-strong: #454a55;
-        --primary: #8b97ff; --primary-hover: #a2acff; --on-primary: #11131a; --soft: #262a45; --soft-ink: #c3c9ff;
+        --bg: #2a343e; --sunken: #333e49; --ink: #ffffff; --muted: #b3bcc6; --line: #3b4753; --line-strong: #4c5967;
+        --primary: #ffffff; --primary-hover: #e4e8ec; --on-primary: #2a343e; --soft: #36424e; --soft-ink: #ffffff;
         --ok: #5cc493; --ok-soft: #1c3329; --warn: #f0b36b; --warn-soft: #3a2c1a; --bad: #ff8a7a; --bad-soft: #3b1f1c;
-        --ring: #f4f5f7;
+        --ring: #ffffff;
         color-scheme: dark;
     }
 }
@@ -61,7 +61,8 @@ svg { display: block; flex: none; }
 
 /* Header */
 .top { display: flex; align-items: center; gap: 10px; padding: 14px 18px 4px; }
-.mark { width: 32px; height: 32px; border-radius: 50%; background: var(--primary); color: var(--on-primary); display: grid; place-items: center; }
+.mark { width: 32px; height: 32px; border-radius: 50%; background: #2a343e url("../assets/icons/icon128.png") center / cover; box-shadow: 0 0 0 1px var(--line-strong); display: grid; place-items: center; }
+.mark svg { visibility: hidden; }
 .mark svg { width: 18px; height: 18px; }
 .name { font-weight: 640; font-size: 15px; margin-right: auto; }
 .version { color: var(--muted); font-size: 12px; }
