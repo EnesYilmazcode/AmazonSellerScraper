@@ -26,11 +26,19 @@ export async function dock(page) {
     return host && host.shadowRoots && host.shadowRoots[0] ? host.shadowRoots[0].nodeId : null;
   }
 
+  // A re-render between getDocument and querySelector drops the node ids,
+  // so a lookup that races one tries again with a fresh document.
   async function query(selector) {
-    const id = await shadowId();
-    if (!id) return null;
-    const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: id, selector });
-    return nodeId || null;
+    for (let i = 0; ; i++) {
+      try {
+        const id = await shadowId();
+        if (!id) return null;
+        const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: id, selector });
+        return nodeId || null;
+      } catch (e) {
+        if (i >= 2 || !/Could not find node/.test(e.message)) throw e;
+      }
+    }
   }
 
   async function call(selector, fn) {
