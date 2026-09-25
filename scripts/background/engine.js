@@ -94,6 +94,42 @@ function prevFor(snap, uid) {
 }
 
 /**
+ * A few numbers about a finished run for the dock: median price, average
+ * rating and the share of sponsored products. Nulls when nothing has one.
+ */
+function summarize(results) {
+    const rows = Array.isArray(results) ? results : [];
+    const cents = rows.map(r => r && r.priceCents).filter(c => Number.isInteger(c) && c > 0).sort((a, b) => a - b);
+    let medianCents = null;
+    if (cents.length) {
+        const mid = Math.floor(cents.length / 2);
+        medianCents = cents.length % 2 ? cents[mid] : Math.round((cents[mid - 1] + cents[mid]) / 2);
+    }
+    const ratings = rows.map(r => r && r.rating).filter(v => typeof v === 'number' && v > 0);
+    const avgRating = ratings.length ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10 : null;
+    const sponsoredPct = rows.length ? Math.round((rows.filter(r => r && r.sponsored).length / rows.length) * 100) : null;
+    return { medianCents, avgRating, sponsoredPct };
+}
+
+/** The run as the page may see it: no product rows, no tab ids but its own. */
+function brief(run, tabId) {
+    if (!run) return null;
+    const src = run.source || {};
+    return {
+        runId: run.runId || null,
+        state: Run.stateOf(run),
+        reason: run.reason || null,
+        page: run.page || 0,
+        maxPages: run.maxPages || Run.DEFAULT_MAX_PAGES,
+        itemCount: run.itemCount || 0,
+        startedAt: run.startedAt || null,
+        finishedAt: run.finishedAt || null,
+        source: { type: src.type || null, sellerId: src.sellerId || null, keyword: src.keyword || null },
+        thisTab: typeof tabId === 'number' && run.tabId === tabId
+    };
+}
+
+/**
  * @param {Object} deps
  * @param {Object} deps.chrome - chrome.* (storage.session, storage.local, tabs)
  * @param {function(): Promise<Object>} deps.openDb - resolves to the db.js api
@@ -422,6 +458,9 @@ function createEngine({
                 return { ok: true, next: 'end', reason: ending };
             }
             schedule(next.navAt - t);
+            sendToTab(next.tabId, {
+                type: Msg.T.RUN_PROGRESS, runId, page: next.page, itemCount: next.itemCount, maxPages: next.maxPages
+            });
             return { ok: true, next: 'wait' };
         });
     }
@@ -577,10 +616,56 @@ function createEngine({
         };
     }
 
+    /** Merges `patch` into settings: maxPages (clamped) and suggest (a boolean). */
+    async function saveSettings(patch = {}) {
+        const local = await chrome.storage.local.get('settings');
+        const settings = { ...((local && local.settings) || {}) };
+        if (patch.maxPages !== undefined) settings.maxPages = Run.clampMaxPages(patch.maxPages);
+        if (patch.suggest !== undefined) settings.suggest = !!patch.suggest;
+        await chrome.storage.local.set({ settings });
+        return { ok: true, settings: { maxPages: Run.clampMaxPages(settings.maxPages), suggest: settings.suggest !== false } };
+    }
+
+    /**
+     * START_RUN_HERE from the dock: a run in the sender's own tab. A page
+     * count in the message becomes the saved setting first.
+     */
+    async function startHere({ maxPages } = {}, sender) {
+        const tabId = sender && sender.tab ? sender.tab.id : null;
+        if (typeof tabId !== 'number') return { error: 'refused', message: Run.refusal('unknown') };
+        if (maxPages !== undefined && maxPages !== null) await saveSettings({ maxPages });
+        return start({ tabId });
+    }
+
+    /**
+     * RUN_STATUS for the dock: the latest run in brief, whether it belongs
+     * to the asking tab, a summary once it has ended, and the settings the
+     * dock shows. Never the products, the key or the account's email.
+     */
+    function status(sender) {
+        const tabId = sender && sender.tab ? sender.tab.id : null;
+        return serial(async () => {
+            const local = await chrome.storage.local.get(['settings', 'geminiApiKey', 'account']);
+            const settings = (local && local.settings) || {};
+            const base = {
+                settings: { maxPages: Run.clampMaxPages(settings.maxPages), suggest: settings.suggest !== false },
+                hasKey: typeof local.geminiApiKey === 'string' && local.geminiApiKey.trim() !== '',
+                signedIn: !!(local.account && local.account.uid),
+                cloudSync: !!flags.CLOUD_SYNC
+            };
+            const live = await liveRun();
+            // While a run goes, the dock asks often: no product reads then.
+            if (Run.isActive(live)) return { ...base, run: brief(live, tabId), count: live.itemCount || 0 };
+            const { run, results, spread } = await latest();
+            const spreadCount = Object.values(spread || {}).filter(Boolean).length;
+            return { ...base, run: brief(run, tabId), count: results.length, summary: summarize(results), spreadCount };
+        });
+    }
+
     return {
         start, stop, pageReady, pageResult, heartbeat, tick, tabRemoved, tabUpdated, recover,
-        getState, getResults, spreadResult, chatData, db
+        getState, getResults, spreadResult, chatData, db, startHere, status, saveSettings
     };
 }
 
-module.exports = { createEngine, foldPage, durable, prevFor, PAGE_TIMEOUT_MS, KEEP_RUNS };
+module.exports = { createEngine, foldPage, durable, prevFor, summarize, brief, PAGE_TIMEOUT_MS, KEEP_RUNS };
