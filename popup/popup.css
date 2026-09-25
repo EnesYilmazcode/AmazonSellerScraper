@@ -45,7 +45,8 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 /* Opened in a tab from the dock's settings link */
-body.in-tab { margin: 24px auto; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+html:has(body.in-tab) { background: var(--sunken); min-height: 100%; }
+body.in-tab { margin: 40px auto; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
 body.in-tab .here, body.in-tab .last { display: none; }
 
 .hidden { display: none !important; }
