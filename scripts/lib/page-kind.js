@@ -45,6 +45,25 @@ const PageKind = (() => {
         /^\/mn\/dcw\/myx/i
     ];
 
+    // Of those, where the dock stays off the page entirely: money, sign-in
+    // and account pages. Product pages keep the plain launcher for Ask.
+    const HIDDEN = [
+        /^\/gp\/cart\//i,
+        /^\/cart(\/|$)/i,
+        /^\/gp\/buy\//i,
+        /^\/checkout(\/|$)/i,
+        /^\/gp\/checkout/i,
+        /^\/ap\//i,
+        /^\/ax\//i,
+        /^\/gp\/css\//i,
+        /^\/gp\/your-account/i,
+        /^\/your-account/i,
+        /^\/your-orders/i,
+        /^\/a\/addresses/i,
+        /^\/cpe\/yourpayments/i,
+        /^\/mn\/dcw\/myx/i
+    ];
+
     const SELLER_ID = /^[A-Z0-9]{8,20}$/i;
 
     function parse(url) {
@@ -107,7 +126,13 @@ const PageKind = (() => {
         return ['search', 'storefront'].includes(classify(url).kind);
     }
 
-    return { classify, suggests, scrapable, storefrontUrl, sellerId };
+    /** True where the dock should not appear at all. */
+    function hidden(url) {
+        const u = parse(url);
+        return !u || HIDDEN.some((re) => re.test(u.pathname));
+    }
+
+    return { classify, suggests, scrapable, hidden, storefrontUrl, sellerId };
 })();
 
 if (typeof module !== 'undefined' && module.exports) {

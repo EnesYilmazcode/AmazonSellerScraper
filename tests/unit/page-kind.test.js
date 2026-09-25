@@ -70,3 +70,17 @@ describe('pages that never get it', () => {
     expect(PageKind.classify(`${A}/s?me=<script>&k=mat`)).toMatchObject({ kind: 'search', sellerId: null });
   });
 });
+
+describe('where the dock stays off the page', () => {
+  test.each([
+    `${A}/gp/cart/view.html`, `${A}/cart`, `${A}/gp/buy/spc/handlers/display.html`, `${A}/checkout/p/p-1/spc`,
+    `${A}/ap/signin`, `${A}/gp/css/homepage.html`, `${A}/gp/your-account/order-history`, `${A}/your-orders/orders`,
+    `${A}/a/addresses`, `${A}/cpe/yourpayments/wallet`, 'https://example.com/',
+  ])('%s', (url) => expect(PageKind.hidden(url)).toBe(true));
+
+  test('product, search and other pages keep the launcher', () => {
+    for (const url of [`${A}/dp/B09B8V1LZ3`, `${A}/s?k=mat`, `${A}/`, `${A}/sp?seller=A1B2C3D4E5F6G7`]) {
+      expect(PageKind.hidden(url)).toBe(false);
+    }
+  });
+});
