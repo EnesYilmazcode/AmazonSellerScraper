@@ -59,6 +59,22 @@ describe('Parsers.parseSearchPage', () => {
     expect(r.nextHref).toBe('https://www.amazon.com/s?k=widget&page=2&qid=9&ref=sr_pg_1');
   });
 
+  test('a storefront with no Next link but more results in the header goes on to the next page', () => {
+    const url = 'https://www.amazon.com/s?me=A3GPGTUC31E362';
+    const header = '<h2 class="a-size-base a-spacing-small a-spacing-top-small a-text-normal"><span>1-16 of 59 results</span></h2>';
+    const r = Parsers.parseSearchPage(parseDoc(page(header + card('B0A', '$1.00')), url), url);
+    expect(r.kind).toBe('results');
+    expect(r.nextHref).toBe('https://www.amazon.com/s?me=A3GPGTUC31E362&page=2&ref=sr_pg_2');
+  });
+
+  test('the header reaching the total is the last page', () => {
+    const url = 'https://www.amazon.com/s?me=A3GPGTUC31E362&page=4';
+    const header = '<h2 class="a-size-base a-spacing-small a-spacing-top-small a-text-normal"><span>49-59 of 59 results</span></h2>';
+    const r = Parsers.parseSearchPage(parseDoc(page(header + card('B0A', '$1.00')), url), url);
+    expect(r.kind).toBe('last');
+    expect(r.nextHref).toBeNull();
+  });
+
   test('no pagination strip at all is the last page', () => {
     const r = Parsers.parseSearchPage(parseDoc(page(card('B0A', '$1.00')), URL_P1), URL_P1);
     expect(r.kind).toBe('last');

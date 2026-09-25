@@ -260,7 +260,20 @@ const Parsers = (() => {
     function nextPageHref(doc, url) {
         const link = doc.querySelector(SEARCH_SELECTORS.nextPageLink);
         if (link) return new URL(link.getAttribute('href'), url).href;
-        return hasNextPage(doc) ? getNextPageUrl(url) : null;
+        if (hasNextPage(doc)) return getNextPageUrl(url);
+        // Newer storefronts load more on scroll and have no Next link, but the
+        // header still says how far this page got ("1-16 of 59 results").
+        const range = resultRange(doc);
+        return range && range.end < range.total ? getNextPageUrl(url) : null;
+    }
+
+    /** "17-32 of 59 results" as {end: 32, total: 59}, or null. */
+    function resultRange(doc) {
+        const el = doc.querySelector(SEARCH_SELECTORS.resultsText);
+        const m = el && el.textContent.match(/(\d[\d,]*)\s*-\s*(\d[\d,]*) of (?:over )?(\d[\d,]*) results/);
+        if (!m) return null;
+        const n = (v) => parseInt(v.replace(/,/g, ''), 10);
+        return { end: n(m[2]), total: n(m[3]) };
     }
 
     /** Amazon's own "No results for ..." markers on a search page. */
@@ -358,7 +371,8 @@ const Parsers = (() => {
      *
      * kind is 'results' when there is a next page, 'last' when there is not,
      * and otherwise what classifyPage says (empty, unreadable, captcha,
-     * interstitial, signin or unknown). nextHref follows the page's own Next link.
+     * interstitial, signin or unknown). nextHref follows the page's own Next link,
+     * or the next page number when the header shows more results than this page.
      * products holds each ASIN once; placements counts the cards.
      *
      * @param {Document} doc
