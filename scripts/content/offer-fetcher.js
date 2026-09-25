@@ -23,6 +23,29 @@
 /** @type {boolean} Whether spread analysis is currently running */
 let isAnalyzing = false;
 
+/**
+ * Callbacks in this page that follow the analysis (the dock). A content
+ * script's runtime.sendMessage never reaches the same page, so the dock
+ * watches here. Each gets {current, total} per product and {done, total}.
+ */
+const spreadWatchers = new Set();
+
+function watchSpread(fn) {
+    spreadWatchers.add(fn);
+    return () => spreadWatchers.delete(fn);
+}
+
+function notifySpread(event) {
+    spreadWatchers.forEach(fn => {
+        try { fn(event); } catch (e) { /* a watcher's error is its own */ }
+    });
+}
+
+/** Stops the analysis after the product it is on. */
+function stopSpreadAnalysis() {
+    isAnalyzing = false;
+}
+
 /** False once the extension was updated or removed under this page. */
 function offersAlive() {
     try {
@@ -167,6 +190,8 @@ async function runSpreadAnalysis(products) {
         // The worker stores it
         await tell({ type: Msg.T.SPREAD_RESULT, asin, data: spreadResults[asin] });
 
+        notifySpread({ current: i + 1, total, asin, hasData: offerData !== null });
+
         // Send progress update to popup
         tell({
             type: Msg.T.SPREAD_PROGRESS,
@@ -184,6 +209,7 @@ async function runSpreadAnalysis(products) {
 
     // Analysis complete
     isAnalyzing = false;
+    notifySpread({ done: true, total, analyzed: Object.keys(spreadResults).length });
 
     tell({
         type: Msg.T.SPREAD_ANALYSIS_COMPLETE,
