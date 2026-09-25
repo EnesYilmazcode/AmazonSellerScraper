@@ -200,6 +200,7 @@
         busy: null,
         fresh: false,
         menu: false,
+        toast: null,
         spread: null,
         notNow: readFlag(KEY_NOT_NOW),
         chat: { status: null, messages: [], draft: '', sending: false }
@@ -304,13 +305,22 @@
         ui.busy = null;
         if (r && r.ok) {
             if (r.via === 'page') saveHere(r);
-            ui.notice = { tone: 'info', text: `${FORMAT_LABEL[format]} download started.` };
+            toast(`${FORMAT_LABEL[format]} downloaded`);
         } else if (!r) {
             unreachable();
         } else {
-            ui.notice = { tone: 'warn', text: r.message || 'ProScan could not make the file. Try again.' };
+            toast(r.message || 'ProScan could not make the file. Try again.', 'warn');
         }
         render();
+    }
+
+    let toastTimer = null;
+
+    /** A short message over the dock that goes away on its own, so the card keeps its shape. */
+    function toast(text, tone = 'info') {
+        ui.toast = { text, tone };
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => { ui.toast = null; render(); }, tone === 'warn' ? 6000 : 2500);
     }
 
     async function compareSellers() {
@@ -413,14 +423,11 @@
         return m;
     }
 
-    /**
-     * The pages strip, one segment per page. While a run goes it spans the
-     * page limit; once it ends it shows only the pages it scraped.
-     */
+    /** The pages strip: one segment per page up to the page limit, filled as pages are scraped. */
     function ticks(r) {
         const live = isLive(r);
         const done = r.page || 0;
-        const max = Math.max(1, live ? (r.maxPages || 1) : done);
+        const max = Math.max(1, r.maxPages || 1, done);
         const n = Math.min(max, 20);
         const per = max / n;
         const row = h('div', { class: 'ticks', title: plural(done, 'page'), 'aria-hidden': 'true' });
@@ -696,37 +703,33 @@
         const out = [];
         const count = cs.productCount || 0;
         if (count > 0) {
-            out.push(h('div', { class: 'scope' }, icon('scan'),
-                h('span', {}, `Answers use this scan: ${cs.source || 'your last scan'}, `, h('b', { text: plural(count, 'item') }))));
+            out.push(h('div', { class: 'scope', title: cs.source || '' }, icon('scan'), h('span', { text: plural(count, 'product') })));
         }
         if (cs.unreachable) {
             out.push(h('div', { class: 'notice', role: 'alert' }, h('span', { text: alive() ? 'Could not reach ProScan. Reload this page and try again.' : 'ProScan was updated. Reload this page to ask.' })));
             return out;
         }
         if (!cs.hasKey) {
-            out.push(lede('Answers need your own Gemini key', 'It is free from Google AI Studio and stays on this computer. You add it on ProScan\'s settings page, not on Amazon.'));
-            out.push(h('button', { class: 'primary', 'data-k': 'add-key', 'data-first': true, onclick: () => openSettingsPage('key') }, 'Add a key in ProScan settings', icon('ext')));
+            out.push(lede('Add a free Gemini key to ask'));
+            out.push(h('button', { class: 'primary', 'data-k': 'add-key', 'data-first': true, onclick: () => openSettingsPage('key') }, 'Add key', icon('ext')));
             return out;
         }
         if (count === 0) {
-            out.push(lede('Nothing to ask about yet', 'Scrape a search or a storefront first, then ask about what it found.'));
+            out.push(lede('Scrape something first'));
             return out;
         }
         const thread = h('div', { class: 'thread', 'aria-live': 'polite' });
-        if (ui.chat.messages.length === 0) {
-            thread.appendChild(h('div', { class: 'msg ai', text: `Ask anything about these ${plural(count, 'product')}: prices, ratings, sellers, which to skip.` }));
-        }
         for (const m of ui.chat.messages) {
             thread.appendChild(h('div', { class: `msg ${m.who}${m.error ? ' error' : ''}${m.wait ? ' wait' : ''}`, text: m.wait ? 'Thinking...' : m.text }));
         }
         out.push(thread);
         if (ui.chat.messages.length === 0) {
             out.push(h('div', { class: 'chips' },
-                ['Best value under $30', 'Which ones are sponsored?', 'Highest rated with 1,000+ reviews'].map((q, i) =>
+                ['Best under $30', 'Top rated', 'Sponsored ones'].map((q, i) =>
                     h('button', { class: 'chip', 'data-k': `chip-${i}`, text: q, onclick: () => ask(q) }))));
         }
         const input = h('input', {
-            type: 'text', 'data-k': 'compose', 'data-first': true, placeholder: 'Ask about these products', 'aria-label': 'Ask about these products',
+            type: 'text', 'data-k': 'compose', 'data-first': true, placeholder: 'Ask anything', 'aria-label': 'Ask about these products',
             value: ui.chat.draft, autocomplete: 'off', disabled: ui.chat.sending,
             oninput: (e) => { ui.chat.draft = e.target.value; },
             onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); ask(ui.chat.draft); } }
@@ -793,7 +796,11 @@
         const thread = root.querySelector('.thread');
         const stuck = thread ? thread.scrollHeight - thread.scrollTop - thread.clientHeight < 8 : true;
 
-        root.replaceChildren(ui.open ? card() : launcher());
+        const tb = ui.toast
+            ? h('div', { class: 'toast' + (ui.toast.tone === 'warn' ? ' warn' : ''), role: ui.toast.tone === 'warn' ? 'alert' : 'status' },
+                icon(ui.toast.tone === 'warn' ? 'warn' : 'ok'), h('span', { text: ui.toast.text }))
+            : null;
+        root.replaceChildren(...[tb, ui.open ? card() : launcher()].filter(Boolean));
         ui.animate = false;
         pendingFocus = null;
 

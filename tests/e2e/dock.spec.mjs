@@ -128,10 +128,10 @@ test('Download Excel in the dock saves the run through chrome.downloads', async 
   const done = await dock(tab);
   await done.waitFor('[data-k="xlsx"]', { timeout: 10000 });
   await done.click('[data-k="xlsx"]');
-  await done.waitForText(/Excel download started/, { timeout: 15000 });
+  await done.waitForText(/Excel downloaded/, { timeout: 15000 });
   await done.click('[data-k="formats"]');
   await done.click('[data-k="csv"]');
-  await done.waitForText(/CSV download started/, { timeout: 15000 });
+  await done.waitForText(/CSV downloaded/, { timeout: 15000 });
 
   const items = await store.evaluate(async () => {
     const shape = (f) => ({ url: f.url.slice(0, 60), mime: f.mime, state: f.state, error: f.error || null, bytes: f.totalBytes, file: f.filename });

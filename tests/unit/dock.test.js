@@ -173,15 +173,15 @@ test('a run that ran out of pages hatches the rest and says so', async () => {
   const d = mount(SEARCH, YOGA, { RUN_STATUS: done, DOWNLOAD: { ok: true, via: 'downloads', filename: 'x.xlsx' } }, { session: { 'proscan.dock.open': '1' } });
   await flush();
   expect(d.$('.num').textContent).toBe('912 products');
-  // Once a run ends the strip shows only the pages it scraped.
-  expect(d.$$('.ticks i')).toHaveLength(19);
+  expect(d.$$('.ticks i')).toHaveLength(20);
   expect(d.$$('.ticks i.done')).toHaveLength(19);
   expect(d.text()).not.toContain('$27.40');
   expect(d.$('[data-k="csv"]')).toBeNull();
   d.$('[data-k="xlsx"]').click();
   await flush();
   expect(d.sent.find((m) => m.type === 'DOWNLOAD')).toEqual({ type: 'DOWNLOAD', format: 'xlsx' });
-  expect(d.text()).toContain('Excel download started.');
+  expect(d.$('.toast').textContent).toBe('Excel downloaded');
+  expect(d.$('.card .notice')).toBeNull();
 });
 
 test('a file too big for the worker to hand over is saved from the page', async () => {
@@ -211,7 +211,7 @@ test('Ask with no key sends the user to ProScan settings, never asks for the key
   await flush();
   d.$('[data-k="chat"]').click();
   await flush();
-  expect(d.text()).toContain('Answers use this scan: search "yoga mat", 12 items');
+  expect(d.$('.scope').textContent).toBe('12 products');
   expect(d.$$('input[type="password"]')).toEqual([]);
   d.$('[data-k="add-key"]').click();
   await flush();

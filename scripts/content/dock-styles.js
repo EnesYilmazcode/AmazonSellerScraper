@@ -185,6 +185,13 @@ svg { display: block; flex: none; }
 .menu button:hover { background: var(--sunken); }
 .menu svg { width: 14px; height: 14px; color: var(--muted); }
 
+/* toast: floats above the dock so the card never changes shape */
+.toast { position: absolute; right: 0; bottom: calc(100% + 10px); display: flex; align-items: center; gap: 8px; padding: 9px 14px 9px 12px; border-radius: 999px; background: var(--primary); color: var(--on-primary); font-size: 13.5px; font-weight: 560; box-shadow: var(--shadow); white-space: nowrap; animation: toast-in .18s ease-out; }
+.toast svg { width: 14px; height: 14px; }
+.toast.warn { background: var(--warn-soft); color: var(--warn); white-space: normal; max-width: 320px; border-radius: 14px; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
 /* results */
 .linkrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; width: 100%; }
 .linkrow:hover { background: var(--sunken); }
