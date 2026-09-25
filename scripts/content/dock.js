@@ -745,7 +745,7 @@
         const count = cs.productCount || 0;
         if (count > 0) {
             out.push(h('div', { class: 'scope' }, icon('scan'),
-                h('span', { text: `Answers use this scan: ${cs.source || 'your last scan'}, ${plural(count, 'item')}` })));
+                h('span', {}, `Answers use this scan: ${cs.source || 'your last scan'}, `, h('b', { text: plural(count, 'item') }))));
         }
         if (cs.unreachable) {
             out.push(h('div', { class: 'notice', role: 'alert' }, h('span', { text: alive() ? 'Could not reach ProScan. Reload this page and try again.' : 'ProScan was updated. Reload this page to ask.' })));
