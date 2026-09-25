@@ -123,7 +123,8 @@ const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const plural = (n, one, many = one + 's') => `${fmt(n)} ${n === 1 ? one : many}`;
 
 /**
- * Update the stats in the last-scrape card: count, average price and rating.
+ * Update the stats in the last-scrape card: count, median price and average
+ * rating, the same figures the dock shows.
  *
  * @param {Object[]} results - Array of product objects
  */
@@ -135,10 +136,15 @@ function updateStats(results) {
     elements.avgRating.textContent = '-';
     if (results.length === 0) return;
 
-    const prices = results.map(r => Analyzer.parsePrice(r.price)).filter(p => p > 0);
+    const cents = results
+        .map(r => (Number.isInteger(r.priceCents) ? r.priceCents : Math.round(Analyzer.parsePrice(r.price) * 100)))
+        .filter(c => c > 0)
+        .sort((a, b) => a - b);
     const ratings = results.map(r => Analyzer.parseRating(r.rating)).filter(r => r > 0);
-    if (prices.length > 0) {
-        elements.avgPrice.textContent = '$' + (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(2);
+    if (cents.length > 0) {
+        const mid = Math.floor(cents.length / 2);
+        const median = cents.length % 2 ? cents[mid] : Math.round((cents[mid - 1] + cents[mid]) / 2);
+        elements.avgPrice.textContent = '$' + (median / 100).toFixed(2);
     }
     if (ratings.length > 0) {
         elements.avgRating.textContent = (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1);
@@ -168,7 +174,7 @@ function setScrapingState(isActive) {
         const n = currentRun ? currentRun.itemCount || 0 : currentResults.length;
         setButton(elements.actionButton, 'stop', `Stop and keep ${plural(n, 'product')}`);
     } else {
-        setButton(elements.actionButton, 'play', 'Scrape this page');
+        setButton(elements.actionButton, 'play', scrapeLabel());
     }
     elements.exportButtons.classList.toggle('hidden', isActive || currentResults.length === 0);
 }
@@ -213,7 +219,7 @@ function drawTicks(run) {
 /** What a run scraped, in words: a storefront or a search. */
 function sourceLabel(run) {
     const src = (run && run.source) || {};
-    if (src.type === 'storefront') return src.sellerId ? `storefront ${src.sellerId}` : 'a storefront';
+    if (src.type === 'storefront') return src.name || (src.sellerId ? `storefront ${src.sellerId}` : 'a storefront');
     return src.keyword ? `search "${src.keyword}"` : 'search results';
 }
 
@@ -243,6 +249,14 @@ function renderLast(run) {
     elements.lastLine.classList.toggle('hidden', !line);
 }
 
+/** The fallback button's name, the same one the dock uses for this tab. */
+function scrapeLabel() {
+    const where = currentTab && currentTab.where ? currentTab.where : {};
+    if (where.kind === 'storefront') return 'Scrape this storefront';
+    if (where.kind === 'search') return 'Scrape this search';
+    return 'Scrape this page';
+}
+
 /** The top of the popup: what the active tab is and whether Scrape works there. */
 function renderHere() {
     const run = currentRun;
@@ -260,6 +274,7 @@ function renderHere() {
     const startable = !!tab && Run.STARTABLE.includes(tab.kind);
     const hint = 'You can also press Scrape in the bottom-right corner of the page.';
     elements.actionButton.classList.toggle('muted', !startable);
+    if (!isScrapingActive) setButton(elements.actionButton, 'play', scrapeLabel());
     if (startable && where.kind === 'storefront') {
         chip.classList.add('on');
         elements.tabChipText.textContent = 'This tab: seller storefront';
