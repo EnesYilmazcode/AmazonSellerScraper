@@ -3,8 +3,10 @@
 // auto-update does. From the live store build (v2.0, commit 7c2ba1c), and
 // from 2.1 (commit 40be432) in the middle of a run. Based on the audit's
 // upgrade harness.
+import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { test, expect } from '@playwright/test';
 import {
   launch, getState, waitForState, sleep, checkoutRevision, copyDir, enableDeveloperMode, clickStart,
@@ -17,7 +19,8 @@ const V21_REV = '40be432';
 const V20 = path.join(BUILD_DIR, 'v2.0');
 const V21 = path.join(BUILD_DIR, 'v2.1');
 const SLOT = path.join(BUILD_DIR, 'upgrade-slot');
-const CURRENT_VERSION = '2.3.0';
+// The build under test, whatever the manifest says it is.
+const CURRENT_VERSION = JSON.parse(fs.readFileSync(fileURLToPath(new URL('../../manifest.json', import.meta.url)), 'utf8')).version;
 
 function bug(fid, what) {
   test.fail(!process.env.PROSCAN_SHOW_KNOWN, `${fid}: ${what}`);

@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "ProScan - Amazon Product Scraper",
-    "version": "2.3.0",
+    "version": "2.4.0",
     "description": "Scrape Amazon seller products with analytics and AI-powered product insights",
     "permissions": [
         "storage",
