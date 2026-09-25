@@ -175,13 +175,13 @@ svg { display: block; flex: none; }
 .linkrow .l { display: flex; flex-direction: column; line-height: 1.3; margin-right: auto; min-width: 0; }
 .linkrow .l b { font-weight: 580; }
 .linkrow .l span { color: var(--muted); font-size: 12.5px; }
-.linkrow > svg { width: 16px; height: 16px; color: var(--muted); }
+.linkrow svg { width: 16px; height: 16px; color: var(--muted); }
 .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 10px 0 0; }
 .bar i { display: block; height: 100%; background: var(--primary); border-radius: 3px; }
 
 /* chat */
-.scope { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--soft-ink); background: var(--soft); border-radius: 999px; padding: 5px 12px 5px 10px; align-self: flex-start; max-width: 100%; }
-.scope span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--soft-ink); background: var(--soft); border-radius: 12px; padding: 5px 12px 5px 10px; align-self: flex-start; max-width: 100%; }
+.scope span { overflow-wrap: anywhere; }
 .scope svg { width: 14px; height: 14px; }
 .thread { display: flex; flex-direction: column; gap: 10px; min-height: 160px; max-height: 340px; overflow-y: auto; }
 .msg { max-width: 86%; padding: 9px 13px; border-radius: 16px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -201,7 +201,7 @@ svg { display: block; flex: none; }
 .send svg { width: 16px; height: 16px; }
 
 /* settings */
-.set { display: flex; flex-direction: column; gap: 8px; }
+.set { display: flex; flex-direction: column; gap: 12px; }
 .set + .set { border-top: 1px solid var(--line); padding-top: 14px; }
 .switch { width: 40px; height: 24px; border-radius: 999px; background: var(--line-strong); position: relative; flex: none; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
@@ -210,7 +210,7 @@ svg { display: block; flex: none; }
 .status { font-size: 12.5px; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .status i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .status.on { color: var(--ok); } .status.on i { background: var(--ok); }
-.small { height: 34px; border-radius: 10px; padding: 0 12px; font-size: 13px; width: auto; flex: none; }
+.compact { height: 34px; border-radius: 10px; padding: 0 12px; font-size: 13px; width: auto; flex: none; }
 .optional { color: var(--muted); font-weight: 400; }
 .foot { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; margin: 0; }
 

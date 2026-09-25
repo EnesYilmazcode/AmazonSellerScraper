@@ -470,7 +470,7 @@
                 h('div', { class: 'bar' }, h('i', { style: `width:${total ? Math.round((current / total) * 100) : 0}%` })),
                 h('p', { class: 'endline', style: 'margin-top:8px', text: 'Keep this tab on this page until it finishes.' }),
                 h('div', { style: 'margin-top:10px' },
-                    h('button', { class: 'secondary small', 'data-k': 'spread-stop', onclick: () => stopSpreadAnalysis() }, icon('stop'), 'Stop checking')));
+                    h('button', { class: 'secondary compact', 'data-k': 'spread-stop', onclick: () => stopSpreadAnalysis() }, icon('stop'), 'Stop checking')));
         }
         if (st.spreadCount > 0) {
             return h('p', { class: 'note' }, icon('ok'),
@@ -516,7 +516,7 @@
         if (isEnded(r) && r.thisTab && recent(r) && !ui.notNow && st && st.count > 0) {
             return launcherShell('done',
                 mainButton('Open ProScan', `${plural(st.count, 'product')} saved`, 'Ready to download', mark({ badge: r.reason === 'complete' })),
-                h('button', { class: 'pill', 'data-k': 'xlsx-quick', disabled: !!ui.busy, onclick: () => download('xlsx') }, icon('down'), 'Excel'),
+                h('button', { class: 'pill', 'data-k': 'xlsx-quick', 'aria-label': 'Download Excel', disabled: !!ui.busy, onclick: () => download('xlsx') }, icon('down'), 'Excel'),
                 chatButton(),
                 hideButton('Hide for this tab'));
         }
@@ -797,14 +797,14 @@
             h('div', { class: 'set' },
                 h('div', { class: 'row' },
                     h('div', { class: 'l' }, h('b', { text: 'AI answers' }), statusDot(!!st.hasKey, st.hasKey ? 'Gemini key added' : 'No key yet')),
-                    h('button', { class: 'secondary small', 'data-k': 'key', onclick: () => openSettingsPage('key') }, st.hasKey ? 'Change key' : 'Add key', icon('ext'))),
+                    h('button', { class: 'secondary compact', 'data-k': 'key', onclick: () => openSettingsPage('key') }, st.hasKey ? 'Change key' : 'Add key', icon('ext'))),
                 h('p', { class: 'note' }, icon('info'), h('span', { text: 'Keys are entered on ProScan\'s own settings page, never on an Amazon page.' })))
         ];
         if (st.cloudSync) {
             sections.push(h('div', { class: 'set' },
                 h('div', { class: 'row' },
                     h('div', { class: 'l' }, h('b', {}, 'Dashboard sync ', h('span', { class: 'optional', text: '(optional)' })), statusDot(!!st.signedIn, st.signedIn ? 'Signed in' : 'Not signed in')),
-                    h('button', { class: 'secondary small', 'data-k': 'sync', onclick: () => openSettingsPage('sync') }, st.signedIn ? 'Manage' : 'Sign in', icon('ext')))));
+                    h('button', { class: 'secondary compact', 'data-k': 'sync', onclick: () => openSettingsPage('sync') }, st.signedIn ? 'Manage' : 'Sign in', icon('ext')))));
         }
         sections.push(noticeEl());
         sections.push(h('p', { class: 'foot' }, h('span', { text: 'Scans stay on this computer unless you sign in.' }), h('span', { text: version ? `ProScan ${version}` : '' })));
