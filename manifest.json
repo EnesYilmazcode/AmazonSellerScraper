@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "ProScan - Amazon Product Scraper",
-    "version": "2.3.0",
+    "version": "2.4.0",
     "description": "Scrape Amazon seller products with analytics and AI-powered product insights",
     "permissions": [
         "storage",
@@ -31,9 +31,12 @@
                 "scripts/modules/price.js",
                 "scripts/lib/parsers.js",
                 "scripts/lib/messages.js",
+                "scripts/lib/run.js",
+                "scripts/lib/page-kind.js",
                 "scripts/content/scraper.js",
-                "scripts/content/chatbot.js",
-                "scripts/content/offer-fetcher.js"
+                "scripts/content/offer-fetcher.js",
+                "scripts/content/dock-styles.js",
+                "scripts/content/dock.js"
             ],
             "run_at": "document_idle"
         }
@@ -43,11 +46,5 @@
     },
     "background": {
         "service_worker": "scripts/background/service-worker.js"
-    },
-    "web_accessible_resources": [
-        {
-            "resources": ["styles/chatbot.css", "libs/*.js", "assets/icons/*.png"],
-            "matches": ["*://*.amazon.com/*"]
-        }
-    ]
+    }
 }

@@ -131,7 +131,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.type === Msg.T.PING) {
         const page = parsePage();
-        sendResponse({ ok: true, kind: page.kind, count: page.products.length, url: window.location.href });
+        sendResponse({ ok: true, kind: page.kind, count: page.products.length, url: window.location.href, title: String(document.title || '').slice(0, 200) });
         return false;
     }
 

@@ -1,262 +1,85 @@
-<p align="center">
-  <img src="assets/logo.png" alt="ProScan Logo" width="128">
-</p>
+<h1 align="center">ProScan</h1>
 
-<h1 align="center">ProScan - Amazon Product Intelligence Platform</h1>
-
-<p align="center">
-  <strong>AI-powered Chrome extension for Amazon product scraping, analytics, and real-time insights</strong>
-</p>
+<p align="center"><b>Scrape any Amazon search or seller storefront in one click.</b><br>
+A small dock in the corner of the page turns every results page for you and hands back an Excel file.</p>
 
 <p align="center">
-  <a href="https://chromewebstore.google.com/detail/proscan-amazon-product-sc/bikgignfnljpbmchlemkbbpboigodgap">
-    <img src="https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?logo=googlechrome&logoColor=white" alt="Chrome Web Store">
-  </a>
-  <img src="https://img.shields.io/badge/Manifest-V3-brightgreen" alt="Manifest V3">
-  <img src="https://img.shields.io/badge/AI-Gemini_Flash-blue" alt="Gemini AI">
-  <img src="https://img.shields.io/badge/License-MIT-green" alt="MIT License">
+  <img src="docs/images/dock-results.png" width="560" alt="The ProScan dock on an Amazon results page after a run: 141 products saved, median price, average rating, and a Download Excel button"><br>
+  <a href="https://chromewebstore.google.com/detail/proscan-amazon-product-sc/bikgignfnljpbmchlemkbbpboigodgap"><b>Get it on the Chrome Web Store</b></a>
 </p>
 
----
+## How it works
 
-## Overview
+<img src="docs/images/dock-suggest.png" width="560" alt="The ProScan dock collapsed in the bottom-right corner of an Amazon search, offering Scrape for 48 products on the page">
 
-ProScan is a Chrome extension that scrapes Amazon product listings across multiple pages, runs analytics to identify arbitrage opportunities, and includes a floating AI chatbot powered by Google Gemini for real-time product Q&A -- all running client-side with no server required.
+1. **Open.** Go to an Amazon search or a seller's storefront. The dock in the bottom-right corner offers **Scrape**. There is nothing to pin or open, and no account to make.
+2. **Scrape.** ProScan reads every product on the page (title, ASIN, price, rating, reviews, Prime, sponsored), then opens the next page itself, 2 to 4 seconds apart, until the last page or your page limit. **Stop** keeps what it has.
+3. **Download.** When the run ends the dock says why (last page, stopped, or Amazon showed a captcha) and offers Excel, CSV or JSON.
+4. **Ask.** The dock's second tab answers questions about the products you just scraped ("what's the best rated mat under $30?"), using Google Gemini and your own free API key.
 
-## Key Features
+Accounts are optional. Signing in only sends your scans to the [ProScan dashboard](https://proscanbot.web.app/dashboard/), where you can track prices across runs.
 
-- **Multi-page scraping** -- Automatically navigates and extracts product data (name, ASIN, price, rating, reviews, Prime status) across paginated Amazon results
-- **Opportunity scoring** -- Proprietary formula identifies high-value arbitrage opportunities based on rating, review velocity, and price positioning
-- **Price spread analysis** -- Fetches competing seller prices for each product and calculates variability (Coefficient of Variation) to identify pricing disagreement -- a strong arbitrage signal
-- **AI chatbot** -- Floating widget on Amazon pages answers questions about your last scan using Gemini Flash and your own free API key (e.g., "What's the best deal under $30?")
-- **Analytics dashboard** -- Real-time stats, underpriced product detection, and quality distribution analysis
-- **Multi-format export** -- Excel (with styled sheets and charts), CSV, and JSON with full analytics
-- **Shadow DOM isolation** -- Chatbot widget styles are fully isolated from Amazon's CSS
+## System design
 
-## Architecture
+Everything happens in your browser. The only servers involved are Google's: Gemini if you use Ask, and Firebase if you sign in to the dashboard.
 
-```
-                    Chrome Extension (Client-Side)
- ┌──────────────────────────────────────────────────────────┐
- │                                                          │
- │  popup/              scripts/content/                    │
- │  ├── popup.html      ├── scraper.js    (DOM extraction)  │
- │  ├── popup.css       └── chatbot.js    (AI widget)       │
- │  └── popup.js                                            │
- │                      scripts/background/                 │
- │  scripts/modules/    └── service-worker.js               │
- │  ├── storage.js         (message routing + Gemini API)   │
- │  ├── analyzer.js                                         │
- │  └── exporter.js     styles/                             │
- │                      └── chatbot.css                     │
- └──────────────────────────────────────────────────────────┘
-```
-
-## Data Flow
-
-### Scraping Pipeline
-
-```
-User clicks "Start Scraping"
-  → popup.js sends START_RUN to the service worker
-  → The worker pings the tab (the popup offers a reload if ProScan is not
-    loaded there), makes a run bound to that tab and asks it to parse
-  → scraper.js classifies the page, extracts products and sends PAGE_RESULT;
-    it never writes storage and never navigates
-  → The worker saves the page to IndexedDB in one transaction
-  → After a 2 to 4 second delay the worker opens the page's Next link
-    with tabs.update, and the new page reports in
-  → Repeats until the last page or the page cap (settings.maxPages, default 20)
-  → The run ends with a reason: complete, stopped, blocked (captcha,
-    bot check, sign-in), selectors_broken, storage_full, interrupted or
-    updated (the extension updated mid-run)
-  → analyzer.js generates insights and opportunity scores
-  → User exports via exporter.js (Excel/CSV/JSON)
+```mermaid
+flowchart LR
+  subgraph page["Amazon tab"]
+    D["Dock<br>(closed Shadow DOM)"]
+    S["Scraper<br>reads the page, never navigates"]
+  end
+  subgraph ext["Extension service worker"]
+    E["Run engine<br>one run, bound to one tab"]
+    DB[("IndexedDB<br>runs, products, outbox")]
+    X["Excel, CSV, JSON"]
+  end
+  D -- "Scrape / Stop" --> E
+  S -- "page result" --> E
+  E -- "next page" --> page
+  E --> DB --> X
+  E -. "optional" .-> F[("Firestore")] --> W["ProScan dashboard"]
+  E -. "Ask, your key" .-> G["Gemini"]
 ```
 
-### Cloud Sync
+The service worker is the only thing that writes data or changes pages, so closing the popup, switching tabs or Chrome stopping the worker between pages does not lose a run. Full detail is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-```
-Signed in to a ProScan account in the popup (email and password)
-  → Each saved page goes into the IndexedDB outbox, tagged with the account's uid;
-    the end of the run goes in after its pages
-  → A few seconds after a page, a run end, a popup open or a browser start,
-    the worker flushes the outbox (no alarms). After a failed flush the next
-    automatic one waits 30 s, doubling up to an hour
-  → sync.js writes one entry at a time: the page chunk, and a product and a
-    history document per ASIN on the page. The run header and the source go
-    once per run per flush. latest, prev and delta are replaced whole, never
-    merged; sourceIds keeps every source
-  → An entry leaves the outbox only once its own writes commit; a page saved
-    during a flush goes out before the flush returns
-  → An entry the rules refuse is set aside, so the entries behind it still sync;
-    the popup counts them and Export to ProScan tries them again
-  → Export to ProScan flushes right away
+## Permissions
+
+ProScan asks for `storage`, `downloads`, and access to amazon.com and the Gemini API. Nothing else. A check in CI (`npm run lock`) fails the build if anything is ever added, because every new permission makes Chrome ask existing users to approve the extension again.
+
+## Run it
+
+```bash
+git clone https://github.com/EnesYilmazcode/AmazonSellerScraper.git
+cd AmazonSellerScraper
+npm ci
+npm run build      # builds the extension into dist/
+npm test           # unit tests, plus a corpus of saved Amazon pages
+npm run test:e2e   # loads dist/ into Chromium and scrapes the saved pages, no live Amazon traffic
+npm run check      # permission lock, version gate and secret scan
 ```
 
-Write cost: a page of k products is 1 + 2k writes, plus 2 per run per flush. A 20 page run of 48 products a page is about 1,960 writes. Spark allows 20,000 writes a day for the whole project, shared by every user, so about 10 such runs a day fill it (audit F-23).
+Then open `chrome://extensions`, turn on Developer mode, click **Load unpacked** and pick `dist/`. The repo root does not load on its own because the service worker is bundled. `npm run build:dev` points sync at the local Firebase emulators instead of the real project.
 
-The document shapes, ids and validators are in `packages/schema/index.js`, which the dashboard copies. Money is integer cents, unknown values are null (left out of compact points), and every document carries `sv`. A signed-out user queues nothing. If Firebase drops the session, the popup says so and the queued pages wait for the same account to sign in again.
+| Folder | What's in it |
+|---|---|
+| [`scripts/content/`](scripts/content/) | the dock, the page scraper, seller offer fetching |
+| [`scripts/background/`](scripts/background/) | the run engine, IndexedDB, downloads, sync |
+| [`scripts/lib/`](scripts/lib/) | pure parsers, the run state machine, page types, the Gemini request |
+| [`popup/`](popup/) | the toolbar popup, a fallback for the dock |
+| [`packages/schema/`](packages/schema/) | the cloud data shapes, shared with the dashboard |
+| [`tests/`](tests/) | Jest suite, the saved page corpus, the Chromium harness |
+| [`tools/`](tools/) | build, store zip, permission lock, secret scan |
 
-### AI Chatbot Flow
+## Known gaps
 
-```
-User types question in floating widget
-  → chatbot.js sends CHAT_MESSAGE (question + last few turns) to service-worker.js
-  → Service worker reads the user's key and the latest run from its storage
-  → scripts/lib/chat.js builds the Gemini request (model id is GEMINI_MODEL there)
-  → Response displayed in chat bubble as plain text
-```
+**Compare seller prices** misses most offers on Amazon's current pages and is being rebuilt. The opportunity score is a rough heuristic, `(rating * log10(reviews + 1)) / sqrt(price)`, not a forecast.
 
-## Analytics Engine
+## Privacy
 
-### Opportunity Score Formula
+Scans stay on your computer unless you sign in, which sends them to your dashboard. Ask sends your question and the scanned products to Google Gemini with your own key. See the [privacy policy](https://proscanbot.web.app/privacy/).
 
-```
-score = (rating * log10(reviews + 1)) / sqrt(price)
-```
+## Credits
 
-Normalized to a 1-10 scale. Higher score = better arbitrage opportunity. The formula favors:
-- **High ratings** (quality signal)
-- **Many reviews** (logarithmic -- diminishing returns prevent outlier dominance)
-- **Lower price** (inverse square root -- moderate price sensitivity)
-
-### Insight Detection
-
-| Insight | Criteria | Priority |
-|---------|----------|----------|
-| High price spread | CV > 30% across sellers for the same ASIN | High |
-| Underpriced | 30%+ below average price with 4+ star rating | High |
-| Underexposed | 4+ stars but fewer than 50 reviews | Medium |
-| Price distribution | Min/max/average/median analysis | Low |
-| Quality distribution | Percentage of products above 4.5 stars | Low |
-
-### Price Spread Analysis
-
-After scraping, click **Analyze Price Spreads** to fetch competing seller prices for each product. The system:
-
-1. Fetches the offer listing page for each ASIN (2-second delay between requests)
-2. Extracts all seller prices using cascading DOM selectors
-3. Calculates the **Coefficient of Variation** (stdDev / mean * 100)
-4. Scores arbitrage opportunity based on CV, seller count, and absolute dollar spread
-
-```
-Arbitrage Score = (CV / 15) * log10(sellers + 1) * min(1, spread / $20)
-```
-
-| CV Range | Signal | Meaning |
-|----------|--------|---------|
-| 0-5% | Very Low | Commodity pricing, tight consensus |
-| 5-15% | Low | Normal variance |
-| 15-30% | Moderate | Some pricing disagreement |
-| 30-50% | High | Strong arbitrage signal |
-| 50%+ | Very High | Major pricing disagreement |
-
-See [docs/PRICE_SPREAD_ANALYSIS.md](docs/PRICE_SPREAD_ANALYSIS.md) for the full feature specification.
-
-## Installation
-
-1. Clone the repository and build it:
-   ```bash
-   git clone https://github.com/EnesYilmazcode/AmazonSellerScraper.git
-   cd AmazonSellerScraper
-   npm ci
-   npm run build
-   ```
-2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable **Developer mode** (top-right toggle)
-4. Click **Load unpacked** and select the `dist/` folder. The repo root does not load on its own, because the service worker has to be bundled.
-
-To use the AI chat, open the ProScan popup, expand **AI chat settings** and paste a Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)). The key stays in `chrome.storage.local`; only the service worker reads it and sends it to Google.
-
-For local Firebase work, `npm run build:dev` points the build at the emulators under the `demo-proscan` project.
-
-## Release checks
-
-`npm test` runs the Jest suite and the tool tests. `npm run check` builds, then runs the permission lock (nothing may be added over `tools/live-manifest.json`, the published v2.0 manifest), the version gate and the secret scan. `npm run zip` writes the store package to `dist-zips/` and refuses a dev build, a stray file, uncommitted changes (`node tools/zip.mjs --allow-dirty` overrides that for local tries), or any gate failure. CI runs all of these.
-
-The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, see its README). `npm run test:e2e` loads the built extension into Chromium and runs scrape scenarios against those pages, with every request answered locally. Run `npx playwright install --no-shell chromium` once first. Known bugs run as expected failures tagged with their audit finding id; `PROSCAN_SHOW_KNOWN=1 npm run test:e2e` shows what they fail on.
-
-`npm run test:contract` runs the real sync module against the Firebase emulators with the dashboard's `firestore.rules` (from `PROSCAN_RULES`, or a `web` or `proscan-web` checkout next to this repo): queues of 1, 201 and 600 products, a page added mid-flush, replace semantics across runs, create-only `firstSeenAt`, the write count per run, a product in two sources and an entry the rules refuse. It refuses to start if any of its ports is taken, and only stops the emulator processes it started. It needs the Firebase CLI and Java, and uses the `demo-proscan` project only.
-
-The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, see its README). `npm run test:e2e` loads the built extension into Chromium and runs scrape scenarios against those pages, with every request answered locally. Run `npx playwright install --no-shell chromium` once first. Known bugs run as expected failures tagged with their audit finding id; `PROSCAN_SHOW_KNOWN=1 npm run test:e2e` shows what they fail on.
-
-## Usage
-
-1. Navigate to any Amazon search results or seller page
-2. Click the ProScan extension icon
-3. Hit **Start Scraping** -- it will automatically paginate through results
-4. View analytics in the dashboard (item count, average rating, average price)
-5. Use the floating AI chatbot (bottom-right) to ask questions about products
-6. Export data as **Excel** (multi-sheet with analytics), **CSV**, or **JSON**
-
-## Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Extension | Vanilla JavaScript | UI, DOM scraping, export |
-| Extension | Chrome Manifest V3 | Extension framework |
-| Extension | Shadow DOM | Chatbot style isolation |
-| Extension | XLSX.js | Excel generation |
-| AI | Google Gemini Flash (bring your own key) | Chatbot |
-
-## Chrome APIs Used
-
-- `chrome.storage.local` -- Settings, the schema version, and the signed-in account (`account`, `authNotice`, `lastSync`)
-- `chrome.storage.session` -- The live run record, written by the service worker
-- IndexedDB (the extension's own origin, no permission) -- Runs, products, pages, lastValues and the sync outbox. Starting a run keeps the 10 newest runs and removes older ones, except runs still waiting to sync.
-- `chrome.runtime.sendMessage` / `onMessage` -- Messages, all listed in `scripts/lib/messages.js`
-- `chrome.downloads` -- File export downloads
-- `chrome.tabs` -- Messages to the run's tab, `tabs.update` for the next page, and `onRemoved` / `onUpdated` to notice the tab going away (none of these need the `tabs` permission)
-
-## Project Structure
-
-```
-AmazonSellerScraper/
-├── manifest.json                  # Extension config (Manifest V3)
-├── popup/
-│   ├── popup.html                # Extension popup interface
-│   ├── popup.css                 # Popup styling (dark theme)
-│   └── popup.js                  # UI state management and export handling
-├── scripts/
-│   ├── content/
-│   │   ├── scraper.js            # Parses a search page and reports it to the worker
-│   │   ├── chatbot.js            # Floating AI chatbot (Shadow DOM)
-│   │   └── offer-fetcher.js      # Seller offer page fetching for spread analysis
-│   ├── lib/
-│   │   ├── parsers.js            # Pure search and offer page parsing
-│   │   ├── messages.js           # Every message type and who may send it
-│   │   ├── run.js                # The run state machine and its end reasons
-│   │   ├── flags.js              # Build flags (cloud sync is on from 2.3)
-│   │   ├── migrate.js            # Storage schema migrations (schemaVersion)
-│   │   └── chat.js               # Gemini request builder and run scoping
-│   ├── background/
-│   │   ├── service-worker.js     # Wires the router, the engine, the chat and migrations
-│   │   ├── router.js             # The one message router
-│   │   ├── engine.js             # Runs scrapes; the only writer of run data
-│   │   ├── db.js                 # IndexedDB stores
-│   │   ├── sync-plan.js          # What each outbox entry writes (pure)
-│   │   └── sync.js               # Drains the outbox into Firestore
-│   └── modules/
-│       ├── storage.js            # Chrome storage abstraction layer
-│       ├── analyzer.js           # Analytics engine + opportunity scoring
-│       ├── spread-analyzer.js    # Price spread statistics (CV, arbitrage score)
-│       └── exporter.js           # Multi-format export (Excel/CSV/JSON)
-├── packages/
-│   └── schema/index.js           # Cloud schema shared with the dashboard
-├── styles/
-│   └── chatbot.css               # Chatbot widget styles (Shadow DOM)
-├── libs/
-│   └── xlsx.full.min.js          # Excel generation library
-└── assets/
-    ├── logo.png                  # Project logo
-    └── icons/                    # Extension icons (16, 48, 128px)
-```
-
-## Developer
-
-- **Enes Yilmaz**
-
-## License
-
-This project is licensed under the MIT License.
+Built by [Enes Yilmaz](https://github.com/EnesYilmazcode). Excel files by [SheetJS](https://sheetjs.com).

@@ -76,6 +76,7 @@ const Chat = (() => {
     function sourceLabel(meta) {
         if (!meta) return '';
         if (meta.keyword) return 'search "' + cleanText(meta.keyword, 80) + '"';
+        if (meta.name) return cleanText(meta.name, 60);
         if (meta.sellerId) return 'storefront ' + cleanText(meta.sellerId, 40);
         return '';
     }

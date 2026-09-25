@@ -59,7 +59,7 @@ test('remove deletes the key', async () => {
     await chrome.storage.local.set({ geminiApiKey: KEY });
     await AiKey.init(document);
     expect(document.getElementById('geminiKeyInput').value).toBe('');
-    expect(document.getElementById('geminiKeyInput').placeholder).toMatch(/Key saved/);
+    expect(document.getElementById('geminiKeyInput').placeholder).toMatch(/replace it/);
     document.getElementById('geminiKeyClear').click();
     await flush();
     expect(chrome.storage.local._getStore().geminiApiKey).toBeUndefined();

@@ -1,9 +1,10 @@
 /**
  * @fileoverview Popup UI Controller
  *
- * Manages the extension popup interface including the analytics dashboard,
- * scraping controls, export buttons, and real-time progress updates.
- * Depends on Storage, Analyzer, and Exporter modules loaded via popup.html.
+ * The popup is the fallback to the dock on the page (scripts/content/dock.js).
+ * It says what the current tab is, offers the same Scrape, follows the run,
+ * downloads the latest run's files, and holds the two things that must never
+ * be typed on an Amazon page: the Gemini key and the ProScan sign-in.
  *
  * State Management:
  * The service worker owns the run and everything it found. The popup never
@@ -13,8 +14,11 @@
  *
  * Communication:
  * - START_RUN / STOP_RUN / GET_STATE to the worker (scripts/lib/messages.js)
- * - PING to a tab that did not answer, to start after a reload
+ * - PING to the active tab: what kind of page it is, and to start after a reload
  * - SPREAD_PROGRESS and SPREAD_ANALYSIS_COMPLETE from the offer fetcher
+ *
+ * Opened in a tab as popup.html#key or #sync (the dock's settings links),
+ * it unfolds that setting.
  *
  * @module PopupUI
  * @requires Storage
@@ -31,6 +35,9 @@ let currentResults = [];
 /** @type {Object} Spread data of the latest run, ASIN to offers */
 let currentSpread = {};
 
+/** @type {?Object} The latest run record, from the worker */
+let currentRun = null;
+
 /** @type {number} Page of the live run the results were last fetched for */
 let renderedPage = -1;
 
@@ -43,32 +50,58 @@ let currentProScanUser = null;
 /** @type {boolean} Whether a cloud export to ProScan is in progress */
 let isExporting = false;
 
+/** @type {?{kind: string, count: number, url: string, where: Object}} The active tab, as last seen */
+let currentTab = null;
+
+/** Inline icons: the popup loads nothing from the network. */
+const ICONS = {
+    play: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M5 3.2v9.6a.6.6 0 0 0 .9.5l7.6-4.8a.6.6 0 0 0 0-1L5.9 2.7a.6.6 0 0 0-.9.5z"/></svg>',
+    stop: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"/></svg>',
+    down: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>',
+    spin: '<span class="spinner" aria-hidden="true"></span>'
+};
+
+/** Sets a button to an icon and a text label; the label is text, never HTML. */
+function setButton(button, icon, label) {
+    button.innerHTML = icon ? ICONS[icon] : '';
+    button.appendChild(document.createTextNode((icon ? ' ' : '') + label));
+}
+
 /**
  * Cached references to DOM elements used throughout the popup lifecycle.
- * Resolved once at module load time for performance.
  * @const {Object<string, HTMLElement>}
  */
 const elements = {
     itemCount: document.getElementById('itemCount'),
+    itemWord: document.getElementById('itemWord'),
     avgRating: document.getElementById('avgRating'),
     avgPrice: document.getElementById('avgPrice'),
     status: document.getElementById('status'),
+    tabChip: document.getElementById('tabChip'),
+    tabChipText: document.getElementById('tabChipText'),
+    hereTitle: document.getElementById('hereTitle'),
+    hereSub: document.getElementById('hereSub'),
     actionButton: document.getElementById('actionButton'),
     reloadTabButton: document.getElementById('reloadTabButton'),
+    lastScrape: document.getElementById('lastScrape'),
+    lastWhen: document.getElementById('lastWhen'),
+    lastSource: document.getElementById('lastSource'),
+    lastTicks: document.getElementById('lastTicks'),
+    lastLine: document.getElementById('lastLine'),
     exportButtons: document.getElementById('exportButtons'),
     downloadExcel: document.getElementById('downloadExcel'),
     downloadCSV: document.getElementById('downloadCSV'),
     downloadJSON: document.getElementById('downloadJSON'),
-    insightsPreview: document.getElementById('insightsPreview'),
-    insightBadge: document.getElementById('insightBadge'),
-    insightText: document.getElementById('insightText'),
     spreadButton: document.getElementById('spreadButton'),
+    spreadLabel: document.getElementById('spreadLabel'),
+    spreadHint: document.getElementById('spreadHint'),
     spreadProgress: document.getElementById('spreadProgress'),
     spreadProgressFill: document.getElementById('spreadProgressFill'),
     spreadProgressText: document.getElementById('spreadProgressText'),
     spreadResults: document.getElementById('spreadResults'),
     spreadHighCount: document.getElementById('spreadHighCount'),
     spreadAvgCV: document.getElementById('spreadAvgCV'),
+    aiKeySummary: document.getElementById('aiKeySummary'),
     // ProScan cloud auth + export
     authForm: document.getElementById('authForm'),
     authEmail: document.getElementById('authEmail'),
@@ -81,131 +114,189 @@ const elements = {
     authNotice: document.getElementById('authNotice'),
     authResetBtn: document.getElementById('authResetBtn'),
     authSignUpLink: document.getElementById('authSignUpLink'),
+    authSummarySub: document.getElementById('authSummarySub'),
     authSync: document.getElementById('authSync'),
     exportToProScanBtn: document.getElementById('exportToProScanBtn')
 };
 
+const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const plural = (n, one, many = one + 's') => `${fmt(n)} ${n === 1 ? one : many}`;
+
 /**
- * Update the dashboard stats display with current results.
- * Calculates average price and rating using the Analyzer module
- * and triggers the insights preview update.
+ * Update the stats in the last-scrape card: count, median price and average
+ * rating, the same figures the dock shows.
  *
  * @param {Object[]} results - Array of product objects
  */
 function updateStats(results) {
     currentResults = results;
-    elements.itemCount.textContent = results.length;
+    elements.itemCount.textContent = fmt(results.length);
+    elements.itemWord.textContent = results.length === 1 ? 'product' : 'products';
+    elements.avgPrice.textContent = '-';
+    elements.avgRating.textContent = '-';
+    if (results.length === 0) return;
 
-    if (results.length > 0) {
-        const prices = results.map(r => Analyzer.parsePrice(r.price)).filter(p => p > 0);
-        const ratings = results.map(r => Analyzer.parseRating(r.rating)).filter(r => r > 0);
-
-        if (prices.length > 0) {
-            const avgPrice = (prices.reduce((a, b) => a + b, 0) / prices.length).toFixed(2);
-            elements.avgPrice.textContent = '$' + avgPrice;
-        }
-
-        if (ratings.length > 0) {
-            const avgRating = (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1);
-            elements.avgRating.textContent = avgRating;
-        }
-
-        updateInsightsPreview(results);
+    const cents = results
+        .map(r => (Number.isInteger(r.priceCents) ? r.priceCents : Math.round(Analyzer.parsePrice(r.price) * 100)))
+        .filter(c => c > 0)
+        .sort((a, b) => a - b);
+    const ratings = results.map(r => Analyzer.parseRating(r.rating)).filter(r => r > 0);
+    if (cents.length > 0) {
+        const mid = Math.floor(cents.length / 2);
+        const median = cents.length % 2 ? cents[mid] : Math.round((cents[mid - 1] + cents[mid]) / 2);
+        elements.avgPrice.textContent = '$' + (median / 100).toFixed(2);
+    }
+    if (ratings.length > 0) {
+        elements.avgRating.textContent = (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1);
     }
 }
 
 /**
- * Show the top insight badge in the popup.
- * Requires at least 5 products for meaningful analysis.
- * Prioritizes high-priority insights (opportunities) over informational ones.
- *
- * @param {Object[]} results - Array of product objects
- */
-function updateInsightsPreview(results) {
-    if (results.length < 5) return;
-
-    const insights = Analyzer.generateInsights(results);
-    const topInsight = insights.find(i => i.priority === 'high') || insights[0];
-
-    if (topInsight) {
-        elements.insightText.textContent = topInsight.title;
-        elements.insightBadge.className = 'insight-badge ' + (topInsight.type === 'opportunity' ? 'opportunity' : '');
-        elements.insightsPreview.classList.remove('hidden');
-    }
-}
-
-/**
- * Update the status bar message with an icon and styling.
+ * Show a status line under the tab description, or hide it with ''.
  *
  * @param {string} message - Status message text
  * @param {'info'|'success'|'error'|'warning'} [type='info'] - Status type for styling
  */
 function updateStatus(message, type = 'info') {
-    elements.status.innerHTML = `<i class="fas fa-${getStatusIcon(type)}"></i> ${message}`;
-    elements.status.className = 'status ' + type;
+    elements.status.textContent = message || '';
+    elements.status.className = 'status ' + type + (message ? '' : ' hidden');
 }
 
 /**
- * Map status type to Font Awesome icon name.
- *
- * @param {string} type - Status type
- * @returns {string} Font Awesome icon identifier
- */
-function getStatusIcon(type) {
-    const icons = {
-        info: 'info-circle',
-        success: 'check-circle',
-        error: 'exclamation-circle',
-        warning: 'exclamation-triangle'
-    };
-    return icons[type] || 'info-circle';
-}
-
-/**
- * Toggle the UI between scraping and idle states.
- * Updates the action button text/style and shows/hides export buttons.
+ * Toggle the main button between Scrape and Stop.
  *
  * @param {boolean} isActive - Whether scraping is in progress
  */
 function setScrapingState(isActive) {
     isScrapingActive = isActive;
-
+    elements.actionButton.classList.toggle('stop', isActive);
     if (isActive) {
-        elements.actionButton.innerHTML = '<i class="fas fa-stop"></i> Stop Scraping';
-        elements.actionButton.classList.add('stop');
-        elements.exportButtons.classList.add('hidden');
+        const n = currentRun ? currentRun.itemCount || 0 : currentResults.length;
+        setButton(elements.actionButton, 'stop', `Stop and keep ${plural(n, 'product')}`);
     } else {
-        elements.actionButton.innerHTML = '<i class="fas fa-play"></i> Start Scraping';
-        elements.actionButton.classList.remove('stop');
-        if (currentResults.length > 0) {
-            elements.exportButtons.classList.remove('hidden');
-        }
+        setButton(elements.actionButton, 'play', scrapeLabel());
+    }
+    elements.exportButtons.classList.toggle('hidden', isActive || currentResults.length === 0);
+}
+
+const DOWNLOAD_LABELS = { downloadExcel: 'Excel', downloadCSV: 'CSV', downloadJSON: 'JSON' };
+
+/**
+ * Toggle loading state on a download button during export generation.
+ *
+ * @param {HTMLButtonElement} button - The download button element
+ * @param {boolean} loading - True while the file is made
+ */
+function setDownloadLoading(button, loading) {
+    button.disabled = loading;
+    if (loading) setButton(button, 'spin', 'Making');
+    else setButton(button, button.id === 'downloadExcel' ? 'down' : null, DOWNLOAD_LABELS[button.id]);
+}
+
+/** The pages strip: saved pages, the one in progress, and hatched pages a store never had. */
+function drawTicks(run) {
+    const box = elements.lastTicks;
+    box.textContent = '';
+    if (!run || !run.maxPages) return;
+    const max = run.maxPages;
+    const n = Math.min(max, 20);
+    const per = max / n;
+    const done = run.page || 0;
+    const live = Run.isActive(run);
+    const early = !live && run.reason === 'complete' && done < max;
+    for (let i = 0; i < n; i++) {
+        const from = i * per;
+        const to = (i + 1) * per;
+        const tick = document.createElement('i');
+        if (done >= to - 1e-9) tick.className = 'done';
+        else if (live && done >= from - 1e-9) tick.className = 'now';
+        else if (!live && done > from) tick.className = 'done';
+        else if (early) tick.className = 'skip';
+        box.appendChild(tick);
     }
 }
 
-/**
- * Toggle loading spinner on a download button during export generation.
- *
- * @param {HTMLButtonElement} button - The download button element
- * @param {boolean} loading - True to show spinner, false to restore original content
- */
-function setDownloadLoading(button, loading) {
-    if (loading) {
-        button.innerHTML = '<span class="spinner"></span> Preparing...';
-        button.disabled = true;
+/** What a run scraped, in words: a storefront or a search. */
+function sourceLabel(run) {
+    const src = (run && run.source) || {};
+    if (src.type === 'storefront') return src.name || (src.sellerId ? `storefront ${src.sellerId}` : 'a storefront');
+    return src.keyword ? `search "${src.keyword}"` : 'search results';
+}
+
+function clock(ms) {
+    try { return new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); } catch (e) { return ''; }
+}
+
+/** The last-scrape card: count, source, pages strip, how it ended. */
+function renderLast(run) {
+    const has = !!run && (currentResults.length > 0 || Run.isActive(run));
+    elements.lastScrape.classList.toggle('hidden', !has);
+    if (!has) return;
+    elements.lastSource.textContent = 'from ' + sourceLabel(run);
+    elements.lastWhen.textContent = Run.isActive(run) ? 'Running now' : run.finishedAt ? clock(run.finishedAt) : '';
+    drawTicks(run);
+    let line = '';
+    if (Run.isActive(run)) {
+        line = `Page ${fmt(Math.min((run.page || 0) + 1, run.maxPages))} of ${fmt(run.maxPages)}`;
+    } else if (run.reason === 'complete' && run.maxPages) {
+        line = run.page < run.maxPages
+            ? `Page ${fmt(run.page)} was the last one, so the run ended early.`
+            : `Stopped at the ${fmt(run.maxPages)}-page limit.`;
+    } else if (run.reason === 'stopped') {
+        line = `You stopped it after page ${fmt(run.page)}.`;
+    }
+    elements.lastLine.textContent = line;
+    elements.lastLine.classList.toggle('hidden', !line);
+}
+
+/** The fallback button's name, the same one the dock uses for this tab. */
+function scrapeLabel() {
+    const where = currentTab && currentTab.where ? currentTab.where : {};
+    if (where.kind === 'storefront') return 'Scrape this storefront';
+    if (where.kind === 'search') return 'Scrape this search';
+    return 'Scrape this page';
+}
+
+/** The top of the popup: what the active tab is and whether Scrape works there. */
+function renderHere() {
+    const run = currentRun;
+    const chip = elements.tabChip;
+    chip.className = 'chip';
+    if (Run.isActive(run)) {
+        chip.classList.add('live');
+        elements.tabChipText.textContent = 'Scraping now';
+        elements.hereTitle.textContent = `Page ${fmt(Math.min((run.page || 0) + 1, run.maxPages))} of ${fmt(run.maxPages)}`;
+        elements.hereSub.textContent = `${plural(run.itemCount || 0, 'product')} saved so far from ${sourceLabel(run)}. Keep its tab open.`;
+        return;
+    }
+    const tab = currentTab;
+    const where = tab && tab.where ? tab.where : { kind: 'other' };
+    const startable = !!tab && Run.STARTABLE.includes(tab.kind);
+    const hint = 'You can also press Scrape in the bottom-right corner of the page.';
+    elements.actionButton.classList.toggle('muted', !startable);
+    if (!isScrapingActive) setButton(elements.actionButton, 'play', scrapeLabel());
+    if (startable && where.kind === 'storefront') {
+        chip.classList.add('on');
+        elements.tabChipText.textContent = 'This tab: seller storefront';
+        elements.hereTitle.textContent = `${plural(tab.count, 'product')} on this page`;
+        elements.hereSub.textContent = `A seller's storefront. ${hint}`;
+    } else if (startable) {
+        chip.classList.add('on');
+        elements.tabChipText.textContent = 'This tab: search results';
+        elements.hereTitle.textContent = `${plural(tab.count, 'product')} on this page`;
+        elements.hereSub.textContent = (where.keyword ? `Search for "${where.keyword}". ` : '') + hint;
+    } else if (tab && tab.kind && (where.kind === 'search' || where.kind === 'storefront')) {
+        elements.tabChipText.textContent = 'This tab: cannot scrape yet';
+        elements.hereTitle.textContent = 'Nothing to scrape here yet';
+        elements.hereSub.textContent = Run.refusal(tab.kind);
+    } else if (where.kind === 'seller' && where.sellerId) {
+        elements.tabChipText.textContent = 'This tab: seller profile';
+        elements.hereTitle.textContent = 'Open the storefront to scrape';
+        elements.hereSub.textContent = 'The page has a ProScan button bottom-right that opens this seller\'s storefront.';
     } else {
-        const icons = {
-            downloadExcel: 'file-excel',
-            downloadCSV: 'file-csv',
-            downloadJSON: 'file-code'
-        };
-        const labels = {
-            downloadExcel: 'Excel',
-            downloadCSV: 'CSV',
-            downloadJSON: 'JSON'
-        };
-        button.innerHTML = `<i class="fas fa-${icons[button.id]}"></i> ${labels[button.id]}`;
-        button.disabled = false;
+        elements.tabChipText.textContent = tab && tab.url ? 'This tab: not a search' : 'This tab';
+        elements.hereTitle.textContent = 'Open a search or a storefront';
+        elements.hereSub.textContent = 'ProScan scrapes Amazon search results and seller storefronts, then saves them as Excel, CSV or JSON.';
     }
 }
 
@@ -217,27 +308,24 @@ function setDownloadLoading(button, loading) {
  */
 function render(state) {
     const run = (state && state.run) || null;
+    currentRun = run;
     currentResults = (state && state.results) || [];
     currentSpread = (state && state.spread) || {};
     isScrapingActive = Run.isActive(run);
     renderedPage = run ? run.page : -1;
 
-    elements.itemCount.textContent = currentResults.length;
-    elements.avgRating.textContent = '-';
-    elements.avgPrice.textContent = '-';
-    elements.insightsPreview.classList.add('hidden');
     updateStats(currentResults);
     setScrapingState(isScrapingActive);
+    renderHere();
+    renderLast(run);
 
     const line = Run.describe(run, currentResults.length);
-    if (line && (isScrapingActive || run.reason !== 'complete')) {
-        updateStatus(line.text, line.type);
-    } else if (currentResults.length > 0) {
-        updateStatus('Ready to download ' + currentResults.length + ' products', 'success');
-    }
+    if (line && !isScrapingActive && run.reason !== 'complete') updateStatus(line.text, line.type);
+    else updateStatus('');
 
     const showSpread = !isScrapingActive && currentResults.length > 0;
     elements.spreadButton.classList.toggle('hidden', !showSpread);
+    elements.spreadHint.textContent = `Checks other sellers' offers, about ${Math.max(1, Math.round(currentResults.length * 2.5 / 60))} min`;
     if (showSpread && Object.keys(currentSpread).length > 0) displaySpreadResults();
 }
 
@@ -259,16 +347,6 @@ async function warnIfNearlyFull() {
             updateStatus(`Browser storage is ${pct}% full. Download your results; the next run removes older saved scans.`, 'warning');
         }
     } catch (e) { /* no estimate in this context */ }
-}
-
-/**
- * Initialize the popup UI from the worker's state.
- *
- * @async
- */
-async function initializeUI() {
-    await refresh();
-    await warnIfNearlyFull();
 }
 
 /** The tab the popup was opened over, or null. */
@@ -293,6 +371,34 @@ function sendToTab(tabId, message) {
 }
 
 const AMAZON_URL = /^https:\/\/([a-z0-9-]+\.)*amazon\.com\//i;
+
+/** Looks at the active tab (PING) and redraws the top of the popup. */
+async function refreshTab() {
+    const tab = await activeTab();
+    if (!tab || !AMAZON_URL.test(tab.url || '')) {
+        currentTab = tab ? { kind: null, count: 0, url: tab.url || '', where: { kind: 'other' } } : null;
+    } else {
+        const pong = await sendToTab(tab.id, { type: Msg.T.PING });
+        currentTab = {
+            kind: pong && pong.ok ? pong.kind : null,
+            count: pong && pong.ok ? pong.count : 0,
+            url: tab.url,
+            where: PageKind.classify(tab.url)
+        };
+    }
+    renderHere();
+}
+
+/**
+ * Initialize the popup UI from the worker's state.
+ *
+ * @async
+ */
+async function initializeUI() {
+    await refresh();
+    await refreshTab();
+    await warnIfNearlyFull();
+}
 
 /**
  * Start a new scraping session.
@@ -320,6 +426,7 @@ async function startScraping() {
         offerReload(tab.id);
         return;
     }
+    refreshTab();
     updateStatus((resp && (resp.message || resp.error)) || 'Could not start the run.', 'warning');
 }
 
@@ -369,6 +476,13 @@ async function stopScraping() {
 
 // --- Spread Analysis ---
 
+function setSpreadButton(running) {
+    elements.spreadButton.classList.toggle('stop', running);
+    elements.spreadLabel.textContent = running ? 'Stop checking seller prices' : 'Compare seller prices';
+    // Starting a run navigates the tab and would cut the analysis off.
+    elements.actionButton.disabled = running;
+}
+
 /**
  * Start the price spread analysis.
  * Sends a message to the offer-fetcher content script to begin
@@ -381,13 +495,12 @@ async function startSpreadAnalysis() {
     }
 
     isSpreadAnalyzing = true;
-    elements.spreadButton.innerHTML = '<i class="fas fa-stop"></i> Stop Analysis';
-    elements.spreadButton.classList.add('stop');
+    setSpreadButton(true);
     elements.spreadProgress.classList.remove('hidden');
     elements.spreadResults.classList.add('hidden');
     elements.spreadProgressFill.style.width = '0%';
     elements.spreadProgressText.textContent = `0/${currentResults.length}`;
-    updateStatus('Analyzing price spreads...', 'info');
+    updateStatus('Checking seller prices. Keep the Amazon tab on its page until it finishes.', 'info');
 
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
         chrome.tabs.sendMessage(tabs[0].id, { type: Msg.T.START_SPREAD_ANALYSIS });
@@ -399,9 +512,8 @@ async function startSpreadAnalysis() {
  */
 function stopSpreadAnalysis() {
     isSpreadAnalyzing = false;
-    elements.spreadButton.innerHTML = '<i class="fas fa-chart-bar"></i> Analyze Price Spreads';
-    elements.spreadButton.classList.remove('stop');
-    updateStatus('Spread analysis stopped.', 'warning');
+    setSpreadButton(false);
+    updateStatus('Seller price check stopped.', 'info');
 
     chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
         chrome.tabs.sendMessage(tabs[0].id, { type: Msg.T.STOP_SPREAD_ANALYSIS });
@@ -422,21 +534,15 @@ function displaySpreadResults() {
     elements.spreadResults.classList.remove('hidden');
     elements.spreadProgress.classList.add('hidden');
 
-    // Show insight if there are high-spread products
     if (summary.highSpreadCount > 0) {
-        updateStatus(
-            `Found ${summary.highSpreadCount} products with high price spread!`,
-            'success'
-        );
+        updateStatus(`${plural(summary.highSpreadCount, 'product')} with a wide price spread. They are marked in the Excel and CSV files.`, 'success');
     } else if (summary.withSpreadData > 0) {
-        updateStatus(
-            `Analyzed ${summary.withSpreadData} products. No high spreads found.`,
-            'info'
-        );
+        updateStatus(`Checked ${plural(summary.withSpreadData, 'product')}. No wide spreads found.`, 'info');
     }
 }
 
 // --- ProScan Cloud Auth + Export ---
+
 
 /**
  * Send a message to the background service worker and resolve with its
@@ -467,7 +573,8 @@ function sendToWorker(message) {
 function showSignedIn(user) {
     currentProScanUser = user;
     elements.authStatusEmail.textContent = user.email || user.displayName || 'Signed in';
-    document.getElementById('authSummary').textContent = 'Syncing to dashboard';
+    elements.authSummarySub.textContent = 'Signed in';
+    elements.authSummarySub.classList.add('on');
     elements.authForm.classList.add('hidden');
     elements.authAccount.classList.remove('hidden');
     elements.authError.classList.add('hidden');
@@ -488,12 +595,12 @@ function showSyncState(state) {
     let text = 'Scans sync to your ProScan dashboard automatically.';
     if (pending > 0) {
         text = `${pending} page${pending === 1 ? '' : 's'} waiting to sync.`;
-        if (last && last.error) text += ' The last try failed; it will try again in a while, or now with Export to ProScan.';
+        if (last && last.error) text += ' The last try failed; it will try again in a while, or now with Send to my ProScan dashboard.';
     } else if (last && !last.error) {
         text = 'Everything is synced.';
     }
     if (failed > 0) {
-        text += ` ${failed} page${failed === 1 ? '' : 's'} could not sync: ProScan refused ${failed === 1 ? 'it' : 'them'}. Export to ProScan tries again.`;
+        text += ` ${failed} page${failed === 1 ? '' : 's'} could not sync: ProScan refused ${failed === 1 ? 'it' : 'them'}. Send to my ProScan dashboard tries again.`;
     }
     elements.authSync.textContent = text;
     elements.authSync.classList.remove('hidden');
@@ -511,7 +618,8 @@ function showSignInForm(notice = null) {
         ? 'Your session expired. Sign in again to keep syncing; your scans are kept.'
         : '';
     elements.authNotice.classList.toggle('hidden', notice !== 'expired');
-    document.getElementById('authSummary').textContent = 'Dashboard sync (optional)';
+    elements.authSummarySub.textContent = 'Not signed in';
+    elements.authSummarySub.classList.remove('on');
     // An expired session is the one case worth unfolding the panel for.
     if (notice === 'expired') document.getElementById('authPanel').open = true;
     elements.authForm.classList.remove('hidden');
@@ -560,7 +668,7 @@ async function handleResetPassword() {
  */
 function resetSignInButton() {
     elements.authSignInBtn.disabled = false;
-    elements.authSignInBtn.innerHTML = '<i class="fas fa-right-to-bracket"></i> Sign in to ProScan';
+    setButton(elements.authSignInBtn, null, 'Sign in to ProScan');
 }
 
 /**
@@ -601,7 +709,7 @@ async function handleSignIn() {
     }
 
     elements.authSignInBtn.disabled = true;
-    elements.authSignInBtn.innerHTML = '<span class="spinner"></span> Signing in…';
+    setButton(elements.authSignInBtn, 'spin', 'Signing in');
 
     const response = await sendToWorker({ type: Msg.T.PROSCAN_SIGN_IN, email, password });
 
@@ -648,8 +756,8 @@ async function handleExportToProScan() {
 
     isExporting = true;
     elements.exportToProScanBtn.disabled = true;
-    elements.exportToProScanBtn.innerHTML = '<span class="spinner"></span> Exporting…';
-    updateStatus('Exporting to ProScan…', 'info');
+    setButton(elements.exportToProScanBtn, 'spin', 'Sending');
+    updateStatus('Sending to your ProScan dashboard.', 'info');
 
     const response = await sendToWorker({ type: Msg.T.PROSCAN_EXPORT });
 
@@ -673,7 +781,7 @@ async function handleExportToProScan() {
 
     isExporting = false;
     elements.exportToProScanBtn.disabled = false;
-    elements.exportToProScanBtn.innerHTML = '<i class="fas fa-cloud-arrow-up"></i> Export to ProScan';
+    setButton(elements.exportToProScanBtn, null, 'Send to my ProScan dashboard');
 }
 
 // --- Event Listeners ---
@@ -714,92 +822,37 @@ elements.actionButton.addEventListener('click', async () => {
         console.error('[ProScan] Start or stop failed:', err && err.message);
         updateStatus('Something went wrong. Close and reopen the popup, then try again.', 'error');
     } finally {
-        elements.actionButton.disabled = false;
+        elements.actionButton.disabled = isSpreadAnalyzing;
     }
 });
 
-// Excel export with full analytics report
-elements.downloadExcel.addEventListener('click', async () => {
+/**
+ * Makes the file for `format` with Exporter.build (the same code the
+ * worker uses for the page) and opens the save dialog.
+ */
+function downloadFile(button, format) {
     if (currentResults.length === 0) {
-        updateStatus('No results to download!', 'warning');
+        updateStatus('There is nothing to download yet.', 'warning');
         return;
     }
-
-    setDownloadLoading(elements.downloadExcel, true);
-    updateStatus('Generating Excel report...', 'info');
-
+    setDownloadLoading(button, true);
     try {
-        const analysisReport = Analyzer.generateFullReport(currentResults);
-        const { blob, filename } = Exporter.exportToExcel(currentResults, analysisReport);
-
+        const { blob, filename } = Exporter.build(format, currentResults, currentSpread);
         Exporter.triggerDownload(blob, filename, (downloadId) => {
-            if (downloadId) {
-                updateStatus('Download started!', 'success');
-            } else {
-                updateStatus('Download failed. Try again.', 'error');
-            }
-            setDownloadLoading(elements.downloadExcel, false);
+            if (downloadId) updateStatus(`${DOWNLOAD_LABELS[button.id]} download started.`, 'success');
+            else updateStatus('The download did not start. Try again.', 'error');
+            setDownloadLoading(button, false);
         });
     } catch (error) {
-        console.error('Excel export error:', error);
-        updateStatus('Error generating Excel file', 'error');
-        setDownloadLoading(elements.downloadExcel, false);
+        console.error('[ProScan] Export failed:', error);
+        updateStatus(`ProScan could not make the ${DOWNLOAD_LABELS[button.id]} file.`, 'error');
+        setDownloadLoading(button, false);
     }
-});
+}
 
-// CSV export
-elements.downloadCSV.addEventListener('click', async () => {
-    if (currentResults.length === 0) {
-        updateStatus('No results to download!', 'warning');
-        return;
-    }
-
-    setDownloadLoading(elements.downloadCSV, true);
-
-    try {
-        const { blob, filename } = Exporter.exportToCSV(currentResults);
-
-        Exporter.triggerDownload(blob, filename, (downloadId) => {
-            if (downloadId) {
-                updateStatus('CSV download started!', 'success');
-            } else {
-                updateStatus('Download failed. Try again.', 'error');
-            }
-            setDownloadLoading(elements.downloadCSV, false);
-        });
-    } catch (error) {
-        console.error('CSV export error:', error);
-        updateStatus('Error generating CSV file', 'error');
-        setDownloadLoading(elements.downloadCSV, false);
-    }
-});
-
-// JSON export with analytics
-elements.downloadJSON.addEventListener('click', async () => {
-    if (currentResults.length === 0) {
-        updateStatus('No results to download!', 'warning');
-        return;
-    }
-
-    setDownloadLoading(elements.downloadJSON, true);
-
-    try {
-        const { blob, filename } = Exporter.exportToJSON(currentResults, true);
-
-        Exporter.triggerDownload(blob, filename, (downloadId) => {
-            if (downloadId) {
-                updateStatus('JSON download started!', 'success');
-            } else {
-                updateStatus('Download failed. Try again.', 'error');
-            }
-            setDownloadLoading(elements.downloadJSON, false);
-        });
-    } catch (error) {
-        console.error('JSON export error:', error);
-        updateStatus('Error generating JSON file', 'error');
-        setDownloadLoading(elements.downloadJSON, false);
-    }
-});
+elements.downloadExcel.addEventListener('click', () => downloadFile(elements.downloadExcel, 'xlsx'));
+elements.downloadCSV.addEventListener('click', () => downloadFile(elements.downloadCSV, 'csv'));
+elements.downloadJSON.addEventListener('click', () => downloadFile(elements.downloadJSON, 'json'));
 
 /**
  * Messages from the offer fetcher in the tab:
@@ -814,8 +867,7 @@ chrome.runtime.onMessage.addListener((request) => {
         elements.spreadProgressText.textContent = `${request.current}/${request.total}`;
     } else if (request.type === Msg.T.SPREAD_ANALYSIS_COMPLETE) {
         isSpreadAnalyzing = false;
-        elements.spreadButton.innerHTML = '<i class="fas fa-chart-bar"></i> Analyze Price Spreads';
-        elements.spreadButton.classList.remove('stop');
+        setSpreadButton(false);
         refresh();
     }
     return false;
@@ -824,18 +876,45 @@ chrome.runtime.onMessage.addListener((request) => {
 // The worker writes the run record to session storage on every change, so
 // the view follows it: a new page, the end of the run, a closed tab.
 chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.geminiApiKey) showKeySummary(!!changes.geminiApiKey.newValue);
     if (area !== 'session' || !changes[Run.KEY]) return;
     const run = changes[Run.KEY].newValue;
     if (!run) return;
     if (!Run.isActive(run) || run.page !== renderedPage || !isScrapingActive) {
         refresh();
     } else {
-        elements.itemCount.textContent = run.itemCount || 0;
+        currentRun = run;
+        renderHere();
+        setScrapingState(true);
     }
 });
 
+/** The one-line state under "AI chat settings". */
+function showKeySummary(set) {
+    elements.aiKeySummary.textContent = set ? 'Gemini key added' : 'No key yet';
+    elements.aiKeySummary.classList.toggle('on', set);
+}
+
+/** popup.html#key or #sync, opened from the dock: unfold that setting. */
+function openFromHash() {
+    const hash = (location.hash || '').slice(1);
+    if (!hash) return;
+    document.body.classList.add('in-tab');
+    const panel = document.getElementById(hash === 'sync' ? 'authPanel' : 'aiSettings');
+    if (!panel || panel.classList.contains('hidden')) return;
+    panel.open = true;
+    const field = hash === 'sync' ? elements.authEmail : document.getElementById('geminiKeyInput');
+    if (field) field.focus();
+    panel.scrollIntoView({ block: 'nearest' });
+}
+
+// For scripts that aim the popup at a tab after it opened (the screenshot harness).
+window.ProScanPopup = { refreshTab, refresh };
+
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
+    try { document.getElementById('version').textContent = chrome.runtime.getManifest().version; } catch (e) { /* no manifest */ }
+    chrome.storage.local.get('geminiApiKey').then((d) => showKeySummary(!!(d && d.geminiApiKey)), () => {});
     initializeUI();
-    initializeAuthUI();
+    initializeAuthUI().then(openFromHash, openFromHash);
 });

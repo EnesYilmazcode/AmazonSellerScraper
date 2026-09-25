@@ -1,7 +1,8 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <meta charset="utf-8">
+    <title>ProScan</title>
     <link rel="stylesheet" href="popup.css">
     <script src="../libs/xlsx.full.min.js"></script>
     <script src="../scripts/modules/price.js"></script>
@@ -9,151 +10,118 @@
     <script src="../scripts/lib/messages.js"></script>
     <script src="../scripts/lib/run.js"></script>
     <script src="../scripts/lib/flags.js"></script>
+    <script src="../scripts/lib/page-kind.js"></script>
     <script src="../scripts/modules/storage.js"></script>
     <script src="../scripts/modules/analyzer.js"></script>
     <script src="../scripts/modules/spread-analyzer.js"></script>
     <script src="../scripts/modules/exporter.js"></script>
 </head>
 <body>
-    <div class="card">
-        <img src="../assets/icons/icon128.png" alt="ProScan Logo" class="logo">
-        <h1>ProScan</h1>
+    <header class="top">
+        <span class="mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="15.5" r="3.5"/><circle cx="17.5" cy="15.5" r="3.5"/><path d="M4 13 6 5.5h3L10 12"/><path d="M20 13 18 5.5h-3L14 12"/><path d="M10 14.5h4"/></svg></span>
+        <span class="name">ProScan</span>
+        <span class="version" id="version"></span>
+    </header>
 
-        <!-- Quick Stats Dashboard -->
-        <div class="dashboard">
-            <div class="stat-row">
-                <div class="stat">
-                    <div class="stat-value" id="itemCount">0</div>
-                    <div class="stat-label"><i class="fas fa-box"></i> Items</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="avgRating">-</div>
-                    <div class="stat-label"><i class="fas fa-star"></i> Avg Rating</div>
-                </div>
-                <div class="stat">
-                    <div class="stat-value" id="avgPrice">-</div>
-                    <div class="stat-label"><i class="fas fa-dollar-sign"></i> Avg Price</div>
+    <main>
+        <!-- This tab: what it is and the fallback Scrape button -->
+        <section class="here" aria-labelledby="hereTitle">
+            <span class="chip" id="tabChip"><i aria-hidden="true"></i><span id="tabChipText">This tab</span></span>
+            <h1 id="hereTitle">Open a search or a storefront</h1>
+            <p id="hereSub">ProScan scrapes Amazon search results and seller storefronts.</p>
+            <div class="status hidden" id="status" role="status"></div>
+            <button id="reloadTabButton" class="secondary hidden">Reload the tab and start</button>
+            <button id="actionButton" class="primary">Scrape this page</button>
+        </section>
+
+        <!-- The latest run and its downloads -->
+        <section class="last hidden" id="lastScrape" aria-labelledby="lastTitle">
+            <div class="last-top">
+                <h2 id="lastTitle">Last scrape</h2>
+                <span id="lastWhen"></span>
+            </div>
+            <div class="card">
+                <div class="big"><b id="itemCount">0</b> <span id="itemWord">products</span> <span class="from" id="lastSource"></span></div>
+                <div class="ticks" id="lastTicks" aria-hidden="true"></div>
+                <p class="endline hidden" id="lastLine"></p>
+                <dl class="facts">
+                    <div><dd id="avgPrice">-</dd><dt>Median price</dt></div>
+                    <div><dd id="avgRating">-</dd><dt>Avg rating</dt></div>
+                </dl>
+                <div class="export-buttons hidden" id="exportButtons">
+                    <button id="downloadExcel" class="download-button primary-soft"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg> Excel</button>
+                    <button id="downloadCSV" class="download-button">CSV</button>
+                    <button id="downloadJSON" class="download-button">JSON</button>
                 </div>
             </div>
-        </div>
 
-        <!-- Insights Preview -->
-        <div class="insights-preview hidden" id="insightsPreview">
-            <div class="insight-badge" id="insightBadge">
-                <i class="fas fa-lightbulb"></i>
-                <span id="insightText">No insights yet</span>
-            </div>
-        </div>
-
-        <div class="status" id="status">
-            <i class="fas fa-info-circle"></i> Ready to start
-        </div>
-
-        <button id="reloadTabButton" class="spread-button hidden">
-            <i class="fas fa-rotate-right"></i> Reload the tab and start
-        </button>
-
-        <button id="actionButton" class="primary-button">
-            <i class="fas fa-play"></i> Start Scraping
-        </button>
-
-        <!-- Spread Analysis -->
-        <button id="spreadButton" class="spread-button hidden">
-            <i class="fas fa-chart-bar"></i> Analyze Price Spreads
-        </button>
-
-        <div id="spreadProgress" class="spread-progress hidden">
-            <div class="spread-progress-bar">
-                <div class="spread-progress-fill" id="spreadProgressFill"></div>
-            </div>
-            <span class="spread-progress-text" id="spreadProgressText">0/0</span>
-        </div>
-
-        <div id="spreadResults" class="spread-results hidden">
-            <div class="spread-stats">
-                <div class="spread-stat">
-                    <span class="spread-stat-value" id="spreadHighCount">0</span>
-                    <span class="spread-stat-label">High Spread</span>
-                </div>
-                <div class="spread-stat">
-                    <span class="spread-stat-value" id="spreadAvgCV">0%</span>
-                    <span class="spread-stat-label">Avg CV</span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Export Options -->
-        <div class="export-buttons hidden" id="exportButtons">
-            <button id="downloadExcel" class="download-button">
-                <i class="fas fa-file-excel"></i> Excel
+            <button id="spreadButton" class="linkrow hidden">
+                <span class="l"><b id="spreadLabel">Compare seller prices</b><span id="spreadHint">Checks other sellers' offers for each product</span></span>
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>
             </button>
-            <button id="downloadCSV" class="download-button secondary">
-                <i class="fas fa-file-csv"></i> CSV
-            </button>
-            <button id="downloadJSON" class="download-button secondary">
-                <i class="fas fa-file-code"></i> JSON
-            </button>
-        </div>
+            <div id="spreadProgress" class="spread-progress hidden" role="status">
+                <div class="spread-progress-bar"><div class="spread-progress-fill" id="spreadProgressFill"></div></div>
+                <span class="spread-progress-text" id="spreadProgressText">0/0</span>
+            </div>
+            <div id="spreadResults" class="spread-results hidden">
+                <div><b id="spreadHighCount">0</b> <span>with a wide price spread</span></div>
+                <div><b id="spreadAvgCV">0%</b> <span>average spread (CV)</span></div>
+            </div>
 
-        <!-- Cloud export -->
-        <button id="exportToProScanBtn" class="export-cloud-button hidden">
-            <i class="fas fa-cloud-arrow-up"></i> Export to ProScan
-        </button>
+            <button id="exportToProScanBtn" class="secondary hidden">Send to my ProScan dashboard</button>
+        </section>
 
-        <!-- ProScan Cloud Auth -->
-        <details class="auth-panel ai-settings hidden" id="authPanel">
-            <summary class="auth-title">
-                <i class="fas fa-cloud"></i> <span id="authSummary">Dashboard sync (optional)</span>
-            </summary>
-            <!-- Signed-out: sign-in form -->
-            <div class="auth-form" id="authForm">
-                <div class="auth-help">Only needed to send scans to your ProScan dashboard.</div>
-                <div class="auth-notice hidden" id="authNotice"></div>
-                <input type="email" id="authEmail" class="auth-input" placeholder="Email" autocomplete="username">
-                <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="current-password">
-                <button id="authSignInBtn" class="auth-button">
-                    <i class="fas fa-right-to-bracket"></i> Sign in to ProScan
-                </button>
-                <div class="auth-error hidden" id="authError"></div>
-                <div class="auth-links">
-                    <a id="authSignUpLink" href="https://proscanbot.web.app/dashboard/" target="_blank" rel="noopener">Create an account</a>
-                    <button type="button" id="authResetBtn" class="auth-link-button">Forgot password?</button>
+        <!-- Settings: the AI key and the optional account stay here, never on Amazon -->
+        <section class="settings" aria-label="Settings">
+            <details class="fold" id="aiSettings">
+                <summary>
+                    <span class="l"><b>AI chat settings</b><span class="dot" id="aiKeySummary">Gemini key for Ask</span></span>
+                </summary>
+                <div class="fold-body">
+                    <label class="sr" for="geminiKeyInput">Gemini API key</label>
+                    <input type="password" id="geminiKeyInput" class="field" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false">
+                    <div class="ai-key-actions">
+                        <button id="geminiKeySave" class="secondary">Save key</button>
+                        <button id="geminiKeyClear" class="quiet hidden">Remove</button>
+                    </div>
+                    <div class="help" id="geminiKeyStatus" role="status"></div>
+                    <div class="help">
+                        Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+                        It stays on this computer and is sent only to Google.
+                    </div>
                 </div>
-            </div>
+            </details>
 
-            <!-- Signed-in: account state -->
-            <div class="auth-account hidden" id="authAccount">
-                <div class="auth-account-info">
-                    <i class="fas fa-circle-user"></i>
-                    <span class="auth-account-email" id="authStatusEmail"></span>
+            <details class="fold hidden" id="authPanel">
+                <summary>
+                    <span class="l"><b id="authSummary">Dashboard sync (optional)</b><span class="dot" id="authSummarySub">Not signed in</span></span>
+                </summary>
+                <div class="fold-body">
+                    <div class="auth-form" id="authForm">
+                        <div class="help">Only needed to send scans to your ProScan dashboard.</div>
+                        <div class="notice hidden" id="authNotice"></div>
+                        <label class="sr" for="authEmail">Email</label>
+                        <input type="email" id="authEmail" class="field" placeholder="Email" autocomplete="username">
+                        <label class="sr" for="authPassword">Password</label>
+                        <input type="password" id="authPassword" class="field" placeholder="Password" autocomplete="current-password">
+                        <button id="authSignInBtn" class="secondary">Sign in to ProScan</button>
+                        <div class="notice error hidden" id="authError" role="alert"></div>
+                        <div class="auth-links">
+                            <a id="authSignUpLink" href="https://proscanbot.web.app/dashboard/" target="_blank" rel="noopener">Create an account</a>
+                            <button type="button" id="authResetBtn" class="quiet">Forgot password?</button>
+                        </div>
+                    </div>
+                    <div class="auth-account hidden" id="authAccount">
+                        <span class="auth-account-email" id="authStatusEmail"></span>
+                        <button id="authSignOutBtn" class="quiet">Sign out</button>
+                    </div>
+                    <div class="help hidden" id="authSync"></div>
                 </div>
-                <button id="authSignOutBtn" class="auth-signout">
-                    <i class="fas fa-right-from-bracket"></i> Sign out
-                </button>
-            </div>
-            <div class="auth-sync hidden" id="authSync"></div>
-        </details>
+            </details>
+        </section>
 
-        <!-- AI chat settings: the user's own Gemini key -->
-        <details class="auth-panel ai-settings" id="aiSettings">
-            <summary class="auth-title">
-                <i class="fas fa-robot"></i> AI chat settings
-            </summary>
-            <input type="password" id="geminiKeyInput" class="auth-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false">
-            <div class="ai-key-actions">
-                <button id="geminiKeySave" class="auth-button">
-                    <i class="fas fa-key"></i> Save key
-                </button>
-                <button id="geminiKeyClear" class="auth-signout hidden">Remove</button>
-            </div>
-            <div class="ai-key-status" id="geminiKeyStatus"></div>
-            <div class="ai-key-help">
-                Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
-                It stays on this computer and is sent only to Google.
-            </div>
-        </details>
-
-    </div>
+        <p class="foot">Scans stay on this computer unless you sign in.</p>
+    </main>
     <script src="ai-key.js"></script>
     <script src="popup.js"></script>
 </body>

@@ -42,7 +42,7 @@ const AiKey = (() => {
 
         const show = (set, message) => {
             status.textContent = message || (set ? 'Key saved. The chat button on Amazon is ready.' : 'No key set. AI chat is off.');
-            input.placeholder = set ? 'Key saved (hidden). Paste a new one to replace it.' : 'Paste your Gemini API key';
+            input.placeholder = set ? 'Paste a new key to replace it' : 'Paste your Gemini API key';
             clearBtn.classList.toggle('hidden', !set);
         };
 
