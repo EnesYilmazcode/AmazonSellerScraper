@@ -6,7 +6,7 @@
  * the products or the key, and the run's tab hears about each saved page.
  */
 const { createRig, settle } = require('../setup/engine-rig');
-const { summarize, brief } = require('../../scripts/background/engine');
+const { summarize, brief, storeNameOf } = require('../../scripts/background/engine');
 const Run = require('../../scripts/lib/run');
 
 const asinFor = (k, p, i) => `B0${k.slice(0, 3).toUpperCase().padEnd(3, 'X')}${String(p).padStart(2, '0')}${String(i).padStart(3, '0')}`;
@@ -154,7 +154,15 @@ test('brief keeps the run shape small', () => {
   const run = { runId: 'r', tabId: 3, state: 'running', page: 2, maxPages: 10, itemCount: 5, source: { type: 'keyword', keyword: 'x', url: 'u' } };
   expect(brief(run, 3)).toEqual({
     runId: 'r', state: 'running', reason: null, page: 2, maxPages: 10, itemCount: 5, startedAt: null, finishedAt: null,
-    source: { type: 'keyword', sellerId: null, keyword: 'x' }, thisTab: true,
+    source: { type: 'keyword', sellerId: null, keyword: 'x', name: null }, thisTab: true,
   });
   expect(brief(null, 3)).toBeNull();
+});
+
+test('storeNameOf reads a storefront name from its tab title', () => {
+  expect(storeNameOf('Amazon.com: Northfield Goods')).toBe('Northfield Goods');
+  expect(storeNameOf('Amazon.com: Cedar‮ & Pine')).toBe('Cedar & Pine');
+  expect(storeNameOf('Amazon.com')).toBeNull();
+  expect(storeNameOf('x'.repeat(61))).toBeNull();
+  expect(storeNameOf(undefined)).toBeNull();
 });

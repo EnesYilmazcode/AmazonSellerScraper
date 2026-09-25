@@ -245,3 +245,10 @@ describe('cleanText', () => {
         expect(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069]/.test(src)).toBe(false);
     });
 });
+
+test('a storefront scan is labeled by its name when the run has one', () => {
+    const named = Chat.buildContext({ ...baseData, scrapeRunMeta: { type: 'storefront', sellerId: 'A1B2C3', name: 'Northfield Goods' } });
+    expect(named.source.label).toBe('Northfield Goods');
+    const bare = Chat.buildContext({ ...baseData, scrapeRunMeta: { type: 'storefront', sellerId: 'A1B2C3' } });
+    expect(bare.source.label).toBe('storefront A1B2C3');
+});

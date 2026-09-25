@@ -111,6 +111,19 @@ function summarize(results) {
     return { medianCents, avgRating, sponsoredPct };
 }
 
+/**
+ * A storefront's name from its tab title ("Amazon.com: Northfield Goods"),
+ * or null. Kept on the run for labels only; it never goes to the cloud.
+ */
+function storeNameOf(title) {
+    const t = String(title == null ? '' : title)
+        .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/^\s*Amazon\.com\s*[:|-]?\s*/i, '')
+        .trim();
+    return t && t.length <= 60 && !/^amazon/i.test(t) ? t : null;
+}
+
 /** The run as the page may see it: no product rows, no tab ids but its own. */
 function brief(run, tabId) {
     if (!run) return null;
@@ -124,7 +137,7 @@ function brief(run, tabId) {
         itemCount: run.itemCount || 0,
         startedAt: run.startedAt || null,
         finishedAt: run.finishedAt || null,
-        source: { type: src.type || null, sellerId: src.sellerId || null, keyword: src.keyword || null },
+        source: { type: src.type || null, sellerId: src.sellerId || null, keyword: src.keyword || null, name: src.name || null },
         thisTab: typeof tabId === 'number' && run.tabId === tabId
     };
 }
@@ -287,10 +300,11 @@ function createEngine({
             // One id for the run, here and in the cloud: {sourceId}_{startMs}.
             const found = Schema.sourceOf(pong.url);
             const sourceId = Schema.sourceIdOf(found);
+            const name = found.type === 'storefront' ? storeNameOf(pong.title) : null;
             const runId = Schema.runIdOf(sourceId, t);
             let run = Run.create({
                 runId, tabId, maxPages: settings.maxPages, now: t,
-                source: { ...found, sourceId, startedAt: new Date(t).toISOString() }
+                source: { ...found, sourceId, name, startedAt: new Date(t).toISOString() }
             });
             run = { ...run, sourceId, dayKey: Schema.dayKeyOf(t, new Date(t).getTimezoneOffset()) };
             await saveRun(run);
@@ -668,4 +682,4 @@ function createEngine({
     };
 }
 
-module.exports = { createEngine, foldPage, durable, prevFor, summarize, brief, PAGE_TIMEOUT_MS, KEEP_RUNS };
+module.exports = { createEngine, foldPage, durable, prevFor, summarize, brief, storeNameOf, PAGE_TIMEOUT_MS, KEEP_RUNS };
