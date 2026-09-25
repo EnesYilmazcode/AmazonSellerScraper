@@ -252,7 +252,8 @@
             ui.orphaned = true;
         }
         render();
-        if (isLive(run())) pollTimer = setTimeout(refresh, POLL_MS);
+        // A background tab checks in less often; RUN_PROGRESS still reaches the run's own tab.
+        if (isLive(run())) pollTimer = setTimeout(refresh, document.hidden ? POLL_MS * 5 : POLL_MS);
     }
 
     async function startHere(maxPages) {
