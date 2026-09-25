@@ -14,6 +14,16 @@ import Run from '../lib/run.js';
 import Flags from '../lib/flags.js';
 import Migrate from '../lib/migrate.js';
 import Msg from '../lib/messages.js';
+import XLSX from '../../libs/xlsx.full.min.js';
+import Analyzer from '../modules/analyzer.js';
+import SpreadAnalyzer from '../modules/spread-analyzer.js';
+import Exporter from '../modules/exporter.js';
+import Download from './download.js';
+
+// exporter.js reads these as globals, as it does in the popup.
+globalThis.XLSX = XLSX;
+globalThis.Analyzer = Analyzer;
+globalThis.SpreadAnalyzer = SpreadAnalyzer;
 
 /**
  * @fileoverview Background Service Worker
@@ -51,6 +61,31 @@ router.on(Msg.T.GET_STATE, () => engine.getState());
 router.on(Msg.T.PAGE_READY, (m, sender) => engine.pageReady(m, sender));
 router.on(Msg.T.PAGE_RESULT, (m, sender) => thenFlush(engine.pageResult(m, sender)));
 router.on(Msg.T.HEARTBEAT, (m, sender) => engine.heartbeat(m, sender));
+
+// The dock on the page. The run is always the sender's own tab.
+router.on(Msg.T.START_RUN_HERE, (m, sender) => engine.startHere({ maxPages: m.maxPages }, sender));
+router.on(Msg.T.STOP_RUN_HERE, () => thenFlush(engine.stop()));
+router.on(Msg.T.RUN_STATUS, (m, sender) => engine.status(sender));
+router.on(Msg.T.SAVE_SETTINGS, (m) => engine.saveSettings({ maxPages: m.maxPages, suggest: m.suggest }));
+router.on(Msg.T.DOWNLOAD, (m) =>
+  Download.deliver({
+    Exporter,
+    getState: () => engine.getState(),
+    download: (opts) => chrome.downloads.download(opts),
+  }, m.format).catch((err) => {
+    console.warn('[ProScan] Download failed:', err && err.message);
+    return { error: 'failed', message: 'ProScan could not make the file. Try again.' };
+  }));
+// Keys and passwords are typed on ProScan's own page, never on Amazon's.
+router.on(Msg.T.OPEN_SETTINGS, async (m, sender) => {
+  const section = m.section === 'sync' ? 'sync' : 'key';
+  const tab = sender.tab || {};
+  const opts = { url: chrome.runtime.getURL(`popup/popup.html#${section}`) };
+  if (typeof tab.index === 'number') opts.index = tab.index + 1;
+  if (typeof tab.id === 'number') opts.openerTabId = tab.id;
+  await chrome.tabs.create(opts);
+  return { ok: true };
+});
 
 // Spread analysis
 router.on(Msg.T.GET_RESULTS, () => engine.getResults());
