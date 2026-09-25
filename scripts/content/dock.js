@@ -669,7 +669,7 @@
             title = `${plural(n, 'product')} saved`;
             const at = r.finishedAt ? ` at ${clock(r.finishedAt)}` : '';
             sub = (r.page || 0) < r.maxPages
-                ? `Reached the last page${at}, ${plural(r.page, 'page')} in all.`
+                ? `Reached the last page${at}.`
                 : `${plural(r.page, 'page')}, finished${at}.`;
         } else if (r.reason === 'stopped') {
             kind = 'neutral';

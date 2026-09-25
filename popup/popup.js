@@ -240,7 +240,7 @@ function renderLast(run) {
         line = `Page ${fmt(Math.min((run.page || 0) + 1, run.maxPages))} of ${fmt(run.maxPages)}`;
     } else if (run.reason === 'complete' && run.maxPages) {
         line = run.page < run.maxPages
-            ? `Reached the last page. Page ${fmt(run.page)} was the last one, so the run ended early.`
+            ? `Page ${fmt(run.page)} was the last one, so the run ended early.`
             : `Stopped at the ${fmt(run.maxPages)}-page limit.`;
     } else if (run.reason === 'stopped') {
         line = `You stopped it after page ${fmt(run.page)}.`;
