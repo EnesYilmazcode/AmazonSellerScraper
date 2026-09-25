@@ -1,10 +1,11 @@
-import { auth } from './firebase-init.js';
+import { auth, db as firestore } from './firebase-init.js';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
 } from 'firebase/auth/web-extension';
-import { syncToCloud } from './sync.js';
+import { createSync, isAuthError } from './sync.js';
 import { createRouter } from './router.js';
 import { createEngine } from './engine.js';
 import DB from './db.js';
@@ -39,11 +40,16 @@ const chatDeps = {
 };
 
 // The run
+// Saved pages and ended runs wake the sync; see scheduleFlush below.
+const thenFlush = (p) => p.then((out) => { scheduleFlush(); return out; });
+// A tab event wakes it only when it ended the run.
+const flushIfEnded = (p) => p.then((ended) => { if (ended) scheduleFlush(); return ended; });
+
 router.on(Msg.T.START_RUN, (m) => engine.start(m));
-router.on(Msg.T.STOP_RUN, () => engine.stop());
+router.on(Msg.T.STOP_RUN, () => thenFlush(engine.stop()));
 router.on(Msg.T.GET_STATE, () => engine.getState());
 router.on(Msg.T.PAGE_READY, (m, sender) => engine.pageReady(m, sender));
-router.on(Msg.T.PAGE_RESULT, (m, sender) => engine.pageResult(m, sender));
+router.on(Msg.T.PAGE_RESULT, (m, sender) => thenFlush(engine.pageResult(m, sender)));
 router.on(Msg.T.HEARTBEAT, (m, sender) => engine.heartbeat(m, sender));
 
 // Spread analysis
@@ -80,40 +86,131 @@ chrome.runtime.onInstalled.addListener((details) => {
     });
   } else if (details.reason === 'update') {
     console.log('[ProScan] Extension updated to version', chrome.runtime.getManifest().version);
-    migrate().then(() => engine.recover('updated'));
+    migrate().then(() => engine.recover('updated')).then(() => scheduleFlush());
   }
 });
 
 // A run cannot survive a browser restart, since its tab id is gone.
 chrome.runtime.onStartup.addListener(() => {
-  migrate().then(() => engine.recover());
+  migrate().then(() => engine.recover()).then(() => scheduleFlush());
 });
 
 // Neither listener needs the tabs permission.
-chrome.tabs.onRemoved.addListener((tabId) => { engine.tabRemoved(tabId); });
-chrome.tabs.onUpdated.addListener((tabId, info, tab) => { engine.tabUpdated(tabId, info, tab); });
+chrome.tabs.onRemoved.addListener((tabId) => { flushIfEnded(engine.tabRemoved(tabId)); });
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => { flushIfEnded(engine.tabUpdated(tabId, info, tab)); });
 
-// ════════════════════════════════════════════════════════════════════════════
-// M3 cloud sync — Firebase Auth (extension-native) + Firestore write path.
-// The popup is a plain (unbundled) page; it drives sign-in / export by sending
-// these messages to the worker, which owns the single Firebase instance.
-// ════════════════════════════════════════════════════════════════════════════
+// ── ProScan account and cloud sync ──────────────────────────────────────────
+// The popup is a plain page; it signs in and exports through these messages,
+// and the worker owns the one Firebase instance.
+//
+// storage.local keeps `account` {uid, email} while signed in, so the engine
+// queues pages for that account, and `authNotice` 'expired' when Firebase
+// dropped the session without the user signing out.
+
+const DASHBOARD_URL = 'https://proscanbot.web.app/dashboard/';
+const FLUSH_DELAY_MS = 3000;
+let flushTimer = null;
+
+/**
+ * After a failed automatic flush the next one waits 30 s, doubling per
+ * failure up to an hour, so a refused or throttled entry is not replayed
+ * (with its product reads) on every page load. Export ignores the wait.
+ */
+function retryDelayMs(failures) {
+  if (!failures) return 0;
+  return Math.min(30000 * 2 ** (failures - 1), 60 * 60 * 1000);
+}
+
+const sync = createSync({ db: firestore, openStore: () => engine.db() });
 
 /** Resolve the current Firebase user, waiting for auth to rehydrate from
  *  IndexedDB after a cold service-worker start. */
 function currentUser() {
   return new Promise((resolve) => {
     if (auth.currentUser) return resolve(auth.currentUser);
-    const unsub = onAuthStateChanged(auth, (u) => {
-      unsub();
+    let settled = false;
+    let unsub = null;
+    unsub = onAuthStateChanged(auth, (u) => {
+      if (settled) return;
+      settled = true;
+      if (unsub) unsub();
       resolve(u);
     });
+    // The first answer can come before onAuthStateChanged returns.
+    if (settled) unsub();
   });
 }
 
 /** Trim a Firebase user to the popup-safe shape. */
 const publicUser = (u) =>
   u ? { uid: u.uid, email: u.email, displayName: u.displayName } : null;
+
+let signingOut = false;
+
+async function rememberAccount(user) {
+  if (user) {
+    await chrome.storage.local.set({ account: { uid: user.uid, email: user.email || null } });
+    await chrome.storage.local.remove('authNotice');
+    return;
+  }
+  const { account } = await chrome.storage.local.get('account');
+  if (!account) return;
+  await chrome.storage.local.remove('account');
+  // Signed out without asking: the refresh token was revoked or expired.
+  if (!signingOut) await chrome.storage.local.set({ authNotice: 'expired' });
+}
+
+onAuthStateChanged(auth, (user) => {
+  rememberAccount(user).catch(() => {});
+  if (user) scheduleFlush();
+});
+
+/** Firebase refused the session: sign out and say so in the popup. */
+async function expireSession() {
+  await chrome.storage.local.set({ authNotice: 'expired' });
+  await chrome.storage.local.remove('account');
+  await signOut(auth).catch(() => {});
+}
+
+/**
+ * Writes the outbox for the signed-in account now. `manual` (Export) also
+ * retries entries the rules refused and skips the backoff.
+ */
+async function flushNow({ manual = false } = {}) {
+  if (!Flags.CLOUD_SYNC) return { skipped: true };
+  const user = await currentUser();
+  if (!user) return { skipped: true };
+  const { lastSync } = await chrome.storage.local.get('lastSync');
+  const failures = (lastSync && lastSync.error && lastSync.failures) || 0;
+  if (!manual && lastSync && lastSync.error && Date.now() < lastSync.at + retryDelayMs(failures)) {
+    return { skipped: true, backoff: true };
+  }
+  try {
+    const out = await sync.flush(user.uid, { retryFailed: manual });
+    await chrome.storage.local.set({ lastSync: { at: Date.now(), error: null, failures: 0 } });
+    return out;
+  } catch (err) {
+    await chrome.storage.local.set({
+      lastSync: { at: Date.now(), error: (err && err.code) || 'unknown', failures: failures + 1 },
+    });
+    if (isAuthError(err)) await expireSession();
+    throw err;
+  }
+}
+
+/**
+ * Flushes a few seconds after the last page or run end, on wake events the
+ * worker already gets. No alarm: the timer dies with the worker, and what
+ * it missed goes out on the next wake.
+ */
+function scheduleFlush(ms = FLUSH_DELAY_MS) {
+  if (!Flags.CLOUD_SYNC) return;
+  if (flushTimer) clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushNow().catch(() => {});
+  }, ms);
+}
 
 /** Map Firebase auth error codes to friendly popup messages. */
 function friendlyAuthError(err) {
@@ -131,34 +228,70 @@ function friendlyAuthError(err) {
     case 'auth/operation-not-allowed':
       return 'Email sign-in is not enabled for this project yet.';
     default:
-      return ((err && err.message) || 'Sign-in failed.').replace(/^Firebase:\s*/, '');
+      return 'Sign-in failed. Try again.';
   }
 }
 
-router.on(Msg.T.PROSCAN_AUTH_STATE, async () => ({ user: publicUser(await currentUser()) }));
+router.on(Msg.T.PROSCAN_AUTH_STATE, async () => {
+  const user = await currentUser();
+  const { authNotice, lastSync } = await chrome.storage.local.get(['authNotice', 'lastSync']);
+  // Opening the popup is a wake event too.
+  if (user) scheduleFlush(0);
+  return {
+    user: publicUser(user),
+    notice: user ? null : authNotice || null,
+    pending: user ? await sync.pending(user.uid).catch(() => 0) : 0,
+    failed: user ? await sync.failed(user.uid).catch(() => 0) : 0,
+    lastSync: lastSync || null,
+    dashboardUrl: DASHBOARD_URL,
+  };
+});
 
 router.on(Msg.T.PROSCAN_SIGN_IN, (m) =>
-  signInWithEmailAndPassword(auth, m.email, m.password)
-    .then((cred) => ({ user: publicUser(cred.user) }))
+  signInWithEmailAndPassword(auth, String(m.email || ''), String(m.password || ''))
+    .then(async (cred) => {
+      await rememberAccount(cred.user);
+      scheduleFlush(0);
+      return { user: publicUser(cred.user) };
+    })
     .catch((err) => ({ error: friendlyAuthError(err) })));
 
-router.on(Msg.T.PROSCAN_SIGN_OUT, () =>
-  signOut(auth).then(() => ({ ok: true }), (err) => ({ error: err.message })));
+// The same answer whether or not the account exists.
+router.on(Msg.T.PROSCAN_RESET_PASSWORD, async (m) => {
+  const email = String(m.email || '').trim();
+  if (!email) return { error: 'Enter your email first.' };
+  try {
+    await sendPasswordResetEmail(auth, email, { url: DASHBOARD_URL });
+  } catch (err) {
+    if (err && err.code === 'auth/invalid-email') return { error: 'That email address does not look valid.' };
+    if (err && err.code === 'auth/network-request-failed') return { error: 'Network error. Check your connection.' };
+  }
+  return { ok: true, message: `If an account exists for ${email}, a reset link is on its way.` };
+});
+
+router.on(Msg.T.PROSCAN_SIGN_OUT, async () => {
+  signingOut = true;
+  try {
+    await signOut(auth);
+    await chrome.storage.local.remove(['account', 'authNotice']);
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  } finally {
+    signingOut = false;
+  }
+});
 
 router.on(Msg.T.PROSCAN_EXPORT, async () => {
   if (!Flags.CLOUD_SYNC) return { error: 'Export to ProScan is not available in this version.' };
   const user = await currentUser();
   if (!user) return { error: 'Sign in to ProScan first.' };
-  const { bundle, seqs } = await engine.outboxBundle();
-  if (bundle.syncQueue.length === 0) return { ok: true, written: 0, products: 0 };
   try {
-    const result = await syncToCloud(user.uid, bundle);
-    // Only what was written leaves the outbox; lastValues stays for deltas.
-    await engine.clearOutbox(seqs);
-    return { ok: true, ...result };
+    const out = await flushNow({ manual: true });
+    return { ok: true, ...out, failed: await sync.failed(user.uid).catch(() => out.failed || 0) };
   } catch (err) {
-    console.error('[ProScan] cloud export failed', err);
-    return { error: (err && err.message) || 'Export failed.' };
+    if (isAuthError(err)) return { error: 'Your session expired. Sign in again to keep syncing.', expired: true };
+    return { error: 'Could not reach ProScan. Your scans are kept and will sync later.' };
   }
 });
 

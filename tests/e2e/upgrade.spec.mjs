@@ -17,7 +17,7 @@ const V21_REV = '40be432';
 const V20 = path.join(BUILD_DIR, 'v2.0');
 const V21 = path.join(BUILD_DIR, 'v2.1');
 const SLOT = path.join(BUILD_DIR, 'upgrade-slot');
-const CURRENT_VERSION = '2.2.0';
+const CURRENT_VERSION = '2.3.0';
 
 function bug(fid, what) {
   test.fail(!process.env.PROSCAN_SHOW_KNOWN, `${fid}: ${what}`);

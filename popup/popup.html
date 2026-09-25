@@ -45,52 +45,6 @@
             </div>
         </div>
 
-        <!-- ProScan Cloud Auth -->
-        <div class="auth-panel hidden" id="authPanel">
-            <!-- Signed-out: sign-in form -->
-            <div class="auth-form" id="authForm">
-                <div class="auth-title">
-                    <i class="fas fa-cloud"></i> Sign in to ProScan
-                </div>
-                <input type="email" id="authEmail" class="auth-input" placeholder="Email" autocomplete="username">
-                <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="current-password">
-                <button id="authSignInBtn" class="auth-button">
-                    <i class="fas fa-right-to-bracket"></i> Sign in to ProScan
-                </button>
-                <div class="auth-error hidden" id="authError"></div>
-            </div>
-
-            <!-- Signed-in: account state -->
-            <div class="auth-account hidden" id="authAccount">
-                <div class="auth-account-info">
-                    <i class="fas fa-circle-user"></i>
-                    <span class="auth-account-email" id="authStatusEmail"></span>
-                </div>
-                <button id="authSignOutBtn" class="auth-signout">
-                    <i class="fas fa-right-from-bracket"></i> Sign out
-                </button>
-            </div>
-        </div>
-
-        <!-- AI chat settings: the user's own Gemini key -->
-        <details class="auth-panel ai-settings" id="aiSettings">
-            <summary class="auth-title">
-                <i class="fas fa-robot"></i> AI chat settings
-            </summary>
-            <input type="password" id="geminiKeyInput" class="auth-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false">
-            <div class="ai-key-actions">
-                <button id="geminiKeySave" class="auth-button">
-                    <i class="fas fa-key"></i> Save key
-                </button>
-                <button id="geminiKeyClear" class="auth-signout hidden">Remove</button>
-            </div>
-            <div class="ai-key-status" id="geminiKeyStatus"></div>
-            <div class="ai-key-help">
-                Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
-                It stays on this computer and is sent only to Google.
-            </div>
-        </details>
-
         <div class="status" id="status">
             <i class="fas fa-info-circle"></i> Ready to start
         </div>
@@ -145,6 +99,59 @@
         <button id="exportToProScanBtn" class="export-cloud-button hidden">
             <i class="fas fa-cloud-arrow-up"></i> Export to ProScan
         </button>
+
+        <!-- ProScan Cloud Auth -->
+        <details class="auth-panel ai-settings hidden" id="authPanel">
+            <summary class="auth-title">
+                <i class="fas fa-cloud"></i> <span id="authSummary">Dashboard sync (optional)</span>
+            </summary>
+            <!-- Signed-out: sign-in form -->
+            <div class="auth-form" id="authForm">
+                <div class="auth-help">Only needed to send scans to your ProScan dashboard.</div>
+                <div class="auth-notice hidden" id="authNotice"></div>
+                <input type="email" id="authEmail" class="auth-input" placeholder="Email" autocomplete="username">
+                <input type="password" id="authPassword" class="auth-input" placeholder="Password" autocomplete="current-password">
+                <button id="authSignInBtn" class="auth-button">
+                    <i class="fas fa-right-to-bracket"></i> Sign in to ProScan
+                </button>
+                <div class="auth-error hidden" id="authError"></div>
+                <div class="auth-links">
+                    <a id="authSignUpLink" href="https://proscanbot.web.app/dashboard/" target="_blank" rel="noopener">Create an account</a>
+                    <button type="button" id="authResetBtn" class="auth-link-button">Forgot password?</button>
+                </div>
+            </div>
+
+            <!-- Signed-in: account state -->
+            <div class="auth-account hidden" id="authAccount">
+                <div class="auth-account-info">
+                    <i class="fas fa-circle-user"></i>
+                    <span class="auth-account-email" id="authStatusEmail"></span>
+                </div>
+                <button id="authSignOutBtn" class="auth-signout">
+                    <i class="fas fa-right-from-bracket"></i> Sign out
+                </button>
+            </div>
+            <div class="auth-sync hidden" id="authSync"></div>
+        </details>
+
+        <!-- AI chat settings: the user's own Gemini key -->
+        <details class="auth-panel ai-settings" id="aiSettings">
+            <summary class="auth-title">
+                <i class="fas fa-robot"></i> AI chat settings
+            </summary>
+            <input type="password" id="geminiKeyInput" class="auth-input" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false">
+            <div class="ai-key-actions">
+                <button id="geminiKeySave" class="auth-button">
+                    <i class="fas fa-key"></i> Save key
+                </button>
+                <button id="geminiKeyClear" class="auth-signout hidden">Remove</button>
+            </div>
+            <div class="ai-key-status" id="geminiKeyStatus"></div>
+            <div class="ai-key-help">
+                Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+                It stays on this computer and is sent only to Google.
+            </div>
+        </details>
 
     </div>
     <script src="ai-key.js"></script>
