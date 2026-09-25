@@ -193,7 +193,7 @@ svg { display: block; flex: none; }
 .chip { border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 12px; font-size: 13px; background: var(--surface); }
 .chip:hover { background: var(--sunken); }
 .compose { display: flex; gap: 8px; align-items: center; border: 1px solid var(--line-strong); border-radius: 14px; padding: 5px 5px 5px 14px; background: var(--surface); }
-.compose:focus-within { outline: 2px solid var(--ring); outline-offset: 2px; }
+.compose:focus-within { border-color: var(--ring); box-shadow: 0 0 0 1px var(--ring); }
 .compose input { flex: 1; border: 0; background: none; color: var(--ink); min-width: 0; padding: 6px 0; }
 .compose input:focus-visible { outline: none; }
 .compose input::placeholder { color: var(--muted); }

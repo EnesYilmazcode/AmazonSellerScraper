@@ -219,6 +219,7 @@
     function runLabel(r) {
         const src = (r && r.source) || {};
         if (src.type === 'storefront') {
+            if (src.name) return src.name;
             if (page.kind === 'storefront' && page.sellerId === src.sellerId && page.name) return page.name;
             return 'this storefront';
         }
@@ -440,7 +441,7 @@
     function endLine(r) {
         if (r.reason !== 'complete') return null;
         if ((r.page || 0) < r.maxPages) {
-            return `Reached the last page. Page ${fmt(r.page)} was the last one, so the run ended early.`;
+            return `Page ${fmt(r.page)} was the last one, so the run ended early.`;
         }
         return `Stopped at your ${fmt(r.maxPages)}-page limit.`;
     }
@@ -536,6 +537,7 @@
             return launcherShell('suggest',
                 mainButton('Open ProScan', page.name || 'This seller', 'Has a storefront to scrape', mark()),
                 h('a', { class: 'pill', 'data-k': 'storefront', href: PageKind.storefrontUrl(page.sellerId) }, 'Open storefront'),
+                chatButton(),
                 hideButton('Not now, hide for this tab'));
         }
         return launcherShell('plain',
@@ -665,7 +667,10 @@
         if (r.reason === 'complete') {
             kind = 'ok';
             title = `${plural(n, 'product')} saved`;
-            sub = `${plural(r.page, 'page')}${r.finishedAt ? `, finished at ${clock(r.finishedAt)}` : ''}`;
+            const at = r.finishedAt ? ` at ${clock(r.finishedAt)}` : '';
+            sub = (r.page || 0) < r.maxPages
+                ? `Reached the last page${at}, ${plural(r.page, 'page')} in all.`
+                : `${plural(r.page, 'page')}, finished${at}.`;
         } else if (r.reason === 'stopped') {
             kind = 'neutral';
             title = `Stopped with ${plural(n, 'product')}`;
@@ -691,7 +696,7 @@
         if (scrapable && page.startable && !ui.spread) {
             out.push(h('div', { class: 'split' },
                 h('span', {}),
-                h('button', { class: 'quiet', 'data-k': 'again', onclick: () => { ui.fresh = true; ui.notice = null; pendingFocus = 'first'; render(); }, text: 'Scrape this page again' })));
+                h('button', { class: 'quiet', 'data-k': 'again', onclick: () => { ui.fresh = true; ui.notice = null; pendingFocus = 'first'; render(); }, text: 'Scrape again' })));
         }
         return out;
     }

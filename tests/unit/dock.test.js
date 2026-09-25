@@ -173,7 +173,7 @@ test('a run that ran out of pages hatches the rest and says so', async () => {
   const d = mount(SEARCH, YOGA, { RUN_STATUS: done, DOWNLOAD: { ok: true, via: 'downloads', filename: 'x.xlsx' } }, { session: { 'proscan.dock.open': '1' } });
   await flush();
   expect(d.text()).toContain('912 products saved');
-  expect(d.text()).toContain('Reached the last page. Page 19 was the last one, so the run ended early.');
+  expect(d.text()).toContain('Page 19 was the last one, so the run ended early.');
   expect(d.$$('.ticks i.done')).toHaveLength(19);
   expect(d.$$('.ticks i.skip')).toHaveLength(1);
   expect(d.text()).toContain('$27.40');

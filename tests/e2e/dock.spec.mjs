@@ -65,7 +65,7 @@ test('Scrape in the dock runs in that tab, page by page, and completes', async (
   // The last page's dock rebuilt itself from the worker and shows the result.
   const after = await dock(tab);
   await after.waitForText(/12 products saved/, { timeout: 10000 });
-  await after.waitForText(/Reached the last page\. Page 3 was the last one/);
+  await after.waitForText(/Reached the last page.*Page 3 was the last one/);
   expect(await after.count('.ticks i.skip')).toBe(17);
 });
 
