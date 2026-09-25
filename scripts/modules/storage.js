@@ -44,50 +44,63 @@ const Storage = {
         LAST_VALUES: 'lastValues'
     },
 
+    /** Share of the quota above which the popup warns that storage is nearly full. */
+    NEAR_FULL: 0.9,
+
+    /**
+     * Runs chrome.storage.local[method] and rejects when Chrome reports an
+     * error through runtime.lastError, instead of resolving as if it worked.
+     * A quota error rejects with code 'storage_full'.
+     */
+    _call(method, ...args) {
+        return new Promise((resolve, reject) => {
+            chrome.storage.local[method](...args, (value) => {
+                const err = chrome.runtime && chrome.runtime.lastError;
+                if (err) return reject(this.error(err.message || String(err)));
+                resolve(value);
+            });
+        });
+    },
+
+    /** An Error for a failed storage call, with code 'storage_full' or 'storage_error'. */
+    error(message) {
+        const err = new Error(message);
+        err.name = 'StorageError';
+        err.code = /quota/i.test(message) ? 'storage_full' : 'storage_error';
+        return err;
+    },
+
     /**
      * Retrieve a single value from chrome.storage.local.
      *
      * @param {string} key - Storage key to retrieve
      * @returns {Promise<*>} Resolves with the stored value, or undefined if not set
-     *
-     * @example
-     * const results = await Storage.get(Storage.KEYS.RESULTS);
      */
     async get(key) {
-        return new Promise((resolve) => {
-            chrome.storage.local.get([key], (data) => {
-                resolve(data[key]);
-            });
-        });
+        const data = await this._call('get', [key]);
+        return (data || {})[key];
     },
 
     /**
      * Retrieve multiple values from storage in a single call.
-     * More efficient than multiple get() calls for batch reads.
      *
      * @param {string[]} keys - Array of storage keys to retrieve
      * @returns {Promise<Object>} Resolves with an object mapping keys to their values
-     *
-     * @example
-     * const { results, currentItemCount } = await Storage.getMultiple(['results', 'currentItemCount']);
      */
     async getMultiple(keys) {
-        return new Promise((resolve) => {
-            chrome.storage.local.get(keys, resolve);
-        });
+        return (await this._call('get', keys)) || {};
     },
 
     /**
-     * Store a single key-value pair in chrome.storage.local.
+     * Store a single key-value pair. Rejects with a StorageError when the
+     * write fails, for example when the quota is used up.
      *
      * @param {string} key - Storage key
      * @param {*} value - Value to store (must be JSON-serializable)
      * @returns {Promise<void>}
      */
     async set(key, value) {
-        return new Promise((resolve) => {
-            chrome.storage.local.set({ [key]: value }, resolve);
-        });
+        await this._call('set', { [key]: value });
     },
 
     /**
@@ -95,14 +108,19 @@ const Storage = {
      *
      * @param {Object} data - Object with key-value pairs to store
      * @returns {Promise<void>}
-     *
-     * @example
-     * await Storage.setMultiple({ results: [], currentItemCount: 0 });
      */
     async setMultiple(data) {
-        return new Promise((resolve) => {
-            chrome.storage.local.set(data, resolve);
-        });
+        await this._call('set', data);
+    },
+
+    /**
+     * Remove one key or a list of keys.
+     *
+     * @param {string|string[]} keys
+     * @returns {Promise<void>}
+     */
+    async remove(keys) {
+        await this._call('remove', keys);
     },
 
     /**
@@ -112,9 +130,22 @@ const Storage = {
      * @returns {Promise<void>}
      */
     async clear() {
-        return new Promise((resolve) => {
-            chrome.storage.local.clear(resolve);
-        });
+        await this._call('clear');
+    },
+
+    /**
+     * Bytes in use against the local quota. `nearFull` is true from
+     * NEAR_FULL of the quota up. Unknown usage reads as 0.
+     *
+     * @returns {Promise<{bytes: number, quota: number, nearFull: boolean}>}
+     */
+    async usage() {
+        const quota = chrome.storage.local.QUOTA_BYTES || 10485760;
+        let bytes = 0;
+        if (typeof chrome.storage.local.getBytesInUse === 'function') {
+            bytes = (await this._call('getBytesInUse', null)) || 0;
+        }
+        return { bytes, quota, nearFull: bytes >= quota * this.NEAR_FULL };
     },
 
     /**

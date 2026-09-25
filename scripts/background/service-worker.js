@@ -5,13 +5,17 @@ import {
   signOut,
 } from 'firebase/auth/web-extension';
 import { syncToCloud } from './sync.js';
+import Chat from '../lib/chat.js';
+import Run from '../lib/run.js';
+import Flags from '../lib/flags.js';
+import Migrate from '../lib/migrate.js';
 
 /**
  * @fileoverview Background Service Worker
  *
  * Central message router for the ProScan extension. Handles:
  * - Message routing between popup, content scripts, and external APIs
- * - Gemini 2.0 Flash API calls for the AI chatbot
+ * - Gemini calls for the AI chatbot (see scripts/lib/chat.js)
  * - Extension lifecycle events (install, update, startup)
  *
  * Runs as a Manifest V3 service worker -- no persistent background page.
@@ -20,101 +24,61 @@ import { syncToCloud } from './sync.js';
  * @module ServiceWorker
  */
 
-/** @const {string} Gemini API endpoint for content generation */
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const chatDeps = {
+    getStorage: (keys) => chrome.storage.local.get(keys),
+    fetchFn: (url, init) => fetch(url, init),
+};
 
 /**
  * Main message listener -- routes messages between extension components.
  *
  * Message types handled:
- * - STOP_SCRAPING: Forwarded from popup to the active tab's content script
+ * - WHO_AM_I: Tells a content script its tab id, so it can check the run is its own
  * - SCRAPING_COMPLETE: Logs scrape completion
- * - CHAT_MESSAGE: Sends question + product context to Gemini API
+ * - CHAT_STATUS: Whether a Gemini key is set, and which run the chat covers
+ * - CHAT_MESSAGE: Answers a question about the current run with Gemini
  *
- * Returns true to keep the message channel open for async responses.
+ * The chat handlers read the key and the run from storage here, so the key
+ * never passes through the content script.
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    // Route STOP_SCRAPING from popup to content script
-    if (request.type === 'STOP_SCRAPING' && sender.tab) {
-        chrome.tabs.sendMessage(sender.tab.id, { type: 'STOP_SCRAPING' });
+    if (request.type === 'WHO_AM_I') {
+        sendResponse({ tabId: sender.tab ? sender.tab.id : null });
+        return false;
     }
 
     // Log scrape completion
     if (request.type === 'SCRAPING_COMPLETE') {
-        console.log('[ProScan] Scraping completed:', request.itemCount, 'items');
+        console.log('[ProScan] Run ended:', request.reason, request.itemCount, 'items');
     }
 
-    // AI chatbot -- call Gemini API with product context
+    if (request.type === 'CHAT_STATUS') {
+        Chat.status(chatDeps).then(sendResponse, () => sendResponse({ hasKey: false, productCount: 0 }));
+        return true;
+    }
+
     if (request.type === 'CHAT_MESSAGE') {
-        handleChatMessage(request.question, request.products)
-            .then(answer => sendResponse({ answer }))
-            .catch(err => sendResponse({ error: err.message }));
+        Chat.answerQuestion({ question: request.question, history: request.history }, chatDeps)
+            .then(sendResponse, (err) => sendResponse({ error: 'Chat failed: ' + err.message }));
         return true; // keep channel open for async response
     }
 
     return true;
 });
 
-/**
- * Handle a chat message by calling the Gemini 2.0 Flash API.
- *
- * Builds a prompt with the system role, product context, and user question.
- * Uses the user's API key from chrome.storage. There is no built-in key.
- *
- * @param {string} question - User's natural language question
- * @param {Object[]} products - Array of product objects for context
- * @returns {Promise<string>} AI-generated response text
- * @throws {Error} On a missing or invalid API key, or Gemini API failure
- */
-async function handleChatMessage(question, products) {
-    const data = await chrome.storage.local.get(['geminiApiKey']);
-    const apiKey = data.geminiApiKey;
-    if (!apiKey) {
-        throw new Error('AI chat needs a Gemini API key, and none is set.');
-    }
-
-    const productCount = products.length;
-    const productList = products.map(p =>
-        `- ${p.name} | ASIN: ${p.asin} | Price: ${p.price} | Rating: ${p.rating}/5 | Reviews: ${p.reviewCount} | Prime: ${p.isPrime ? 'Yes' : 'No'}`
-    ).join('\n');
-
-    const prompt = `You are ProScan AI, a product analysis assistant for Amazon shoppers and resellers.
-You have data on ${productCount} products scraped from an Amazon page.
-Answer the user's question concisely and very shortly. Reference specific product names and prices.
-If the data doesn't contain enough info to answer, say so. Dont formate your response in markdown.
-Be confidant, dont say "thats subjected but.." or "i'm not sure but...".
-
-Products:
-${productList}
-
-User question: ${question}`;
-
-    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-        })
+/** Brings stored data to the current schema. Safe to call any number of times. */
+function migrate() {
+    return Migrate.run(chrome.storage.local).then((done) => {
+        if (done) console.log(`[ProScan] Storage migrated from schema ${done.from} to ${done.to}`);
+    }, (err) => {
+        console.error('[ProScan] Storage migration failed, will retry:', err && err.message);
     });
-
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        if (response.status === 400 || response.status === 403) {
-            throw new Error('Invalid API key. Check your Gemini API key in the ProScan popup.');
-        }
-        throw new Error(err.error?.message || 'Gemini API error: ' + response.status);
-    }
-
-    const result = await response.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error('Empty response from Gemini.');
-    return text;
 }
 
 /**
  * Handle extension installation and update events.
  * On fresh install, initializes chrome.storage with default values.
- * On update, logs the new version number.
+ * On update, migrates what the previous version stored.
  */
 chrome.runtime.onInstalled.addListener((details) => {
     if (details.reason === 'install') {
@@ -127,22 +91,37 @@ chrome.runtime.onInstalled.addListener((details) => {
             isScrapingActive: false,
             settings: {
                 pageDelay: 2000,
-                maxPages: 100
-            }
+                maxPages: Run.DEFAULT_MAX_PAGES
+            },
+            schemaVersion: Migrate.CURRENT
         });
     } else if (details.reason === 'update') {
         console.log('[ProScan] Extension updated to version', chrome.runtime.getManifest().version);
+        migrate();
     }
 });
 
+/** Ends the running run as `reason` if `test(run)` holds. */
+async function endRunIf(test, reason) {
+    const { run } = await chrome.storage.local.get(Run.KEY);
+    if (Run.isActive(run) && test(run)) {
+        await chrome.storage.local.set({ [Run.KEY]: Run.finish(run, reason), isScrapingActive: false });
+    }
+}
+
 /**
  * Clean up on browser startup.
- * Resets the scraping flag in case the browser was closed mid-scrape.
+ * A run cannot survive a browser restart, since its tab id is gone.
  */
 chrome.runtime.onStartup.addListener(() => {
-    chrome.storage.local.set({
-        isScrapingActive: false
-    });
+    migrate();
+    chrome.storage.local.set({ isScrapingActive: false });
+    endRunIf(() => true, 'interrupted');
+});
+
+// Closing the run's tab ends the run. Needs no tabs permission.
+chrome.tabs.onRemoved.addListener((tabId) => {
+    endRunIf((run) => run.tabId === tabId, 'interrupted');
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -208,6 +187,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.type === 'PROSCAN_EXPORT') {
+        if (!Flags.CLOUD_SYNC) {
+            sendResponse({ error: 'Export to ProScan is not available in this version.' });
+            return false;
+        }
         (async () => {
             const user = await currentUser();
             if (!user) return sendResponse({ error: 'Sign in to ProScan first.' });

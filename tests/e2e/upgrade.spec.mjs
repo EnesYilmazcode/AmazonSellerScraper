@@ -65,7 +65,6 @@ test('a v2.0 user keeps their last scrape through the update', async () => {
     expect(before.isScrapingActive).toBe(false);
     expect(s.results.map((r) => r.asin)).toEqual(asins);
 
-    bug('F-100', 'onInstalled(update) does nothing: no schemaVersion, no lastValues seeded from results');
     expect(s.schemaVersion).toBe(3);
     expect(Object.keys(s.lastValues || {}).sort()).toEqual([...asins].sort());
   } finally {
@@ -83,8 +82,9 @@ test('a scrape running during the update is stopped, not resumed without a run',
     const s = await getState(after);
 
     expect(s.results.length).toBeGreaterThanOrEqual(4);
+    expect(s.schemaVersion).toBe(3);
+    expect(s.run).toMatchObject({ runId: 'legacy-2.0', status: 'updated' });
 
-    bug('F-101', 'the new content script resumes the old run with no runId');
     expect((s.syncQueue || []).filter((p) => !p.runId).map((p) => p.asin)).toEqual([]);
     expect((s.scrapeRunPages || []).filter((p) => !p.runId)).toEqual([]);
   } finally {

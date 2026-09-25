@@ -7,6 +7,7 @@ const { loadContentScript } = require('../setup/dom-helpers');
 const { corpus } = require('../setup/corpus');
 const Analyzer = require('../../scripts/modules/analyzer');
 const Price = require('../../scripts/modules/price');
+const Run = require('../../scripts/lib/run');
 
 const PAGES = corpus();
 const PRICE_STRINGS = [
@@ -23,7 +24,12 @@ function attempt(fn) {
   try { return fn(); } catch (e) { return `throws ${e.constructor.name}`; }
 }
 
-function runScrape(page) {
+// Lets the scraper's promise chains settle; the storage mock is synchronous.
+async function flush() {
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+}
+
+async function runScrape(page) {
   let listener = null;
   const sent = [];
   const origAdd = chrome.runtime.onMessage.addListener;
@@ -33,14 +39,18 @@ function runScrape(page) {
   chrome.storage.local._reset();
   try {
     const ctx = loadContentScript('scripts/content/scraper.js', page.html, page.expected.url);
-    chrome.storage.local.set({ scrapeRunId: 'run-golden', scrapeRunPageIndex: 0 });
-    listener({ type: 'START_SCRAPING' }, {}, () => {});
+    const run = { ...Run.create({ runId: 'run-golden', tabId: 1, now: 0 }), startedAt: 0, heartbeat: 0 };
+    chrome.storage.local.set({ scrapeRunId: 'run-golden', scrapeRunPageIndex: 0, run, isScrapingActive: true });
+    listener({ type: 'START_SCRAPING', runId: 'run-golden', tabId: 1 }, {}, () => {});
+    await flush();
     const store = chrome.storage.local._getStore();
     const nav = ctx.console.log.mock.calls.map((c) => c[0]).filter((l) => /Navigating/.test(l));
     return {
       sent,
       nav,
       isScrapingActive: store.isScrapingActive,
+      runStatus: store.run.status,
+      runPage: store.run.page,
       currentItemCount: store.currentItemCount,
       runPages: (store.scrapeRunPages || []).map(({ pageIndex, count, url }) => ({ pageIndex, count, url })),
       results: (store.results || []).map((r) => ({ ...r, scrapedAt: typeof r.scrapedAt })),
@@ -59,8 +69,8 @@ function runScrape(page) {
 }
 
 describe('current scraper behavior on the corpus', () => {
-  test.each(PAGES.map((p) => [p.id, p]))('%s', (_id, page) => {
-    expect(runScrape(page)).toMatchSnapshot();
+  test.each(PAGES.map((p) => [p.id, p]))('%s', async (_id, page) => {
+    expect(await runScrape(page)).toMatchSnapshot();
   });
 });
 

@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { test as base, expect } from '@playwright/test';
 import {
   launch, extPage, getState, clickStart, aimPopupAt, waitForState, endReason,
-  runMetaFor, killServiceWorker, sleep,
+  runMetaFor, killServiceWorker, enableDeveloperMode, sleep,
 } from './lib/extension.mjs';
 import { serveAmazon, simplePlan, searchPage, card, asinFor, corpusPage, CAPTCHA } from './lib/amazon.mjs';
 
@@ -79,8 +79,9 @@ test('real markup: Chromium scrapes the saved yoga mat page like the parser does
   expect(fill.title).toBeGreaterThanOrEqual(0.9);
   expect(fill.price).toBeGreaterThanOrEqual(0.9);
 
-  bug('F-27', 'repeats and carousel cards are stored as products');
   expect(new Set(page1.map((r) => r.asin)).size).toBe(page1.length);
+  expect(page1.filter((r) => r.sponsored).length).toBe(12);
+  expect(page1.filter((r) => /\/sspa\//.test(r.url))).toEqual([]);
 });
 
 test('a captcha at page 2 ends the run as blocked', async ({ ext }) => {
@@ -95,7 +96,6 @@ test('a captcha at page 2 ends the run as blocked', async ({ ext }) => {
   expect(pagesOf(served, 'usb cable')).toEqual([1, 2]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('usb cable', [1]));
 
-  bug('F-12', 'a captcha page ends the run as complete');
   expect(endReason(s)).toBe('blocked');
 });
 
@@ -119,8 +119,10 @@ test('duplicates across pages are stored once', async ({ ext }) => {
   const asins = s.results.map((r) => r.asin);
   expect(asins).toEqual(expect.arrayContaining([...allAsins('dupes', [1, 2, 3]), 'B0SPONSOR1']));
 
-  bug('F-27', 'no ASIN dedupe within or across pages');
   expect(asins.length).toBe(new Set(asins).size);
+  const ad = s.results.find((r) => r.asin === 'B0SPONSOR1');
+  expect(ad).toMatchObject({ sponsored: true, organicRank: null, url: 'https://www.amazon.com/dp/B0SPONSOR1' });
+  expect(ad.placements.map((pl) => pl.page)).toEqual([1, 2, 3]);
 });
 
 test('Stop halts the run before the next page loads', async ({ ext }) => {
@@ -136,7 +138,6 @@ test('Stop halts the run before the next page loads', async ({ ext }) => {
   expect(s.isScrapingActive).toBe(false);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('stop me', [1]));
 
-  bug('F-13', 'the pending navigation still fires and the run is never finalized as stopped');
   expect(pagesOf(served, 'stop me')).toEqual([1]);
   expect(endReason(s)).toBe('stopped');
 });
@@ -154,7 +155,6 @@ test('a second search tab opened mid-run does not join the run', async ({ ext })
 
   expect(pagesOf(served, 'beta')[0]).toBe(1);
 
-  bug('F-11', 'every Amazon tab reads the one global flag and scrapes into the run');
   expect(s.results.filter((r) => r.name.startsWith('beta'))).toEqual([]);
   expect(pagesOf(served, 'alpha')).toEqual([1, 2, 3]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('alpha', [1, 2, 3]));
@@ -173,7 +173,6 @@ test('a product page opened mid-run does not end the run', async ({ ext }) => {
 
   expect(await product.title()).not.toBe('');
 
-  bug('F-11', 'a tab with zero listings ends the run for everyone');
   expect(pagesOf(served, 'gamma')).toEqual([1, 2, 3]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('gamma', [1, 2, 3]));
 });
@@ -211,19 +210,18 @@ test('a full storage quota fails the run loudly', async ({ ext }) => {
 
   const tab = await openSearch(ext, 'full disk');
   await clickStart(ext, tab);
-  const s = await waitForState(store, (x) => !x.isScrapingActive, { timeout: 30000 });
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
   await sleep(2500);
 
   expect(pagesOf(served, 'full disk').length).toBeGreaterThanOrEqual(1);
 
-  bug('F-26', 'storage writes ignore lastError, so the run reports complete with nothing saved');
   expect(endReason(s)).toBe('storage_full');
 });
 
-test('two runs without an export keep their own attribution', async ({ ext }) => {
-  await serveAmazon(ext.context, simplePlan(2));
-  const store = await extPage(ext);
+const Flags = require('../../scripts/lib/flags.js');
 
+/** Scrapes 2 pages of "garden hose" in one tab, then 2 of "yoga mat" in another. */
+async function twoRuns(ext, store, done = () => true) {
   const tab1 = await openSearch(ext, 'garden hose');
   await clickStart(ext, tab1);
   await waitForState(store, (x) => x.scrapeRunPages?.length >= 2 && !x.isScrapingActive, { timeout: 30000 });
@@ -234,8 +232,37 @@ test('two runs without an export keep their own attribution', async ({ ext }) =>
   await aimPopupAt(popup, tab2);
   await popup.click('#actionButton');
   await sleep(300);
-  const s = await waitForState(store, (x) => x.scrapeRunPages?.length >= 2 && !x.isScrapingActive &&
-    (x.syncQueue || []).length >= 16, { timeout: 30000 });
+  return waitForState(store, (x) => x.scrapeRunPages?.length >= 2 && !x.isScrapingActive &&
+    (x.results || []).some((r) => r.name.startsWith('yoga mat')) && done(x), { timeout: 30000 });
+}
+
+test('with cloud sync off (2.1), two runs queue nothing and keep their deltas (F-26)', async ({ ext }) => {
+  test.skip(Flags.CLOUD_SYNC, 'cloud sync is on in this build');
+  await serveAmazon(ext.context, simplePlan(2));
+  const store = await extPage(ext);
+  const s = await twoRuns(ext, store);
+
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('yoga mat', [1, 2]));
+  expect(s).not.toHaveProperty('syncQueue');
+  expect(Object.keys(s.lastValues).sort()).toEqual([...allAsins('garden hose', [1, 2]), ...allAsins('yoga mat', [1, 2])].sort());
+});
+
+test('with cloud sync off (2.1), the popup shows no sign-in and no Export to ProScan', async ({ ext }) => {
+  test.skip(Flags.CLOUD_SYNC, 'cloud sync is on in this build');
+  const popup = await extPage(ext);
+  await sleep(500);
+  await expect(popup.locator('#actionButton')).toBeVisible();
+  await expect(popup.locator('#authPanel')).toBeHidden();
+  await expect(popup.locator('#exportToProScanBtn')).toBeHidden();
+  const resp = await popup.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: 'PROSCAN_EXPORT' }, r)));
+  expect(resp.error).toMatch(/not available/);
+});
+
+test('two runs without an export keep their own attribution', async ({ ext }) => {
+  test.skip(!Flags.CLOUD_SYNC, 'F-20: cloud sync is off in 2.1, so nothing is queued to attribute');
+  await serveAmazon(ext.context, simplePlan(2));
+  const store = await extPage(ext);
+  const s = await twoRuns(ext, store, (x) => (x.syncQueue || []).length >= 16);
 
   const runIds = [...new Set(s.syncQueue.map((p) => p.runId))];
   expect(runIds).toHaveLength(2);
@@ -259,4 +286,116 @@ test('a service worker stopped between pages does not break the run', async ({ e
   expect(pagesOf(served, 'sleepy')).toEqual([1, 2, 3]);
   expect(s.results.map((r) => r.asin)).toEqual(allAsins('sleepy', [1, 2, 3]));
   expect(endReason(s)).toBe('complete');
+});
+
+test('the page cap in settings ends the run as complete', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(5));
+  const store = await extPage(ext);
+  await store.evaluate(() => chrome.storage.local.set({ settings: { pageDelay: 2000, maxPages: 2 } }));
+  const tab = await openSearch(ext, 'capped');
+  await clickStart(ext, tab);
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+  await sleep(4500);
+
+  expect(pagesOf(served, 'capped')).toEqual([1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('capped', [1, 2]));
+  expect(endReason(s)).toBe('complete');
+});
+
+test('Start on a captcha page changes nothing and says why', async ({ ext }) => {
+  await serveAmazon(ext.context, () => ({ body: CAPTCHA() }));
+  const store = await extPage(ext);
+  await store.evaluate(() => chrome.storage.local.set({ results: [{ asin: 'B0KEEP0001', name: 'kept' }] }));
+  const tab = await openSearch(ext, 'robot');
+  const popup = await clickStart(ext, tab);
+  await sleep(1000);
+  const s = await getState(store);
+
+  expect(s.results.map((r) => r.asin)).toEqual(['B0KEEP0001']);
+  expect(s.run).toBeUndefined();
+  expect(s.isScrapingActive).toBeFalsy();
+  expect(await popup.textContent('#status')).toMatch(/captcha/);
+});
+
+test('Start on a tab left over from an update offers a reload, then runs', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(2));
+  const tab = await openSearch(ext, 'orphan');
+  const before = await extPage(ext);
+  await before.evaluate(() => chrome.storage.local.set({ results: [{ asin: 'B0KEEP0001', name: 'kept' }] }));
+
+  // Reloading the extension orphans the content script already in the tab,
+  // as a Chrome Web Store update does.
+  await enableDeveloperMode(ext);
+  await ext.sw.evaluate(() => chrome.runtime.reload()).catch(() => {});
+  await sleep(3000);
+  const store = await extPage(ext);
+  const popup = await clickStart(ext, tab);
+  await sleep(1000);
+  let s = await getState(store);
+
+  expect(s.results.map((r) => r.asin)).toEqual(['B0KEEP0001']);
+  expect(s.isScrapingActive).toBeFalsy();
+  expect(await popup.isVisible('#reloadTabButton')).toBe(true);
+
+  await popup.click('#reloadTabButton');
+  s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+
+  expect(pagesOf(served, 'orphan')).toEqual([1, 1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('orphan', [1, 2]));
+  expect(endReason(s)).toBe('complete');
+});
+
+test('a new search typed in the run tab ends the run and is not scraped into it', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(3));
+  const tab = await openSearch(ext, 'first');
+  const store = await extPage(ext);
+  await clickStart(ext, tab);
+  await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
+  await tab.goto(searchUrl('second'));
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 15000 });
+  await sleep(5000);
+
+  expect(pagesOf(served, 'second')).toEqual([1]);
+  expect(pagesOf(served, 'first')).toEqual([1]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('first', [1]));
+  expect(endReason(s)).toBe('interrupted');
+});
+
+test('a run tab that left Amazon and comes back after a minute does not resume', async ({ ext }) => {
+  const served = await serveAmazon(ext.context, simplePlan(3));
+  const tab = await openSearch(ext, 'wander');
+  const store = await extPage(ext);
+  await clickStart(ext, tab);
+  await waitForState(store, (x) => x.scrapeRunPages?.length >= 1, { timeout: 15000, interval: 100 });
+  // Answered locally like every other request.
+  await tab.route('https://example.com/**', (r) => r.fulfill({ status: 200, contentType: 'text/html', body: '<p>elsewhere</p>' }));
+  await tab.goto('https://example.com/');
+  // Age the heartbeat instead of waiting out the 60 s.
+  await store.evaluate(async () => {
+    const { run } = await chrome.storage.local.get('run');
+    await chrome.storage.local.set({ run: { ...run, heartbeat: Date.now() - 120000 } });
+  });
+  await tab.goto(searchUrl('wander', 2));
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 15000 });
+  await sleep(5000);
+
+  expect(pagesOf(served, 'wander')).toEqual([1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('wander', [1]));
+  expect(endReason(s)).toBe('interrupted');
+});
+
+test('a 503 error page at page 2 ends the run as a warning, not complete', async ({ ext }) => {
+  const dog = '<!DOCTYPE html><html><head><title>Sorry! Something went wrong!</title></head>'
+    + '<body><b>Sorry! Something went wrong on our end.</b><img alt="Dogs of Amazon"></body></html>';
+  const served = await serveAmazon(ext.context, ({ keyword, page }) =>
+    page === 2 ? { body: dog } : { body: searchPage(keyword, page, { last: page >= 4 }) });
+  const tab = await openSearch(ext, 'throttled');
+  const store = await extPage(ext);
+  await clickStart(ext, tab);
+  const s = await waitForState(store, (x) => x.run && x.run.status !== 'running', { timeout: 30000 });
+  await sleep(2500);
+
+  expect(pagesOf(served, 'throttled')).toEqual([1, 2]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('throttled', [1]));
+  expect(endReason(s)).toBe('selectors_broken');
 });

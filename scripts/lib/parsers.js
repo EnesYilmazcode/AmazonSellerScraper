@@ -6,9 +6,9 @@
  * global (`Parsers`) after price.js in the content scripts and the popup, and
  * as a CommonJS module in Jest and Node.
  *
- * The logic was moved here unchanged from scraper.js, offer-fetcher.js and
- * analyzer.js, known bugs included. The golden tests in tests/golden mark
- * each of those with its finding id.
+ * Search parsing returns one product per ASIN with its placements, null for
+ * any field the card lacks, a /dp/ URL and a USD-only price. The golden tests
+ * in tests/golden mark what is still wrong with its finding id.
  *
  * @module Parsers
  */
@@ -20,12 +20,19 @@ const Parsers = (() => {
     const SEARCH_SELECTORS = {
         // Filtered to exclude empty ASINs (ad placeholders)
         productItem: '.s-result-item[data-asin]:not([data-asin=""])',
+        // Real result cards; carousels and video widgets share the class above
+        searchResult: '[data-component-type="s-search-result"]',
 
+        // The title h2 sits inside the product link; a brand line is its own h2 before it
+        titleLinked: 'a h2',
+        titleRecipe: '[data-cy="title-recipe"] h2',
         title: 'h2 span',
         titleAlt: '.a-size-base-plus.a-color-base.a-text-normal',
 
         price: '.a-price[data-a-size="xl"] .a-offscreen',
-        priceAlt: '.a-price .a-offscreen',
+        // a-text-price is a unit or strikethrough list price, never the buy price
+        priceAlt: '.a-price:not(.a-text-price) .a-offscreen',
+        secondaryOffer: '[data-cy="secondary-offer-recipe"]',
 
         rating: '[data-cy="reviews-ratings-slot"] .a-icon-alt',
         ratingAlt: '.a-icon-star-mini .a-icon-alt',
@@ -33,13 +40,17 @@ const Parsers = (() => {
         ratingText: '[data-cy="reviews-block"] span.a-size-base.a-color-secondary',
 
         // aria-label has the full number; display text may use K/M
-        reviewCount: 'a[aria-label$="ratings"]',
+        reviewCount: 'a[aria-label$="ratings"], a[aria-label$="rating"]',
         reviewCountAlt: '.a-size-mini.puis-normal-weight-text.s-underline-text',
         reviewCountLegacy: '.a-size-base.puis-normal-weight-text.s-underline-text',
 
         productLink: '.a-link-normal.s-no-outline',
+        sponsored: '.puis-sponsored-label-text, .s-sponsored-label-text, [data-component-type="sp-sponsored-result"], a[href*="/sspa/"]',
         primeBadge: '.a-icon-prime, .s-prime',
+        nextPage: '.s-pagination-next:not(.s-pagination-disabled)',
+        nextPageLink: 'a.s-pagination-next[href]:not(.s-pagination-disabled)',
         nextPageDisabled: '.s-pagination-next.s-pagination-disabled',
+        searchPage: '.s-main-slot, .s-search-results, [data-component-type="s-search-result"]',
         resultsText: 'h2.a-size-base.a-spacing-small.a-spacing-top-small span',
         resultsToolbar: '.s-desktop-toolbar .a-spacing-small span'
     };
@@ -68,26 +79,36 @@ const Parsers = (() => {
         return el ? el.innerText.trim() : null;
     }
 
-    /** Display price string such as "$19.99", or "N/A". */
+    /** The product title, skipping a separate brand h2. Null if none. */
+    function extractTitle(element) {
+        const linked = element.querySelector(SEARCH_SELECTORS.titleLinked);
+        const recipe = element.querySelectorAll(SEARCH_SELECTORS.titleRecipe);
+        const el = linked || recipe[recipe.length - 1];
+        const text = el ? el.innerText.trim() : '';
+        return text || getText(element, SEARCH_SELECTORS.title, SEARCH_SELECTORS.titleAlt) || null;
+    }
+
+    /** Display price string such as "$19.99", or null. */
     function extractPrice(element) {
         const priceEl = element.querySelector(SEARCH_SELECTORS.price) ||
-                        element.querySelector(SEARCH_SELECTORS.priceAlt);
+                        [...element.querySelectorAll(SEARCH_SELECTORS.priceAlt)]
+                            .find(el => !el.closest(SEARCH_SELECTORS.secondaryOffer));
 
         if (priceEl) {
             const text = priceEl.innerText || priceEl.textContent;
-            return text ? text.trim() : 'N/A';
+            return text && text.trim() ? text.trim() : null;
         }
-        return 'N/A';
+        return null;
     }
 
-    /** "4.7 out of 5 stars" -> 4.7, or 0. */
+    /** "4.7 out of 5 stars" -> 4.7, or null. */
     function parseRatingText(text) {
-        if (!text) return 0;
+        if (!text) return null;
         const match = text.match(/(\d+\.?\d*)/);
-        return match ? parseFloat(match[1]) : 0;
+        return match ? parseFloat(match[1]) : null;
     }
 
-    /** Rating from data-cy, star-mini, star-small, then plain text. 0 if none. */
+    /** Rating from data-cy, star-mini, star-small, then plain text. Null if none. */
     function extractRating(element) {
         const dataCy = element.querySelector(SEARCH_SELECTORS.rating);
         if (dataCy) {
@@ -113,15 +134,15 @@ const Parsers = (() => {
             if (val > 0 && val <= 5) return val;
         }
 
-        return 0;
+        return null;
     }
 
-    /** "(108.3K)" -> 108300, "(1.2M)" -> 1200000, or 0. */
+    /** "(108.3K)" -> 108300, "(1.2M)" -> 1200000, or null. */
     function parseReviewText(text) {
-        if (!text) return 0;
+        if (!text) return null;
         const cleaned = text.replace(/[()]/g, '').trim();
         const match = cleaned.match(/^([\d,.]+)\s*([KMkm])?/);
-        if (!match) return 0;
+        if (!match) return null;
 
         let num = parseFloat(match[1].replace(/,/g, ''));
         const suffix = (match[2] || '').toUpperCase();
@@ -130,7 +151,7 @@ const Parsers = (() => {
         return Math.round(num);
     }
 
-    /** Review count from the aria-label, then the display text. 0 if none. */
+    /** Review count from the aria-label, then the display text. Null if none. */
     function extractReviewCount(element) {
         const ariaLink = element.querySelector(SEARCH_SELECTORS.reviewCount);
         if (ariaLink) {
@@ -154,11 +175,22 @@ const Parsers = (() => {
             if (count > 0) return count;
         }
 
-        return 0;
+        return null;
     }
 
     function hasPrimeBadge(element) {
         return element.querySelector(SEARCH_SELECTORS.primeBadge) !== null;
+    }
+
+    /** True for a paid placement: the Sponsored label, an ad holder or an sspa ad link. */
+    function isSponsored(element) {
+        return element.classList.contains('AdHolder') ||
+            element.querySelector(SEARCH_SELECTORS.sponsored) !== null;
+    }
+
+    /** The product page for an ASIN. Card links can be expiring sspa ad redirects. */
+    function productUrl(asin) {
+        return `https://www.amazon.com/dp/${asin}`;
     }
 
     /** One product record from a result card, or null without an ASIN. */
@@ -166,37 +198,37 @@ const Parsers = (() => {
         const asin = listing.dataset.asin;
         if (!asin) return null;
 
-        const title = getText(listing, SEARCH_SELECTORS.title, SEARCH_SELECTORS.titleAlt) || 'N/A';
-        const price = extractPrice(listing);
+        const title = extractTitle(listing);
+        const rawPrice = extractPrice(listing);
+        // Only a dollar price counts; anything else keeps its currency and no amount.
+        const priceCents = PriceLib.usdToCents(rawPrice);
+        const price = priceCents === null ? null : rawPrice;
         const rating = extractRating(listing);
         const reviewCount = extractReviewCount(listing);
         const isPrime = hasPrimeBadge(listing);
-
-        const linkEl = listing.querySelector(SEARCH_SELECTORS.productLink);
-        const productUrl = linkEl
-            ? `https://www.amazon.com${linkEl.getAttribute('href')}`
-            : 'N/A';
 
         return {
             name: title,
             asin: asin,
             price: price,
-            // Integer cents for sync and delta math; null when unparseable
-            priceCents: PriceLib.priceToCents(price),
+            // Integer cents for sync and delta math; null when missing or not USD
+            priceCents: priceCents,
+            currency: PriceLib.currencyOf(rawPrice),
             rating: rating,
             reviewCount: reviewCount,
             isPrime: isPrime,
-            url: productUrl,
+            sponsored: isSponsored(listing),
+            url: productUrl(asin),
             scrapedAt: new Date().toISOString()
         };
     }
 
-    /** Result count from the header ("1-48 of 523 results"), or 0. */
+    /** Result count from the header ("1-48 of 523 results", "of over 10,000 results"), or 0. */
     function getTotalResults(doc) {
         const resultsEl = doc.querySelector(SEARCH_SELECTORS.resultsText);
         if (resultsEl) {
             const text = resultsEl.innerText;
-            const match = text.match(/of (\d+[\d,]*) results/);
+            const match = text.match(/of (?:over )?(\d+[\d,]*) results/);
             if (match) {
                 return parseInt(match[1].replace(/,/g, ''));
             }
@@ -216,9 +248,61 @@ const Parsers = (() => {
         return currentUrl.toString();
     }
 
-    /** False only when a disabled Next button is present. */
+    /** True when the page has a Next button that is not disabled. */
     function hasNextPage(doc) {
-        return !doc.querySelector(SEARCH_SELECTORS.nextPageDisabled);
+        return !!doc.querySelector(SEARCH_SELECTORS.nextPage);
+    }
+
+    /**
+     * The address of the next page: the Next link's own href when there is
+     * one, the page number bumped by hand for an older span button, or null.
+     */
+    function nextPageHref(doc, url) {
+        const link = doc.querySelector(SEARCH_SELECTORS.nextPageLink);
+        if (link) return new URL(link.getAttribute('href'), url).href;
+        if (hasNextPage(doc)) return getNextPageUrl(url);
+        // Newer storefronts load more on scroll and have no Next link, but the
+        // header still says how far this page got ("1-16 of 59 results").
+        const range = resultRange(doc);
+        return range && range.end < range.total ? getNextPageUrl(url) : null;
+    }
+
+    /** "17-32 of 59 results" as {end: 32, total: 59}, or null. */
+    function resultRange(doc) {
+        const el = doc.querySelector(SEARCH_SELECTORS.resultsText);
+        const m = el && el.textContent.match(/(\d[\d,]*)\s*-\s*(\d[\d,]*) of (?:over )?(\d[\d,]*) results/);
+        if (!m) return null;
+        const n = (v) => parseInt(v.replace(/,/g, ''), 10);
+        return { end: n(m[2]), total: n(m[3]) };
+    }
+
+    /** Amazon's own "No results for ..." markers on a search page. */
+    const NO_RESULTS = '[data-component-type="s-no-results"], .s-no-results, #noResultsTitle';
+
+    function hasNoResultsMarker(doc) {
+        if (doc.querySelector(NO_RESULTS)) return true;
+        const scope = doc.querySelector('.s-main-slot, .s-search-results, #search') || doc.body;
+        return !!scope && /\bNo results for\b/i.test(scope.textContent || '');
+    }
+
+    /**
+     * What kind of page this is when it has no result cards: a captcha, a
+     * bot check, a sign-in wall, a search Amazon says has no results
+     * ('empty'), a search page with no readable cards ('unreadable': an
+     * error page or a changed layout), or something else ('unknown': a
+     * product page, another site section).
+     */
+    function classifyPage(doc, url) {
+        const path = url ? new URL(url).pathname : '';
+        if (doc.querySelector('form[action*="validateCaptcha"], #captchacharacters')) return 'captcha';
+        if (/robot check/i.test(doc.title || '')) return 'captcha';
+        if (/^\/ap\/(signin|mfa|cvf)/.test(path) || doc.querySelector('form[name="signIn"], #ap_email, #ap_password')) return 'signin';
+        const refresh = doc.querySelector('meta[http-equiv="refresh" i]');
+        if (refresh || /bm-verify|_bm_|akamai/i.test(url || '')) return 'interstitial';
+        if (path === '/s' || path.startsWith('/s/') || doc.querySelector(SEARCH_SELECTORS.searchPage)) {
+            return hasNoResultsMarker(doc) ? 'empty' : 'unreadable';
+        }
+        return 'unknown';
     }
 
     /** Share of products with an ASIN, a title and a price. */
@@ -227,39 +311,88 @@ const Parsers = (() => {
         const share = (ok) => (n ? products.filter(ok).length / n : 0);
         return {
             asin: share((p) => !!p.asin),
-            title: share((p) => !!p.name && p.name !== 'N/A'),
+            title: share((p) => !!p.name),
             price: share((p) => p.priceCents !== null && p.priceCents !== undefined)
         };
     }
 
     /**
-     * Parses one search page the way the scraper does today.
+     * The search-result cards on a page. When the page marks its real results
+     * with s-search-result, only those count; older layouts fall back to every
+     * .s-result-item with an ASIN.
+     */
+    function resultCards(doc) {
+        const all = [...doc.querySelectorAll(SEARCH_SELECTORS.productItem)];
+        const main = all.filter(el => el.matches(SEARCH_SELECTORS.searchResult));
+        return main.length ? main : all;
+    }
+
+    /**
+     * One product per ASIN from the page's cards. Each product keeps every
+     * placement ({position, sponsored, rank}), where rank counts organic
+     * cards only. `sponsored` is true if any placement was an ad, and
+     * `organicRank` is the rank of the first organic one, or null. The fields
+     * come from the first organic card when there is one.
+     */
+    function dedupe(cards) {
+        const products = [];
+        const byAsin = new Map();
+        let organic = 0;
+        cards.forEach((card, i) => {
+            const product = scrapeProduct(card);
+            if (!product) return;
+            const placement = {
+                position: i + 1,
+                sponsored: product.sponsored,
+                rank: product.sponsored ? null : ++organic
+            };
+            const seen = byAsin.get(product.asin);
+            if (!seen) {
+                product.organicRank = placement.rank;
+                product.placements = [placement];
+                byAsin.set(product.asin, product);
+                products.push(product);
+                return;
+            }
+            seen.placements.push(placement);
+            if (seen.organicRank === null && placement.rank !== null) {
+                Object.assign(seen, product, {
+                    sponsored: true,
+                    organicRank: placement.rank,
+                    placements: seen.placements
+                });
+            }
+        });
+        return products;
+    }
+
+    /**
+     * Parses one search page.
      *
-     * kind is 'empty' when no result card matched, 'last' when the Next
-     * button is disabled, else 'results'. nextHref is the hand-built next URL.
+     * kind is 'results' when there is a next page, 'last' when there is not,
+     * and otherwise what classifyPage says (empty, unreadable, captcha,
+     * interstitial, signin or unknown). nextHref follows the page's own Next link,
+     * or the next page number when the header shows more results than this page.
+     * products holds each ASIN once; placements counts the cards.
      *
      * @param {Document} doc
      * @param {string} url - the page's address
-     * @returns {{kind: string, products: Object[], nextHref: string|null, total: number, fill: Object}}
+     * @returns {{kind: string, products: Object[], placements: number, nextHref: string|null, total: number, fill: Object}}
      */
     function parseSearchPage(doc, url) {
-        const listings = doc.querySelectorAll(SEARCH_SELECTORS.productItem);
+        const cards = resultCards(doc);
         const total = getTotalResults(doc);
-        if (listings.length === 0) {
-            return { kind: 'empty', products: [], nextHref: null, total, fill: fillRates([]) };
+        if (cards.length === 0) {
+            return { kind: classifyPage(doc, url), products: [], placements: 0, nextHref: null, total, fill: fillRates([]) };
         }
 
-        const products = [];
-        listings.forEach(listing => {
-            const product = scrapeProduct(listing);
-            if (product) products.push(product);
-        });
-
-        const more = hasNextPage(doc);
+        const products = dedupe(cards);
+        const nextHref = nextPageHref(doc, url);
         return {
-            kind: more ? 'results' : 'last',
+            kind: nextHref ? 'results' : 'last',
             products,
-            nextHref: more ? getNextPageUrl(url) : null,
+            placements: products.reduce((n, p) => n + p.placements.length, 0),
+            nextHref,
             total,
             fill: fillRates(products)
         };
@@ -334,16 +467,23 @@ const Parsers = (() => {
         OFFER_SELECTORS,
         priceToCents: (input) => PriceLib.priceToCents(input),
         getText,
+        extractTitle,
         extractPrice,
         parseRatingText,
         extractRating,
         parseReviewText,
         extractReviewCount,
         hasPrimeBadge,
+        isSponsored,
+        productUrl,
         scrapeProduct,
         getTotalResults,
         getNextPageUrl,
         hasNextPage,
+        nextPageHref,
+        classifyPage,
+        resultCards,
+        dedupe,
         fillRates,
         parseSearchPage,
         buildOfferUrl,
