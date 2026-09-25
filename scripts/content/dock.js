@@ -44,7 +44,7 @@
         mark: SVG('<circle cx="6.5" cy="15.5" r="3.5"/><circle cx="17.5" cy="15.5" r="3.5"/><path d="M4 13 6 5.5h3L10 12"/><path d="M20 13 18 5.5h-3L14 12"/><path d="M10 14.5h4"/>', { box: 24, w: 2 }),
         x: SVG('<path d="M4 4l8 8M12 4l-8 8"/>'),
         min: SVG('<path d="M4 6l4 4 4-4"/>'),
-        gear: SVG('<circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v1.7M8 12.8v1.7M1.5 8h1.7M12.8 8h1.7M3.4 3.4l1.2 1.2M11.4 11.4l1.2 1.2M3.4 12.6l1.2-1.2M11.4 4.6l1.2-1.2"/>', { w: 1.5 }),
+        gear: SVG('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>', { box: 24, w: 2 }),
         play: SVG('<path d="M5 3.2v9.6a.6.6 0 0 0 .9.5l7.6-4.8a.6.6 0 0 0 0-1L5.9 2.7a.6.6 0 0 0-.9.5z"/>', { fill: true }),
         stop: SVG('<rect x="4" y="4" width="8" height="8" rx="1.5"/>', { fill: true }),
         down: SVG('<path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/>'),
@@ -195,10 +195,8 @@
         tab: 'scrape',
         status: null,
         orphaned: false,
-        pages: null,
         notice: null,
         busy: null,
-        fresh: false,
         menu: false,
         toast: null,
         spread: null,
@@ -241,12 +239,9 @@
 
     async function refresh() {
         clearTimeout(pollTimer);
-        const wasLive = isLive(run());
         const st = await send({ type: 'RUN_STATUS' });
         if (st && !st.error) {
             ui.status = st;
-            if (ui.pages === null) ui.pages = settings().maxPages;
-            if (wasLive && !isLive(st.run)) ui.fresh = false;
         } else if (!alive()) {
             ui.orphaned = true;
         }
@@ -255,15 +250,14 @@
         if (isLive(run())) pollTimer = setTimeout(refresh, document.hidden ? POLL_MS * 5 : POLL_MS);
     }
 
-    async function startHere(maxPages) {
+    async function startHere() {
         if (ui.busy) return;
         ui.busy = 'start';
         ui.notice = null;
         render();
-        const r = await send({ type: 'START_RUN_HERE', maxPages });
+        const r = await send({ type: 'START_RUN_HERE' });
         ui.busy = null;
         if (r && r.ok) {
-            ui.fresh = false;
             setOpen(true, { focus: 'stop' });
             await refresh();
             return;
@@ -456,7 +450,7 @@
     }
 
     /** Download Excel, with CSV and JSON behind the arrow on its right. */
-    function downloads(count) {
+    function downloads(count, extra = null) {
         const pick = (f) => { ui.menu = false; download(f); };
         const item = (f) => h('button', {
             role: 'menuitem', 'data-k': f, disabled: !!ui.busy, 'aria-label': `Download ${plural(count, 'product')} as ${FORMAT_LABEL[f]}`, onclick: () => pick(f)
@@ -468,7 +462,8 @@
                 h('button', {
                     class: 'primary dl-more', 'data-k': 'formats', 'aria-label': 'Other formats', 'aria-haspopup': 'menu', 'aria-expanded': String(!!ui.menu),
                     disabled: !!ui.busy, onclick: () => { ui.menu = !ui.menu; pendingFocus = ui.menu ? 'csv' : 'formats'; render(); }
-                }, icon('min'))),
+                }, icon('min')),
+                extra),
             ui.menu ? h('div', { class: 'menu', role: 'menu', 'aria-label': 'Other formats' }, item('csv'), item('json')) : null);
     }
 
@@ -609,20 +604,14 @@
     }
 
     function readyView() {
-        const pages = ui.pages || settings().maxPages;
         const isStore = page.kind === 'storefront';
         const title = isStore ? (page.name || 'This storefront') : page.keyword ? `"${page.keyword}"` : 'These results';
-        const total = isStore && page.total ? page.total : null;
-        const sub = total ? plural(total, 'product')
-            : page.pagesAvail > 1 ? `About ${plural(page.pagesAvail, 'page')}` : plural(page.count, 'product');
+        const total = isStore && page.total ? page.total : page.count;
         const busy = ui.busy === 'start';
         return [
-            lede(title, sub),
-            h('div', { class: 'row' },
-                h('span', { class: 'label', text: 'Pages' }),
-                stepper(pages, (v) => { ui.pages = v; render(); }, 'Pages to scrape')),
+            lede(title, plural(total, 'product')),
             noticeEl(),
-            h('button', { class: 'primary', 'data-k': 'scrape', 'data-first': true, disabled: busy || !!ui.spread, onclick: () => startHere(ui.pages || settings().maxPages) },
+            h('button', { class: 'primary', 'data-k': 'scrape', 'data-first': true, disabled: busy || !!ui.spread, onclick: () => startHere() },
                 icon('play'), busy ? 'Starting' : 'Scrape')
         ];
     }
@@ -649,15 +638,16 @@
         else if (r.reason !== 'complete') meta = h('p', { class: 'meta warn', text: (Run.MESSAGES && Run.MESSAGES[r.reason]) || 'The run ended early.' });
         const again = scrapable && page.startable && !ui.spread
             ? h('button', {
-                class: 'icon-btn', 'data-k': 'again', 'aria-label': 'Scrape again', title: 'Scrape again',
-                onclick: () => { ui.fresh = true; ui.notice = null; ui.menu = false; pendingFocus = 'first'; render(); }
+                class: 'again', 'data-k': 'again', 'aria-label': 'Scrape again', title: 'Scrape again', disabled: ui.busy === 'start',
+                onclick: () => { ui.notice = null; ui.menu = false; startHere(); }
             }, icon('again'))
             : null;
         const out = [
-            h('div', { class: 'hero' }, tally(n, again), ticks(r), meta),
+            h('div', { class: 'hero' }, tally(n), ticks(r), meta),
             noticeEl()
         ];
-        if (n > 0) out.push(downloads(n));
+        if (n > 0) out.push(downloads(n, again));
+        else if (again) out.push(h('button', { class: 'primary', 'data-k': 'scrape', 'data-first': true, onclick: () => startHere() }, icon('play'), 'Scrape again'));
         // Compare seller prices stays hidden until the offer parser works on
         // Amazon's current pages (audit F-30); a check already running still shows.
         if (ui.spread) out.push(spreadBlock(st));
@@ -692,7 +682,7 @@
             return [lede('ProScan', st ? '' : 'Loading'), noticeEl()];
         }
         if (isLive(r)) return runningView(r);
-        if (ui.spread || (isEnded(r) && r.thisTab && !ui.fresh)) return doneView(r, st);
+        if (ui.spread || (isEnded(r) && r.thisTab)) return doneView(r, st);
         if (scrapable && page.startable) return readyView();
         return elsewhereView(st);
     }
@@ -743,32 +733,21 @@
         const st = ui.status || {};
         const s = settings();
         const version = (() => { try { return chrome.runtime.getManifest().version; } catch (e) { return ''; } })();
-        const statusDot = (on, text) => h('span', { class: 'status' + (on ? ' on' : '') }, h('i', {}), text);
+        const row = (label, control, id) => h('div', { class: 'row' }, h('span', { class: 'label', id: id || null, text: label }), control);
         const sections = [
             h('div', { class: 'set' },
-                h('div', { class: 'row' },
-                    h('div', { class: 'l' }, h('b', { text: 'Pages per run' }), h('span', { text: 'Up to 400. Fewer pages finish faster.' })),
-                    stepper(s.maxPages, (v) => { ui.pages = v; saveSettings({ maxPages: v }); }, 'Pages per run')),
-                h('div', { class: 'row' },
-                    h('div', { class: 'l', id: 'ps-suggest-label' }, h('b', { text: 'Suggest Scrape' }), h('span', { text: 'On search results and storefronts' })),
-                    h('button', {
-                        class: 'switch', role: 'switch', 'data-k': 'suggest', 'data-first': true, 'aria-checked': String(s.suggest !== false), 'aria-labelledby': 'ps-suggest-label',
-                        onclick: () => saveSettings({ suggest: s.suggest === false })
-                    }))),
-            h('div', { class: 'set' },
-                h('div', { class: 'row' },
-                    h('div', { class: 'l' }, h('b', { text: 'AI answers' }), statusDot(!!st.hasKey, st.hasKey ? 'Gemini key added' : 'No key yet')),
-                    h('button', { class: 'secondary compact', 'data-k': 'key', onclick: () => openSettingsPage('key') }, st.hasKey ? 'Change key' : 'Add key', icon('ext'))),
-                h('p', { class: 'note' }, icon('info'), h('span', { text: 'Keys are entered on ProScan\'s own settings page, never on an Amazon page.' })))
+                row('Pages per run', stepper(s.maxPages, (v) => saveSettings({ maxPages: v }), 'Pages per run')),
+                row('Suggest Scrape', h('button', {
+                    class: 'switch', role: 'switch', 'data-k': 'suggest', 'data-first': true, 'aria-checked': String(s.suggest !== false), 'aria-labelledby': 'ps-suggest-label',
+                    onclick: () => saveSettings({ suggest: s.suggest === false })
+                }), 'ps-suggest-label'),
+                row('Gemini key', h('button', { class: 'secondary compact', 'data-k': 'key', onclick: () => openSettingsPage('key') }, st.hasKey ? 'Change' : 'Add', icon('ext'))),
+                st.cloudSync
+                    ? row('Dashboard sync', h('button', { class: 'secondary compact', 'data-k': 'sync', onclick: () => openSettingsPage('sync') }, st.signedIn ? 'Manage' : 'Sign in', icon('ext')))
+                    : null)
         ];
-        if (st.cloudSync) {
-            sections.push(h('div', { class: 'set' },
-                h('div', { class: 'row' },
-                    h('div', { class: 'l' }, h('b', {}, 'Dashboard sync ', h('span', { class: 'optional', text: '(optional)' })), statusDot(!!st.signedIn, st.signedIn ? 'Signed in' : 'Not signed in')),
-                    h('button', { class: 'secondary compact', 'data-k': 'sync', onclick: () => openSettingsPage('sync') }, st.signedIn ? 'Manage' : 'Sign in', icon('ext')))));
-        }
         sections.push(noticeEl());
-        sections.push(h('p', { class: 'foot' }, h('span', { text: 'Scans stay on this computer unless you sign in.' }), h('span', { text: version ? `ProScan ${version}` : '' })));
+        if (version) sections.push(h('p', { class: 'foot' }, h('span', { text: `ProScan ${version}` })));
         return sections;
     }
 

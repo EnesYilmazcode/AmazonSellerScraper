@@ -249,7 +249,7 @@ test('every icon-only control has a label, and Escape closes the card', async ()
   d.$('[data-k="gear"]').click();
   await flush();
   expect(unlabeled()).toEqual([]);
-  expect(d.text()).toContain('Scans stay on this computer unless you sign in.');
+  expect(d.text()).toContain('Pages per run');
   expect(d.$$('input[type="password"], input[type="email"]')).toEqual([]);
 
   d.$('.dock').dispatchEvent(new d.w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

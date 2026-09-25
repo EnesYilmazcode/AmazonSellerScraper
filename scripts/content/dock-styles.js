@@ -180,6 +180,9 @@ svg { display: block; flex: none; }
 .dl-more { width: 46px; flex: none; border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
 .dl-more svg { width: 14px; height: 14px; }
 .dl-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.again { width: 46px; height: 46px; flex: none; margin-left: 6px; border-radius: 12px; border: 1px solid var(--line-strong); display: grid; place-items: center; color: var(--ink); }
+.again:hover { background: var(--sunken); }
+.again svg { width: 18px; height: 18px; }
 .menu { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
 .menu button { height: 36px; border-radius: 10px; border: 1px solid var(--line-strong); display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 580; font-size: 13.5px; }
 .menu button:hover { background: var(--sunken); }
