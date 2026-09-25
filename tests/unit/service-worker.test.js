@@ -1,5 +1,8 @@
 /**
- * The service worker's own handlers, with Firebase and sync mocked out.
+ * @jest-environment node
+ *
+ * The service worker's own handlers, with Firebase and sync mocked out and
+ * fake-indexeddb standing in for IndexedDB.
  */
 jest.mock('../../scripts/background/firebase-init.js', () => ({
   auth: { currentUser: { uid: 'u1', email: 'u1@example.test', displayName: null } },
@@ -12,7 +15,9 @@ jest.mock('firebase/auth/web-extension', () => ({
 }), { virtual: true });
 jest.mock('../../scripts/background/sync.js', () => ({ syncToCloud: jest.fn(async () => ({ written: 1 })) }));
 
+require('fake-indexeddb/auto');
 const { syncToCloud } = require('../../scripts/background/sync.js');
+const DB = require('../../scripts/background/db');
 
 const fs = require('fs');
 const path = require('path');
@@ -23,53 +28,71 @@ const installedListeners = [];
 const startupListeners = [];
 
 beforeAll(() => {
+  chrome.runtime.id = 'test-extension';
   chrome.runtime.onMessage.addListener = (fn) => messageListeners.push(fn);
   chrome.runtime.onInstalled = { addListener: (fn) => installedListeners.push(fn) };
   chrome.runtime.onStartup = { addListener: (fn) => startupListeners.push(fn) };
-  chrome.tabs.onRemoved = { addListener() {} };
   require('../../scripts/background/service-worker.js');
 });
 
-beforeEach(() => chrome.storage.local._reset());
+beforeEach(() => {
+  chrome.storage.local._reset();
+  chrome.storage.session._reset();
+});
 
-function send(msg) {
+function send(msg, sender = { id: 'test-extension' }) {
   return new Promise((resolve) => {
-    // The sync listener is the second one registered.
-    messageListeners[1](msg, {}, resolve);
+    const held = messageListeners[0](msg, sender, resolve);
+    if (!held) setTimeout(() => resolve('no answer'), 0);
   });
 }
 
-test('Export to ProScan is refused while cloud sync is off (2.1)', async () => {
-  chrome.storage.local.set({ syncQueue: [{ asin: 'B000000001', runId: 'r1' }] });
+async function settle() {
+  for (let i = 0; i < 400; i++) await new Promise((r) => setImmediate(r));
+}
+
+test('one router answers every message', () => {
+  expect(messageListeners).toHaveLength(1);
+});
+
+test('Export to ProScan is refused while cloud sync is off', async () => {
   const resp = await send({ type: 'PROSCAN_EXPORT' });
   expect(resp.error).toMatch(/not available/);
   expect(syncToCloud).not.toHaveBeenCalled();
-  expect(chrome.storage.local._getStore().syncQueue).toHaveLength(1);
 });
 
-async function settle() {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-}
+test('messages meant for the popup or a tab are left alone', async () => {
+  expect(await send({ type: 'SPREAD_PROGRESS', current: 1, total: 2 })).toBe('no answer');
+  expect(await send({ type: 'PING' })).toBe('no answer');
+});
 
-test('an update from 2.0 migrates storage to schema 3 (F-100)', async () => {
+test('an update from 2.0 migrates storage to schema 4, into IndexedDB (F-100)', async () => {
   chrome.storage.local.set(JSON.parse(JSON.stringify(V20)));
   installedListeners.forEach((fn) => fn({ reason: 'update', previousVersion: '2.0' }));
   await settle();
-  const s = chrome.storage.local._getStore();
-  expect(s.schemaVersion).toBe(3);
-  expect(s.results).toHaveLength(V20.results.length);
-  expect(Object.keys(s.lastValues).sort()).toEqual([...new Set(V20.results.map((r) => r.asin))].sort());
+  expect(chrome.storage.local._getStore()).toEqual({ schemaVersion: 4 });
+  const st = await send({ type: 'GET_STATE' });
+  expect(st.results).toHaveLength(V20.results.length);
+  const db = await DB.open();
+  expect(await db.count('lastValues')).toBe(new Set(V20.results.map((r) => r.asin)).size);
+  db.close();
 });
 
 test('a browser start finishes a migration an update could not', async () => {
   chrome.storage.local.set(JSON.parse(JSON.stringify(V20)));
   startupListeners.forEach((fn) => fn());
   await settle();
-  expect(chrome.storage.local._getStore().schemaVersion).toBe(3);
+  expect(chrome.storage.local._getStore().schemaVersion).toBe(4);
 });
 
-test('a fresh install starts at schema 3', async () => {
+test('a fresh install writes only settings and the schema version', async () => {
   installedListeners.forEach((fn) => fn({ reason: 'install' }));
   await settle();
-  expect(chrome.storage.local._getStore()).toMatchObject({ schemaVersion: 3, results: [], isScrapingActive: false });
+  expect(chrome.storage.local._getStore()).toEqual({ schemaVersion: 4, settings: { maxPages: 20 } });
+});
+
+test('the chat reads the key from settings and the run from IndexedDB', async () => {
+  chrome.storage.local.set({ geminiApiKey: 'k', schemaVersion: 4 });
+  const st = await send({ type: 'CHAT_STATUS' }, { id: 'test-extension', tab: { id: 3 } });
+  expect(st).toMatchObject({ hasKey: true });
 });

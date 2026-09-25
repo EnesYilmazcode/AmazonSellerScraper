@@ -3,6 +3,9 @@ module.exports = {
   roots: ['<rootDir>/tests'],
   setupFiles: ['<rootDir>/tests/setup/chrome-mock.js'],
   testMatch: ['**/*.test.js'],
+  // Older builds checked out by the e2e upgrade harness have their own tests.
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/tests/e2e/\\.build/'],
+  modulePathIgnorePatterns: ['<rootDir>/tests/e2e/\\.build/'],
   // sync.js and service-worker.js are authored as ESM (esbuild bundles
   // them). A tiny scoped transform rewrites their import/export to
   // CommonJS so they can be unit-tested; every other file keeps the

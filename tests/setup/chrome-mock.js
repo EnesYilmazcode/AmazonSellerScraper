@@ -9,8 +9,31 @@
 const { TextEncoder, TextDecoder } = require('util');
 if (!global.TextEncoder) global.TextEncoder = TextEncoder;
 if (!global.TextDecoder) global.TextDecoder = TextDecoder;
+// fake-indexeddb needs structuredClone, which the jsdom environment leaves out.
+if (!global.structuredClone) {
+  const v8 = require('v8');
+  global.structuredClone = (value) => v8.deserialize(v8.serialize(value));
+}
 
 let store = {};
+
+/** chrome.storage.session: promise-only, cleared by _reset(). */
+function sessionArea() {
+  let data = {};
+  const copy = (v) => JSON.parse(JSON.stringify(v));
+  return {
+    async get(keys) {
+      const list = keys == null ? Object.keys(data) : [].concat(keys);
+      const out = {};
+      list.forEach(k => { if (data[k] !== undefined) out[k] = copy(data[k]); });
+      return out;
+    },
+    async set(items) { Object.assign(data, copy(items)); },
+    async remove(keys) { [].concat(keys).forEach(k => delete data[k]); },
+    _getStore() { return copy(data); },
+    _reset() { data = {}; }
+  };
+}
 // Set by _failNext: the next set() fails with this runtime.lastError message.
 let failNext = null;
 
@@ -65,7 +88,8 @@ global.chrome = {
       },
       _getStore() { return { ...store }; },
       _reset() { store = {}; failNext = null; }
-    }
+    },
+    session: sessionArea()
   },
   runtime: {
     sendMessage: function(msg, callback) {
@@ -83,9 +107,14 @@ global.chrome = {
     query: function(opts, callback) {
       if (callback) callback([{ id: 1, url: 'https://www.amazon.com/s?k=test' }]);
     },
-    sendMessage: function(tabId, msg, callback) {
-      if (callback) callback({});
-    }
+    sendMessage: function(tabId, msg, opts, callback) {
+      const cb = typeof opts === 'function' ? opts : callback;
+      if (cb) cb({});
+    },
+    update: async function(tabId, props) { return { id: tabId, ...props }; },
+    get: async function(tabId) { return { id: tabId, url: 'https://www.amazon.com/s?k=test' }; },
+    onRemoved: { addListener() {} },
+    onUpdated: { addListener() {} }
   },
   downloads: {
     download: function(opts, callback) {
