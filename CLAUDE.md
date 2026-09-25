@@ -2,27 +2,29 @@
 
 ## Project Overview
 
-Chrome extension (Manifest V3) that scrapes Amazon seller product listings, provides analytics for resellers/arbitrage, and includes a floating AI chatbot on Amazon pages powered by Gemini API. No server required — everything runs client-side.
+Chrome extension (Manifest V3) that scrapes Amazon search results and seller storefronts and saves them as Excel, CSV or JSON. Its main surface is an on-page dock, bottom-right on Amazon, that suggests Scrape on search and storefront pages, follows the run, downloads the files, and holds the Gemini chat (Ask). The popup is a fallback and holds the key and the optional sign-in. No server required; everything runs client-side.
 
-## Architecture (v2.3)
+## Architecture (v2.4)
 
 ```text
 AmazonSellerScraper/
-├── manifest.json              # Extension config (v2.3)
+├── manifest.json              # Extension config (v2.4)
 ├── popup/                     # UI Layer
-│   ├── popup.html            # Popup interface (dashboard + settings)
+│   ├── popup.html            # Popup: this tab, fallback Scrape, last scrape, settings
 │   ├── popup.css             # Popup styling
 │   ├── popup.js              # UI logic
 │   └── ai-key.js             # Gemini key field (AI chat settings)
 ├── scripts/
 │   ├── content/
 │   │   ├── scraper.js        # Parses a search page, reports it to the SW (parse only)
-│   │   ├── chatbot.js        # Floating AI chatbot widget (Shadow DOM)
-│   │   └── offer-fetcher.js  # Seller price fetching for spread analysis
+│   │   ├── offer-fetcher.js  # Seller price fetching for spread analysis (watchSpread for the dock)
+│   │   ├── dock-styles.js    # DOCK_CSS, adopted as a constructed stylesheet
+│   │   └── dock.js           # The on-page dock: Scrape, Ask, settings (closed Shadow DOM)
 │   ├── lib/
 │   │   ├── parsers.js        # Pure search/offer parsing (global Parsers)
 │   │   ├── messages.js       # Every message type and who may send it (global Msg)
 │   │   ├── run.js            # Run state machine, bound to one tab (global Run)
+│   │   ├── page-kind.js      # search / storefront / seller / store / never, and hidden pages (global PageKind)
 │   │   ├── flags.js          # Build flags (global Flags); CLOUD_SYNC is on from 2.3
 │   │   ├── migrate.js        # Storage schema migrations, run by the SW
 │   │   └── chat.js           # Gemini request builder, run scoping, error text
@@ -30,6 +32,7 @@ AmazonSellerScraper/
 │   │   ├── service-worker.js # Wires router, engine, chat, auth and migrations
 │   │   ├── router.js         # The one typed message router
 │   │   ├── engine.js         # The run engine; the only writer of run data
+│   │   ├── download.js       # DOWNLOAD for the dock: data: URL to chrome.downloads, or back to the page
 │   │   ├── db.js             # IndexedDB: runs, products, placements, lastValues, outbox, spread
 │   │   ├── sync-plan.js      # Outbox entry -> cloud writes (pure)
 │   │   └── sync.js           # Drains the outbox into Firestore, one entry at a time
@@ -40,8 +43,6 @@ AmazonSellerScraper/
 │       └── exporter.js       # Excel/CSV/JSON export
 ├── packages/
 │   └── schema/index.js       # Cloud schema: types, validators, ids (shared with the dashboard)
-├── styles/
-│   └── chatbot.css           # Chatbot widget styles (loaded into Shadow DOM)
 ├── tests/                     # Test suite (Jest)
 │   ├── setup/
 │   │   ├── chrome-mock.js    # In-memory Chrome API mock
@@ -69,9 +70,10 @@ AmazonSellerScraper/
 | -------------------- | --------------------------------------------------------- |
 | `scraper.js`         | Parses a page with `Parsers`, sends `PAGE_RESULT`         |
 | `engine.js`          | Run state machine, page saves, navigation, heartbeat     |
-| `chatbot.js`         | Floating AI chatbot widget on Amazon pages (Shadow DOM)   |
+| `dock.js`            | On-page dock: Scrape, progress, downloads, Ask, settings  |
+| `page-kind.js`       | Which pages get Scrape, a storefront link, or no dock     |
 | `offer-fetcher.js`   | Fetches seller offer pages for price spread analysis      |
-| `chatbot.css`        | Widget styles loaded into Shadow DOM                      |
+| `download.js`        | Files for the dock, made in the worker                    |
 | `storage.js`         | Async wrapper for chrome.storage.local                    |
 | `analyzer.js`        | Opportunity scoring, insights, statistics                 |
 | `spread-analyzer.js` | Price spread statistics (CV, std dev, arbitrage scoring)  |
@@ -84,7 +86,8 @@ AmazonSellerScraper/
 
 The service worker is the only writer (`scripts/background/engine.js`).
 
-1. User clicks "Start Scraping" in popup; `popup.js` sends `START_RUN {tabId}` to the SW
+1. User presses Scrape in the dock; `dock.js` sends `START_RUN_HERE {maxPages?}` and the SW takes the tab
+   from `sender.tab.id` (`engine.startHere`). The popup's fallback sends `START_RUN {tabId}`
 2. The SW pings the tab. No answer: the popup offers `chrome.tabs.reload` and starts after the reload.
    A page that is not a search (captcha, sign-in, product page) is refused and nothing changes
 3. The SW writes the run record (`scripts/lib/run.js`) to `chrome.storage.session` under `run`,
@@ -100,7 +103,11 @@ The service worker is the only writer (`scripts/background/engine.js`).
 8. The run ends with a reason; Stop goes to the SW, which cancels the pending page. Closing the
    run's tab or taking it elsewhere ends the run as `interrupted`
 9. `analyzer.js` generates insights and opportunity scores
-10. User exports via `exporter.js` (Excel/CSV/JSON)
+10. After each saved page the SW sends `RUN_PROGRESS` to the run's tab; the dock also polls `RUN_STATUS`
+    every 2 s while a run is live. `RUN_STATUS` (`engine.status`) is the run in brief (`brief`), whether it is
+    the asking tab's, and a `summarize` of the results once it ended. Never products, the key or the email
+11. User downloads from the dock (`DOWNLOAD {format}`, made in the SW by `Exporter.build`) or the popup
+    (same `Exporter.build`, `Exporter.triggerDownload`)
 
 Run states: idle, starting, running, stopping, then stopped, blocked, failed or done.
 `reason` says why it ended: complete, stopped, blocked, selectors_broken, storage_full,
@@ -137,22 +144,36 @@ Cloud paths and shapes: `packages/schema/index.js` (keep the dashboard's copy id
 on a shape change). Run id `{sourceId}_{startMs}`, minted once in `engine.start`; page id `p0001`;
 `dayKey` is the local date the run started.
 
-### AI Chatbot (client-side, no server)
+### The dock (2.4)
 
-1. `chatbot.js` injects a floating widget (bottom-right) on Amazon pages with product listings
-2. Widget uses Shadow DOM to isolate styles from Amazon's CSS
-3. User types a question (e.g. "What's the best deal under $30?")
-4. `chatbot.js` sends `CHAT_MESSAGE` to `service-worker.js` with the question and the last few turns
-5. The service worker reads the user's key from `chrome.storage.local` and the latest run from IndexedDB; the content script never sees the key
-6. `scripts/lib/chat.js` builds the request: model id in `GEMINI_MODEL`, key in the `x-goog-api-key` header, titles in a fenced JSON block marked untrusted
-7. Response displayed in chat bubble as text, never HTML
+1. `dock.js` runs on every Amazon page except cart, checkout, sign-in and account pages (`PageKind.hidden`).
+   Closed shadow root on `#proscan-dock-host`, `DOCK_CSS` adopted as a constructed stylesheet, system fonts,
+   inline SVG. No `web_accessible_resources`
+2. Launcher: search or storefront suggests Scrape (one click starts); `/sp?seller=` and brand stores link to
+   `/s?me=ID`; elsewhere a plain ProScan button with Ask. A live run shows page x of y and a labeled Stop;
+   a finished run in this tab offers the Excel download. "Not now" sets `proscan.dock.notNow` in the tab's
+   sessionStorage; the card's open state is `proscan.dock.open` so it survives each page of a run
+3. Card: Scrape tab (ready, running, done with the pages strip, hatched pages the store never had, downloads,
+   Compare seller prices through `runSpreadAnalysis` and `watchSpread`), Ask tab, settings (pages per run and
+   the suggestion via `SAVE_SETTINGS`; the key and sign-in open `popup.html#key` or `#sync` in a tab via
+   `OPEN_SETTINGS`)
+4. Keys and passwords are never typed on Amazon. Key events stop at the dock so Amazon shortcuts do not fire
+
+### AI chat (client-side, no server)
+
+1. The dock's Ask tab asks `CHAT_STATUS` for the key state and the scan it covers
+2. User types a question (e.g. "What's the best deal under $30?")
+3. `dock.js` sends `CHAT_MESSAGE` to `service-worker.js` with the question and the last few turns
+4. The service worker reads the user's key from `chrome.storage.local` and the latest run from IndexedDB; the content script never sees the key
+5. `scripts/lib/chat.js` builds the request: model id in `GEMINI_MODEL`, key in the `x-goog-api-key` header, titles in a fenced JSON block marked untrusted
+6. Response displayed in chat bubble as text, never HTML
 
 ## Setup
 
 1. Load unpacked extension in `chrome://extensions`
-2. Click the ProScan popup, expand AI chat settings, paste your Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey))
-3. Navigate to Amazon seller/search page → scrape → export
-4. The AI chatbot button appears in the bottom-right corner on Amazon pages with product listings
+2. Open an Amazon search or storefront and press Scrape on the dock (bottom-right), then Download Excel
+3. For Ask, add a Gemini API key (free at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)) from the
+   dock's settings (Add key) or the popup's AI chat settings
 
 ## Testing
 
@@ -173,6 +194,8 @@ npm run test:coverage # With coverage report
   `firestore.rules` (`tools/contract.mjs`, `tests/contract/`); ESM files under `packages/` and
   `scripts/background/` load in Jest through `tests/setup/esm-to-cjs-transform.js`
 - `npm run test:e2e` runs the same scenarios in Chromium (`tests/e2e/`), including the worker stopped via CDP between pages and 2.0 and 2.1 builds updated mid-run
+- `tests/unit/dock.test.js` runs `dock.js` in JSDOM with the shadow root forced open; `tests/e2e/dock.spec.mjs` drives
+  the real dock through CDP, which can pierce the closed root (`tests/e2e/lib/dock.mjs`)
 - HTML fixtures in `tests/fixtures/` match the exact CSS selectors the code uses
 - Chrome APIs (`storage`, `runtime`, `tabs`, `downloads`) are mocked in `tests/setup/chrome-mock.js`
 - XLSX is mocked with jest.fn() stubs in exporter.test.js; export-xlsx.test.js uses the real libs/xlsx.full.min.js
@@ -183,8 +206,8 @@ npm run test:coverage # With coverage report
 - `chrome.storage.session`: the live run record (content scripts cannot read it)
 - IndexedDB: run data, in the extension origin; needs no permission
 - `chrome.runtime.sendMessage/onMessage`: messages, all in `scripts/lib/messages.js`
-- `chrome.downloads`: file downloads
-- `chrome.tabs`: `sendMessage`, `update`, `onRemoved`, `onUpdated`; none need the `tabs` permission
+- `chrome.downloads`: file downloads, from the popup and from the SW for the dock (data: URL up to about 1.5 MB)
+- `chrome.tabs`: `sendMessage`, `update`, `onRemoved`, `onUpdated`, `create` (settings page); none need the `tabs` permission
 
 No permission was added for the run engine: no `alarms`, `scripting`, `offscreen` or
 `unlimitedStorage`. `npm run lock` fails on any addition.
@@ -300,8 +323,8 @@ See `docs/PRICE_SPREAD_ANALYSIS.md` for the full specification.
 - [x] In-popup analytics dashboard
 - [x] Opportunity scoring
 - [x] Price spread analysis (seller price variability detection)
-- [x] Floating AI chatbot on Amazon pages (Gemini API, no server needed)
-- [x] Shadow DOM isolation for chatbot widget
+- [x] On-page dock with Scrape, progress, downloads and Ask (2.4)
+- [x] Closed Shadow DOM isolation, no web-accessible files
 - [x] API key management in popup settings
 - [x] Comprehensive test suite (214 Jest tests)
 
