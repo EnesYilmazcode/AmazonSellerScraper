@@ -12,9 +12,11 @@
  *
  * Supported forms (all that sync.js uses):
  *   import { a, b } from 'mod';          -> const { a, b } = require('mod');
+ *   import { a as b } from 'mod';        -> const { a: b } = require('mod');
  *   import x from 'mod';                 -> const x = require('mod');
  *   export async function f() {}         -> async function f() {}; module.exports.f = f;
  *   export function f() {}               -> function f() {}; module.exports.f = f;
+ *   export const X = ...;                -> const X = ...; module.exports.X = X;
  */
 function rewrite(src) {
   const named = [];
@@ -26,7 +28,7 @@ function rewrite(src) {
       (_m, names, mod) => {
         const clean = names
           .split(',')
-          .map((s) => s.trim())
+          .map((s) => s.trim().replace(/\s+as\s+/, ': '))
           .filter(Boolean)
           .join(', ');
         return `const { ${clean} } = require('${mod}');`;
@@ -37,6 +39,11 @@ function rewrite(src) {
       /import\s+([A-Za-z_$][\w$]*)\s+from\s*['"]([^'"]+)['"]\s*;?/g,
       (_m, name, mod) => `const ${name} = require('${mod}');`
     )
+    // export const NAME = ... -> strip `export`, remember the name
+    .replace(/^export\s+const\s+([A-Za-z_$][\w$]*)/gm, (_m, name) => {
+      named.push(name);
+      return `const ${name}`;
+    })
     // export (async) function name(...) -> strip `export`, remember the name
     .replace(
       /export\s+(async\s+)?function\s+([A-Za-z_$][\w$]*)/g,
@@ -52,8 +59,15 @@ function rewrite(src) {
   return out;
 }
 
+const crypto = require('crypto');
+const self = require('fs').readFileSync(__filename);
+
 module.exports = {
   process(sourceText) {
     return { code: rewrite(sourceText) };
+  },
+  // Jest caches transformed files; a change here must invalidate them.
+  getCacheKey(sourceText, filename) {
+    return crypto.createHash('md5').update(self).update(sourceText).update(filename).digest('hex');
   },
 };

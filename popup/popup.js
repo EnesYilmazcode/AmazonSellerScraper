@@ -78,6 +78,10 @@ const elements = {
     authAccount: document.getElementById('authAccount'),
     authStatusEmail: document.getElementById('authStatusEmail'),
     authSignOutBtn: document.getElementById('authSignOutBtn'),
+    authNotice: document.getElementById('authNotice'),
+    authResetBtn: document.getElementById('authResetBtn'),
+    authSignUpLink: document.getElementById('authSignUpLink'),
+    authSync: document.getElementById('authSync'),
     exportToProScanBtn: document.getElementById('exportToProScanBtn')
 };
 
@@ -463,20 +467,53 @@ function sendToWorker(message) {
 function showSignedIn(user) {
     currentProScanUser = user;
     elements.authStatusEmail.textContent = user.email || user.displayName || 'Signed in';
+    document.getElementById('authSummary').textContent = 'Syncing to dashboard';
     elements.authForm.classList.add('hidden');
     elements.authAccount.classList.remove('hidden');
     elements.authError.classList.add('hidden');
     elements.authError.textContent = '';
+    elements.authNotice.classList.add('hidden');
     elements.exportToProScanBtn.classList.toggle('hidden', !Flags.CLOUD_SYNC);
+}
+
+/**
+ * The sync line under the account: what is waiting, or when it last synced.
+ *
+ * @param {{pending?: number, failed?: number, lastSync?: ?{at:number, error:?string}}} state
+ */
+function showSyncState(state) {
+    const pending = (state && state.pending) || 0;
+    const failed = (state && state.failed) || 0;
+    const last = state && state.lastSync;
+    let text = 'Scans sync to your ProScan dashboard automatically.';
+    if (pending > 0) {
+        text = `${pending} page${pending === 1 ? '' : 's'} waiting to sync.`;
+        if (last && last.error) text += ' The last try failed; it will try again in a while, or now with Export to ProScan.';
+    } else if (last && !last.error) {
+        text = 'Everything is synced.';
+    }
+    if (failed > 0) {
+        text += ` ${failed} page${failed === 1 ? '' : 's'} could not sync: ProScan refused ${failed === 1 ? 'it' : 'them'}. Export to ProScan tries again.`;
+    }
+    elements.authSync.textContent = text;
+    elements.authSync.classList.remove('hidden');
 }
 
 /**
  * Render the signed-out state: show the sign-in form, hide the account state,
  * and hide the cloud-export button.
  */
-function showSignInForm() {
+function showSignInForm(notice = null) {
     currentProScanUser = null;
     elements.authAccount.classList.add('hidden');
+    elements.authSync.classList.add('hidden');
+    elements.authNotice.textContent = notice === 'expired'
+        ? 'Your session expired. Sign in again to keep syncing; your scans are kept.'
+        : '';
+    elements.authNotice.classList.toggle('hidden', notice !== 'expired');
+    document.getElementById('authSummary').textContent = 'Dashboard sync (optional)';
+    // An expired session is the one case worth unfolding the panel for.
+    if (notice === 'expired') document.getElementById('authPanel').open = true;
     elements.authForm.classList.remove('hidden');
     elements.authError.classList.add('hidden');
     elements.authError.textContent = '';
@@ -492,6 +529,30 @@ function showSignInForm() {
 function showAuthError(message) {
     elements.authError.textContent = message;
     elements.authError.classList.remove('hidden');
+}
+
+/**
+ * Ask the worker to send a password reset email for the typed address.
+ * The answer is the same whether or not the account exists.
+ *
+ * @async
+ */
+async function handleResetPassword() {
+    const email = elements.authEmail.value.trim();
+    if (!email) {
+        showAuthError('Enter your email above, then tap Forgot password.');
+        return;
+    }
+    elements.authResetBtn.disabled = true;
+    const response = await sendToWorker({ type: Msg.T.PROSCAN_RESET_PASSWORD, email });
+    elements.authResetBtn.disabled = false;
+    if (response && response.ok) {
+        elements.authError.classList.add('hidden');
+        elements.authNotice.textContent = response.message;
+        elements.authNotice.classList.remove('hidden');
+    } else {
+        showAuthError((response && response.error) || 'Could not send the reset email.');
+    }
 }
 
 /**
@@ -513,10 +574,12 @@ async function initializeAuthUI() {
     if (!Flags.CLOUD_SYNC) return;
     document.getElementById('authPanel').classList.remove('hidden');
     const response = await sendToWorker({ type: Msg.T.PROSCAN_AUTH_STATE });
+    if (response && response.dashboardUrl) elements.authSignUpLink.href = response.dashboardUrl;
     if (response && response.user) {
         showSignedIn(response.user);
+        showSyncState(response);
     } else {
-        showSignInForm();
+        showSignInForm(response && response.notice);
     }
 }
 
@@ -545,6 +608,7 @@ async function handleSignIn() {
     if (response && response.user) {
         elements.authPassword.value = '';
         showSignedIn(response.user);
+        showSyncState({ pending: 0 });
     } else {
         showAuthError((response && response.error) || 'Sign-in failed.');
         resetSignInButton();
@@ -591,11 +655,18 @@ async function handleExportToProScan() {
 
     if (response && response.ok) {
         const count = response.products || 0;
-        if (!response.written || count === 0) {
-            updateStatus('No new products to export', 'info');
+        const failed = response.failed || 0;
+        if (failed > 0) {
+            updateStatus(`Synced ${count} product${count === 1 ? '' : 's'}; ${failed} page${failed === 1 ? '' : 's'} could not sync.`, 'warning');
+        } else if (!response.entries) {
+            updateStatus('Everything is already synced.', 'info');
         } else {
-            updateStatus(`Exported ${count} product${count === 1 ? '' : 's'} to ProScan`, 'success');
+            updateStatus(`Synced ${count} product${count === 1 ? '' : 's'} to ProScan`, 'success');
         }
+        showSyncState({ pending: 0, failed, lastSync: { at: Date.now(), error: null } });
+    } else if (response && response.expired) {
+        showSignInForm('expired');
+        updateStatus(response.error, 'warning');
     } else {
         updateStatus((response && response.error) || 'Export failed.', 'error');
     }
@@ -610,6 +681,7 @@ async function handleExportToProScan() {
 // ProScan cloud auth + export
 elements.authSignInBtn.addEventListener('click', handleSignIn);
 elements.authSignOutBtn.addEventListener('click', handleSignOut);
+elements.authResetBtn.addEventListener('click', handleResetPassword);
 elements.exportToProScanBtn.addEventListener('click', handleExportToProScan);
 
 // Enter-to-submit from the password field

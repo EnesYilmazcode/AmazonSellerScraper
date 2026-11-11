@@ -25,6 +25,7 @@ const Run = require('../lib/run.js');
 const Msg = require('../lib/messages.js');
 const Flags = require('../lib/flags.js');
 const Delta = require('../modules/delta.js');
+const Schema = require('../../packages/schema/index.js');
 
 /** A page asked for but not reported this long is asked for again. */
 const PAGE_TIMEOUT_MS = 20000;
@@ -77,14 +78,26 @@ function durable(run) {
     return rest;
 }
 
-function runSuffix(random) {
-    return Math.floor(random() * 0x100000000).toString(36).padStart(7, '0').slice(0, 8);
+/** The signed-in account's uid, as the service worker keeps it in storage.local. */
+async function accountUid(chrome) {
+    const data = await chrome.storage.local.get('account');
+    return (data && data.account && data.account.uid) || null;
+}
+
+/**
+ * A lastValues snapshot counts for `uid` when this account took it, or when
+ * it was taken signed out. Another account's snapshot does not.
+ */
+function prevFor(snap, uid) {
+    if (!snap) return null;
+    return !snap.uid || snap.uid === uid ? snap : null;
 }
 
 /**
  * @param {Object} deps
  * @param {Object} deps.chrome - chrome.* (storage.session, storage.local, tabs)
  * @param {function(): Promise<Object>} deps.openDb - resolves to the db.js api
+ * @param {function(): Promise<?string>} [deps.owner] - uid of the signed-in account
  */
 function createEngine({
     chrome,
@@ -94,7 +107,8 @@ function createEngine({
     setTimer = setTimeout,
     clearTimer = clearTimeout,
     flags = Flags,
-    log = console
+    log = console,
+    owner = () => accountUid(chrome)
 }) {
     let dbPromise = null;
     let timer = null;
@@ -152,13 +166,35 @@ function createEngine({
         timer = null;
     }
 
+    /** Outbox entries for a signed-in account; none when sync is off or nobody is signed in. */
+    async function outbox(runId, kind, extra = {}) {
+        if (!flags.CLOUD_SYNC) return [];
+        const uid = await owner();
+        if (!uid) return [];
+        return [{ store: 'outbox', put: { runId, kind, uid, queuedAt: now(), ...extra } }];
+    }
+
+    /**
+     * The end-of-run entry for `run`. It goes to the account its pages were
+     * queued for (run.syncUid), even if that account signed out mid-run, so
+     * the cloud header does not stay active forever.
+     */
+    async function endEntry(run) {
+        if (!flags.CLOUD_SYNC || !(run.page > 0)) return [];
+        const uid = run.syncUid || await owner();
+        if (!uid) return [];
+        return [{ store: 'outbox', put: { runId: run.runId, kind: 'run', uid, queuedAt: now() } }];
+    }
+
     /** Ends `run` for `reason` and tells its tab. Returns the ended run. */
     async function end(run, reason) {
         const ended = Run.finish(run, reason, now());
         cancelTimer();
         await saveRun(ended);
         try {
-            await (await db()).write([{ store: 'runs', put: durable(ended) }]);
+            // A run with saved pages sends its final header to the cloud.
+            const queued = await endEntry(ended);
+            await (await db()).write([{ store: 'runs', put: durable(ended) }, ...queued]);
         } catch (err) {
             log.warn('[ProScan] Could not record the end of the run:', err.message);
         }
@@ -212,8 +248,15 @@ function createEngine({
             const local = await chrome.storage.local.get('settings');
             const settings = (local && local.settings) || {};
             const t = now();
-            const runId = `${t}-${runSuffix(random)}`;
-            let run = Run.create({ runId, tabId, maxPages: settings.maxPages, source: Run.sourceOf(pong.url, t), now: t });
+            // One id for the run, here and in the cloud: {sourceId}_{startMs}.
+            const found = Schema.sourceOf(pong.url);
+            const sourceId = Schema.sourceIdOf(found);
+            const runId = Schema.runIdOf(sourceId, t);
+            let run = Run.create({
+                runId, tabId, maxPages: settings.maxPages, now: t,
+                source: { ...found, sourceId, startedAt: new Date(t).toISOString() }
+            });
+            run = { ...run, sourceId, dayKey: Schema.dayKeyOf(t, new Date(t).getTimezoneOffset()) };
             await saveRun(run);
             const first = [
                 { store: 'runs', put: durable(run) },
@@ -261,7 +304,7 @@ function createEngine({
         const rec = latestId ? await store.get('runs', latestId) : null;
         if (!Run.isActive(rec)) return null;
         const ended = Run.finish(rec, reason, now());
-        await store.write([{ store: 'runs', put: durable(ended) }]);
+        await store.write([{ store: 'runs', put: durable(ended) }, ...await endEntry(ended)]);
         return ended;
     }
 
@@ -320,16 +363,23 @@ function createEngine({
                 store = await db();
                 const existing = await store.runProducts(runId);
                 const { fresh, changed } = foldPage(existing, result.products, page);
-                const prevs = await store.getMany('lastValues', fresh.map(p => p.asin));
+                const snaps = await store.getMany('lastValues', fresh.map(p => p.asin));
+                const uid = await owner();
                 ops = [];
                 fresh.forEach((p, i) => {
                     p.runId = runId;
                     p.pageIndex = page;
                     p.n = existing.length + i;
-                    const prev = prevs[i] || null;
+                    const prev = prevFor(snaps[i], uid);
                     // Only an ASIN's first sighting in the run gets a delta.
                     p.delta = Delta.computeDeltas(p, prev);
-                    ops.push({ store: 'lastValues', put: { asin: p.asin, ...Delta.snapshot(p, prev) } });
+                    p.prev = prev ? {
+                        priceCents: prev.priceCents ?? null, rating: prev.rating ?? null,
+                        reviewCount: prev.reviewCount ?? null, scrapedAt: prev.scrapedAt || null, uid: prev.uid || null
+                    } : null;
+                    const snap = { asin: p.asin, ...Delta.snapshot(p, prev) };
+                    if (uid) snap.uid = uid;
+                    ops.push({ store: 'lastValues', put: snap });
                     ops.push({ store: 'products', put: p });
                 });
                 changed.forEach(p => ops.push({ store: 'products', put: p }));
@@ -337,17 +387,24 @@ function createEngine({
                     store: 'placements',
                     put: {
                         runId, pageIndex: page, count: fresh.length, placements: result.placements || 0,
-                        kind: result.kind, fill: result.fill || null, scrapedAt: new Date(t).toISOString(), url
+                        kind: result.kind, fill: result.fill || null, scrapedAt: new Date(t).toISOString(), url,
+                        total: Number.isInteger(result.total) && result.total > 0 ? result.total : null
                     }
                 });
-                if (flags.CLOUD_SYNC) ops.push({ store: 'outbox', put: { runId, pageIndex: page, queuedAt: t } });
+                const queuedPage = await outbox(runId, 'page', { pageIndex: page });
+                ops.push(...queuedPage);
 
                 next = {
                     ...run, page, itemCount: run.itemCount + fresh.length, heartbeat: t,
                     lastUrl: url, nextHref: result.nextHref || null, awaiting: false
                 };
-                if (ending) next = Run.finish(next, ending, t);
-                else next.navAt = t + Run.pageDelay(random());
+                if (queuedPage.length && !next.syncUid) next.syncUid = queuedPage[0].put.uid;
+                if (ending) {
+                    next = Run.finish(next, ending, t);
+                    ops.push(...await endEntry(next));
+                } else {
+                    next.navAt = t + Run.pageDelay(random());
+                }
                 ops.push({ store: 'runs', put: durable(next) });
                 await store.write(ops);
             } catch (err) {
@@ -415,10 +472,13 @@ function createEngine({
         }).then((out) => { tick(); return out; });
     }
 
+    /** Resolves true when this ended the run. */
     function tabRemoved(tabId) {
         return serial(async () => {
             const run = await getRun();
-            if (Run.isActive(run) && run.tabId === tabId) await end(run, 'interrupted');
+            if (!Run.isActive(run) || run.tabId !== tabId) return false;
+            await end(run, 'interrupted');
+            return true;
         });
     }
 
@@ -428,13 +488,14 @@ function createEngine({
      * the tabs permission a non-Amazon URL is hidden, which also counts.
      */
     function tabUpdated(tabId, info, tab) {
-        if (!info || info.status !== 'loading') return Promise.resolve();
+        if (!info || info.status !== 'loading') return Promise.resolve(false);
         return serial(async () => {
             const run = await getRun();
-            if (!Run.owns(run, tabId) || run.state !== 'running' || run.awaiting) return;
+            if (!Run.owns(run, tabId) || run.state !== 'running' || run.awaiting) return false;
             const url = info.url || (tab && tab.url);
-            if (url && url === run.lastUrl) return;
+            if (url && url === run.lastUrl) return false;
             await end(run, 'interrupted');
+            return true;
         });
     }
 
@@ -450,7 +511,8 @@ function createEngine({
             const latest = await store.getMeta('latestRunId');
             const rec = latest ? await store.get('runs', latest) : null;
             if (Run.isActive(rec)) {
-                await store.write([{ store: 'runs', put: durable(Run.finish(rec, reason, now())) }]);
+                const queued = await endEntry(rec);
+                await store.write([{ store: 'runs', put: durable(Run.finish(rec, reason, now())) }, ...queued]);
             }
         });
     }
@@ -515,34 +577,10 @@ function createEngine({
         };
     }
 
-    /**
-     * The sync bundle for every run in the outbox, built from the products
-     * as they are now, and the outbox keys to delete once it is written.
-     */
-    async function outboxBundle() {
-        const store = await db();
-        const entries = await store.getAll('outbox');
-        const runIds = [...new Set(entries.map(e => e.runId))];
-        const syncQueue = [];
-        const scrapeRunPages = [];
-        let scrapeRunMeta = null;
-        for (const runId of runIds) {
-            syncQueue.push(...await store.runProducts(runId));
-            scrapeRunPages.push(...await store.runPages(runId));
-            const rec = await store.get('runs', runId);
-            if (rec) scrapeRunMeta = rec.source;
-        }
-        return { bundle: { syncQueue, scrapeRunMeta, scrapeRunPages }, seqs: entries.map(e => e.seq) };
-    }
-
-    async function clearOutbox(seqs) {
-        await (await db()).write(seqs.map(seq => ({ store: 'outbox', delete: seq })));
-    }
-
     return {
         start, stop, pageReady, pageResult, heartbeat, tick, tabRemoved, tabUpdated, recover,
-        getState, getResults, spreadResult, chatData, outboxBundle, clearOutbox, db
+        getState, getResults, spreadResult, chatData, db
     };
 }
 
-module.exports = { createEngine, foldPage, durable, PAGE_TIMEOUT_MS, KEEP_RUNS };
+module.exports = { createEngine, foldPage, durable, prevFor, PAGE_TIMEOUT_MS, KEEP_RUNS };

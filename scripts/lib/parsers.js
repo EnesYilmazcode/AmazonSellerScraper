@@ -47,6 +47,7 @@ const Parsers = (() => {
         productLink: '.a-link-normal.s-no-outline',
         sponsored: '.puis-sponsored-label-text, .s-sponsored-label-text, [data-component-type="sp-sponsored-result"], a[href*="/sspa/"]',
         primeBadge: '.a-icon-prime, .s-prime',
+        image: 'img.s-image',
         nextPage: '.s-pagination-next:not(.s-pagination-disabled)',
         nextPageLink: 'a.s-pagination-next[href]:not(.s-pagination-disabled)',
         nextPageDisabled: '.s-pagination-next.s-pagination-disabled',
@@ -188,6 +189,13 @@ const Parsers = (() => {
             element.querySelector(SEARCH_SELECTORS.sponsored) !== null;
     }
 
+    /** The card's product image on Amazon's image host, or null. */
+    function extractImage(element) {
+        const img = element.querySelector(SEARCH_SELECTORS.image);
+        const src = img ? img.getAttribute('src') : null;
+        return src && /^https:\/\/(m\.media-amazon\.com|images-na\.ssl-images-amazon\.com)\//.test(src) ? src : null;
+    }
+
     /** The product page for an ASIN. Card links can be expiring sspa ad redirects. */
     function productUrl(asin) {
         return `https://www.amazon.com/dp/${asin}`;
@@ -219,6 +227,7 @@ const Parsers = (() => {
             isPrime: isPrime,
             sponsored: isSponsored(listing),
             url: productUrl(asin),
+            img: extractImage(listing),
             scrapedAt: new Date().toISOString()
         };
     }
@@ -476,6 +485,7 @@ const Parsers = (() => {
         hasPrimeBadge,
         isSponsored,
         productUrl,
+        extractImage,
         scrapeProduct,
         getTotalResults,
         getNextPageUrl,

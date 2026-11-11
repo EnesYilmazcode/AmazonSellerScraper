@@ -37,6 +37,7 @@ const Msg = (() => {
         PROSCAN_AUTH_STATE: { to: 'worker', from: 'page' },
         PROSCAN_SIGN_IN: { to: 'worker', from: 'page' },
         PROSCAN_SIGN_OUT: { to: 'worker', from: 'page' },
+        PROSCAN_RESET_PASSWORD: { to: 'worker', from: 'page' },
         PROSCAN_EXPORT: { to: 'worker', from: 'page' },
 
         // Worker or popup -> content script

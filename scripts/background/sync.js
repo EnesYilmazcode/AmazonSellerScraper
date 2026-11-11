@@ -1,187 +1,233 @@
 /**
- * @fileoverview Sync consumer — drains the durable syncQueue into the
- * signed-in user's Firestore workspace (workspaces/{uid}), converting the
- * producer's shapes to the cloud schema (proscan-web docs/architecture/
- * data-model.md §4) so every write passes firestore.rules.
+ * @fileoverview Cloud sync: drains the IndexedDB outbox into the signed-in
+ * user's workspace, one entry at a time.
  *
- * The producer (scraper.js/storage.js/delta.js) stamps each product with
- * priceCents + a delta block + runId/pageIndex and pushes it to
- * chrome.storage.local 'syncQueue'. It does NOT carry several fields the cloud
- * schema requires — this module derives them at write time:
- *   - canonical sourceId  (s_{sellerId} | k_{slug})  from scrapeRunMeta
- *   - canonical runId      ({sourceId}_{startEpochMs})
- *   - dayKey               (UTC date of run start; rules REQUIRE it as string)
- *   - mk                   ('US' — only marketplace today)
- *   - delta.pPct           (percent change; producer only has absolute cents)
- *   - ISO strings -> Firestore Timestamp
- *   - isPrime boolean -> pr 0/1
- * Money stays integer cents. Unknown numerics are OMITTED (never written as
- * null) so they never violate the rules' `is int` checks. Dashboard-owned
- * fields (lead/verdict/tags/spread) are never touched — set(merge) preserves
- * them.
+ * Each entry (one page of a run, or the end of a run) is planned by
+ * sync-plan.js, committed, and only then deleted. Entries queued while a
+ * flush runs are picked up before it returns. An entry belongs to the
+ * account that was signed in when it was queued and is never written into
+ * another account's workspace.
  *
- * Bundled into the service worker by esbuild.
+ * Every write is idempotent, so an entry that fails halfway is simply
+ * written again on the next flush.
+ *
+ * The rules can refuse one entry for good (permission-denied or
+ * invalid-argument on a document the schema allowed). That entry is marked
+ * failed and skipped, so the entries behind it still sync; a flush with
+ * `retryFailed` (Export to ProScan) tries the failed ones again. When every
+ * entry of a flush is refused, the cause is the account or the rules, not
+ * one entry, so nothing is marked and the error goes to the caller.
+ *
+ * Authored as ESM and bundled into the service worker by esbuild. The
+ * contract test runs this same file in Node against the emulators.
+ *
  * @module Sync
  */
 
 import {
-  writeBatch,
   doc,
-  serverTimestamp,
+  getDoc,
+  writeBatch,
   Timestamp,
   arrayUnion,
+  deleteField,
+  FieldPath,
 } from 'firebase/firestore';
-import { db } from './firebase-init.js';
+import { planEntry, firstSeenCandidates } from './sync-plan.js';
 
-const slugify = (s) =>
-  String(s).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-const tsOf = (iso) => Timestamp.fromDate(new Date(iso));
-const round1 = (n) => Math.round(n * 10) / 10;
-const intOrUndef = (n) =>
-  typeof n === 'number' && Number.isFinite(n) ? Math.round(n) : undefined;
+const FIRESTORE = { doc, getDoc, writeBatch, Timestamp, arrayUnion, deleteField, FieldPath };
 
-function deriveSourceId(meta) {
-  if (meta && meta.sellerId) return `s_${meta.sellerId}`;
-  if (meta && meta.keyword) return `k_${slugify(meta.keyword)}`;
-  return 'k_unknown';
-}
-
-/** Compact observation point {p,r,v,pr} — schema's history/latest shape.
- *  Omits unknown numerics so the rules' `is int` checks never see a null. */
-function pointFrom(q) {
-  const pt = {
-    p: intOrUndef(q.priceCents),
-    r: typeof q.rating === 'number' && q.rating > 0 ? round1(q.rating) : undefined,
-    v: typeof q.reviewCount === 'number' && q.reviewCount > 0 ? Math.round(q.reviewCount) : undefined,
-    pr: q.isPrime ? 1 : 0,
-  };
-  Object.keys(pt).forEach((k) => pt[k] === undefined && delete pt[k]);
-  return pt;
-}
-
-/** Convert the producer delta {dPriceCents,dRating,dReviews} → schema
- *  {p,pPct,r,v}. Returns undefined for first-sight / empty deltas. */
-function deltaBlock(q) {
-  const d = q.delta;
-  if (!d || d.isNew) return undefined;
-  const out = {};
-  if (typeof d.dPriceCents === 'number') {
-    out.p = Math.round(d.dPriceCents);
-    const prev = typeof q.priceCents === 'number' ? q.priceCents - d.dPriceCents : null;
-    if (prev && prev !== 0) out.pPct = round1((d.dPriceCents / prev) * 100);
-  }
-  if (typeof d.dRating === 'number') out.r = round1(d.dRating);
-  if (typeof d.dReviews === 'number') out.v = Math.round(d.dReviews);
-  return Object.keys(out).length ? out : undefined;
-}
+/** Firestore allows 500 writes per batch; stay under it. */
+export const BATCH_LIMIT = 450;
 
 /**
- * Drain the queue into workspaces/{uid}. Idempotent: every write is
- * set(merge) of absolute values + one arrayUnion, so a retried export
- * rewrites byte-identical docs.
- *
- * @param {string} uid  signed-in user's uid (== workspace id)
- * @param {{syncQueue?: object[], scrapeRunMeta?: object, scrapeRunPages?: object[]}} bundle
- * @returns {Promise<{written: number, runId: string|null, products: number}>}
+ * Errors that mean the account's session is gone, not the network. A
+ * permission-denied is the rules refusing a document, not a lost session.
  */
-export async function syncToCloud(uid, bundle) {
-  const queue = (bundle && bundle.syncQueue) || [];
-  if (!queue.length) return { written: 0, runId: null, products: 0 };
+const AUTH_CODES = ['unauthenticated', 'auth/user-token-expired', 'auth/user-disabled', 'auth/invalid-user-token'];
 
-  const meta = (bundle && bundle.scrapeRunMeta) || {};
-  const sourceId = deriveSourceId(meta);
-  const startMs = meta.startedAt ? Date.parse(meta.startedAt) : Date.now();
-  const runId = `${sourceId}_${startMs}`;
-  const dayKey = new Date(startMs).toISOString().slice(0, 10);
-  const mk = 'US';
+export function isAuthError(err) {
+  return !!err && AUTH_CODES.includes(err.code);
+}
 
-  // ── products + history, chunked under the 500-writes/batch limit ──
-  const CHUNK = 200; // 2 writes per product → 400 writes/batch
-  let products = 0;
-  for (let i = 0; i < queue.length; i += CHUNK) {
-    const batch = writeBatch(db);
-    for (const q of queue.slice(i, i + CHUNK)) {
-      if (!q || !q.asin) continue;
-      const at = q.scrapedAt ? tsOf(q.scrapedAt) : serverTimestamp();
+/** The rules or the backend refused this write for good; a retry would fail the same way. */
+const REFUSAL_CODES = ['permission-denied', 'invalid-argument'];
 
-      const payload = {
-        asin: q.asin, // rules: doc id must equal this
-        mk,
-        url: `https://www.amazon.com/dp/${q.asin}`,
-        latest: { ...pointFrom(q), at, runId, dayKey }, // rules require latest.dayKey:string
-        sourceIds: arrayUnion(sourceId),
-      };
-      if (typeof q.name === 'string' && q.name) payload.name = q.name;
-      const d = deltaBlock(q);
-      if (d) payload.delta = d;
-      if (q.delta && q.delta.isNew) {
-        // immutable first-sight stamps — only on first sight, else merge would clobber
-        payload.firstSeenAt = at;
-        payload.firstRunId = runId;
-      }
-      batch.set(doc(db, 'workspaces', uid, 'products', q.asin), payload, { merge: true });
+export function isRefusal(err) {
+  return !!err && REFUSAL_CODES.includes(err.code);
+}
 
-      // date-keyed history point (deep-merges into the d-map)
-      batch.set(
-        doc(db, 'workspaces', uid, 'products', q.asin, 'history', 'daily'),
-        { asin: q.asin, d: { [dayKey]: pointFrom(q) } },
-        { merge: true },
-      );
-      products++;
-    }
-    await batch.commit();
+const EMPTY = () => ({ entries: 0, pages: 0, runs: 0, products: 0, writes: 0, failed: 0 });
+
+/**
+ * @param {Object} deps
+ * @param {Object} deps.db - the Firestore instance
+ * @param {function(): Promise<Object>} deps.openStore - resolves to the db.js api
+ * @param {Object} [deps.fs] - firebase/firestore functions, for tests
+ * @param {function(Object): Promise<void>} [deps.onBatch] - called before each commit, for tests
+ */
+export function createSync({ db, openStore, fs = FIRESTORE, batchLimit = BATCH_LIMIT, onBatch = null, log = console }) {
+  let running = null;
+  let again = false;
+
+  const ref = (path) => fs.doc(db, ...path);
+  const time = (ms) => fs.Timestamp.fromMillis(ms);
+  // Product writes need field deletes; without them every page would fail planning and be dropped.
+  if (typeof fs.deleteField !== 'function') throw new Error('createSync: fs.deleteField is missing');
+  const union = (vals) => fs.arrayUnion(...vals);
+  const del = () => fs.deleteField();
+  const field = (f) => (Array.isArray(f) ? new fs.FieldPath(...f) : f);
+
+  /** Entries queued for `uid`, oldest first; failed ones only when `failed` is true. */
+  async function mine(store, uid, { failed = false } = {}) {
+    const all = await store.getAll('outbox');
+    return all
+      .filter((e) => e.uid === uid && (e.kind === 'page' || e.kind === 'run') && !!e.failed === failed)
+      .sort((a, b) => a.seq - b.seq);
   }
 
-  // ── run header + source spine (once per drain) ──
-  const head = writeBatch(db);
-  head.set(
-    doc(db, 'workspaces', uid, 'runs', runId),
-    {
-      runId,
-      sourceId, // rules require string
-      source: {
-        type: meta.type || 'keyword',
-        sellerId: meta.sellerId ?? null,
-        keyword: meta.keyword ?? null,
-        url: meta.url ?? null,
-      },
-      mk,
-      dayKey, // rules require string
-      startedAt: meta.startedAt ? tsOf(meta.startedAt) : serverTimestamp(),
-      finishedAt: serverTimestamp(),
-      status: 'complete', // rules enum
-      pagesDone: bundle.scrapeRunPages ? bundle.scrapeRunPages.length : null,
-      pagesPlanned: bundle.scrapeRunPages ? bundle.scrapeRunPages.length : null,
-      counters: {
-        // Each queued product is one ASIN; its placements list every card it had
-        placements: queue.reduce((n, q) => n + (Array.isArray(q.placements) ? q.placements.length : 1), 0),
-        uniqueAsins: new Set(queue.map((q) => q.asin)).size,
-        sponsored: queue.reduce(
-          (n, q) => n + (Array.isArray(q.placements) ? q.placements.filter((pl) => pl.sponsored).length : q.sponsored ? 1 : 0),
-          0,
-        ),
-        priceParseFailures: queue.filter((q) => q.priceCents == null).length,
-        newSeen: queue.filter((q) => q.delta && q.delta.isNew).length,
-      },
-    },
-    { merge: true },
-  );
-  head.set(
-    doc(db, 'workspaces', uid, 'sources', sourceId),
-    {
-      sourceId,
-      type: meta.type === 'storefront' ? 'storefront' : 'keyword', // rules enum
-      sellerId: meta.sellerId ?? null,
-      keyword: meta.keyword ?? null,
-      url: meta.url ?? null,
-      lastRunId: runId,
-      lastScrapedAt: meta.startedAt ? tsOf(meta.startedAt) : serverTimestamp(),
-      // cadenceDays intentionally omitted — rules default it; never stomp a
-      // dashboard-set cadence on re-scan.
-    },
-    { merge: true },
-  );
-  await head.commit();
+  /** Product documents among `asins` that do not exist yet. */
+  async function missingOf(uid, asins) {
+    const missing = new Set();
+    for (let i = 0; i < asins.length; i += 25) {
+      const part = asins.slice(i, i + 25);
+      const snaps = await Promise.all(part.map((a) => fs.getDoc(ref(['workspaces', uid, 'products', a]))));
+      snaps.forEach((snap, j) => { if (!snap.exists()) missing.add(part[j]); });
+    }
+    return missing;
+  }
 
-  return { written: products * 2 + 2, runId, products };
+  /**
+   * Writes one entry, with the run header and source when `header` is true.
+   * Returns how many writes it took, or null if it had nothing to write.
+   */
+  async function commitEntry(store, entry, header) {
+    const run = await store.get('runs', entry.runId);
+    if (!run) return null;
+    const [products, pages] = await Promise.all([store.runProducts(entry.runId), store.runPages(entry.runId)]);
+    const missing = await missingOf(entry.uid, firstSeenCandidates(entry, products));
+    let writes;
+    try {
+      writes = planEntry({ entry, run, products, pages, missing, time, union, del, header });
+    } catch (err) {
+      // Planning is pure, so a retry would fail the same way and hold up the queue.
+      log.warn('[ProScan] Dropped an outbox entry that cannot be written:', err.message);
+      return null;
+    }
+
+    for (let i = 0; i < writes.length; i += batchLimit) {
+      const batch = fs.writeBatch(db);
+      for (const w of writes.slice(i, i + batchLimit)) {
+        if (w.merge) batch.set(ref(w.path), w.data, { merge: true });
+        else if (w.fields) batch.set(ref(w.path), w.data, { mergeFields: w.fields.map(field) });
+        else batch.set(ref(w.path), w.data);
+      }
+      if (onBatch) await onBatch({ entry, writes: Math.min(batchLimit, writes.length - i) });
+      await batch.commit();
+    }
+    return { writes: writes.length, products: products.filter((p) => (p.placements || []).some((pl) => pl.page === entry.pageIndex)).length };
+  }
+
+  async function drain(uid, state) {
+    const store = await openStore();
+    const totals = EMPTY();
+    const runs = new Set();
+    // New entries can arrive while we write; keep going until none are left.
+    for (let round = 0; round < 1000; round++) {
+      const entries = await mine(store, uid);
+      if (entries.length === 0) break;
+      // The header and source go with each run's last entry in this round.
+      const lastOf = new Map(entries.map((e, i) => [e.runId, i]));
+      const refused = [];
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        let done;
+        try {
+          done = await commitEntry(store, entry, lastOf.get(entry.runId) === i);
+        } catch (err) {
+          if (!isRefusal(err)) throw err;
+          refused.push({ entry, err });
+          continue;
+        }
+        state.through = true;
+        await store.write([{ store: 'outbox', delete: entry.seq }]);
+        totals.entries++;
+        if (!done) continue;
+        runs.add(entry.runId);
+        totals.writes += done.writes;
+        if (entry.kind === 'page') {
+          totals.pages++;
+          totals.products += done.products;
+        }
+      }
+      if (refused.length === 0) continue;
+      // Entries refused before stay failed. For the others, nothing getting
+      // through at all points at the account or the rules, not these entries.
+      const before = refused.filter(({ entry }) => state.retried.has(entry.seq));
+      const fresh = refused.filter(({ entry }) => !state.retried.has(entry.seq));
+      const mark = state.through ? refused : before;
+      if (mark.length) {
+        await store.write(mark.map(({ entry, err }) => ({
+          store: 'outbox', put: { ...entry, failed: { code: err.code, at: Date.now() } },
+        })));
+      }
+      if (!state.through && fresh.length) throw fresh[0].err;
+      totals.failed += mark.length;
+      log.warn(`[ProScan] The rules refused ${refused.length} outbox entr${refused.length === 1 ? 'y' : 'ies'}; the rest go on.`);
+    }
+    totals.runs = runs.size;
+    return totals;
+  }
+
+  /** Puts `uid`'s failed entries back in line. */
+  async function unfail(uid) {
+    const store = await openStore();
+    const failed = await mine(store, uid, { failed: true });
+    if (failed.length) await store.write(failed.map(({ failed: _f, ...entry }) => ({ store: 'outbox', put: entry })));
+    return new Set(failed.map((e) => e.seq));
+  }
+
+  /**
+   * Writes everything queued for `uid`. One flush at a time; a call during
+   * a flush makes it look again once more before it resolves.
+   *
+   * @param {string} uid
+   * @param {{retryFailed?: boolean}} [opts] - also try entries the rules refused before
+   * @returns {Promise<{entries:number, pages:number, runs:number, products:number, writes:number, failed:number}>}
+   */
+  function flush(uid, { retryFailed = false } = {}) {
+    if (!uid) return Promise.resolve(EMPTY());
+    if (running) {
+      again = true;
+      return running;
+    }
+    running = (async () => {
+      const totals = EMPTY();
+      const state = { through: false, retried: retryFailed ? await unfail(uid) : new Set() };
+      do {
+        again = false;
+        const t = await drain(uid, state);
+        for (const k of Object.keys(totals)) totals[k] += t[k];
+      } while (again);
+      return totals;
+    })().catch((err) => {
+      log.warn('[ProScan] Sync stopped:', err && (err.code || err.message));
+      throw err;
+    }).finally(() => { running = null; });
+    return running;
+  }
+
+  /** How many entries are waiting for `uid`, not counting failed ones. */
+  async function pending(uid) {
+    if (!uid) return 0;
+    return (await mine(await openStore(), uid)).length;
+  }
+
+  /** How many of `uid`'s entries the rules refused. */
+  async function failedCount(uid) {
+    if (!uid) return 0;
+    return (await mine(await openStore(), uid, { failed: true })).length;
+  }
+
+  return { flush, pending, failed: failedCount };
 }

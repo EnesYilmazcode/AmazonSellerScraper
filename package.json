@@ -10,6 +10,7 @@
     "test:integration": "jest tests/integration --verbose",
     "test:tools": "node --test --test-concurrency=1 \"tools/tests/*.test.mjs\"",
     "test:e2e": "playwright test",
+    "test:contract": "node tools/contract.mjs",
     "test:coverage": "jest --coverage",
     "lock": "node tools/permission-lock.mjs && node tools/version-gate.mjs",
     "scan:secrets": "node tools/secret-scan.mjs",
