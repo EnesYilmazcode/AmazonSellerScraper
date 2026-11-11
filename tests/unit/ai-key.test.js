@@ -23,7 +23,8 @@ beforeEach(() => {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 test('the popup has the key field the error text points to', () => {
-    expect(document.getElementById('aiSettings').textContent).toMatch(/AI chat settings/);
+    expect(document.getElementById('aiSettings').textContent).toMatch(/Gemini key/);
+    expect(document.querySelector('#aiSettings a[href="https://aistudio.google.com/apikey"]').textContent).toBe('Get a free key');
     expect(document.getElementById('geminiKeyInput').type).toBe('password');
     expect(html).toMatch(/<script src="ai-key.js"><\/script>/);
 });
