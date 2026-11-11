@@ -493,11 +493,15 @@ function createEngine({
                 run = { ...run, awaiting: true, expectUrl: run.nextHref, navigatedAt: t, navAt: null };
                 await saveRun(run);
                 log.log(`[ProScan] Navigating to next page: ${run.expectUrl}`);
-                try {
-                    await chrome.tabs.update(run.tabId, { url: run.expectUrl });
-                } catch (err) {
-                    await end(run, 'interrupted');
-                    return;
+                // The page follows the link itself; the tab URL is the fallback.
+                const went = await sendToTab(run.tabId, { type: Msg.T.GO_NEXT, url: run.expectUrl });
+                if (!went || !went.ok) {
+                    try {
+                        await chrome.tabs.update(run.tabId, { url: run.expectUrl });
+                    } catch (err) {
+                        await end(run, 'interrupted');
+                        return;
+                    }
                 }
                 // If the page never reports, ask it again.
                 schedule(PAGE_TIMEOUT_MS + 1000);

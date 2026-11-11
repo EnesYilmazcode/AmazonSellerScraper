@@ -52,6 +52,7 @@ const Msg = (() => {
         // Worker or popup -> content script
         PING: { to: 'tab' },
         PARSE_PAGE: { to: 'tab' },
+        GO_NEXT: { to: 'tab' },
         RUN_ENDED: { to: 'tab' },
         RUN_PROGRESS: { to: 'tab' },
         START_SPREAD_ANALYSIS: { to: 'tab' },

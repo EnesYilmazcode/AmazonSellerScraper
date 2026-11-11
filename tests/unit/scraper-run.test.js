@@ -183,3 +183,12 @@ test('after the extension is updated under the page it goes quiet (alive guard)'
   expect(listener({ type: 'PING' }, {}, respond)).toBe(false);
   expect(respond).not.toHaveBeenCalled();
 });
+
+test('GO_NEXT follows an Amazon link from the page and refuses any other site', async () => {
+  replies.PAGE_READY = { idle: true };
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  const ask = (url) => new Promise((resolve) => listener({ type: 'GO_NEXT', url }, { id: 'test-extension' }, resolve));
+  await expect(ask('/s?k=widget&page=2')).resolves.toEqual({ ok: true });
+  await expect(ask('https://evil.example/s?k=widget')).resolves.toEqual({ ok: false });
+});

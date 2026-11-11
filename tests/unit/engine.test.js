@@ -87,6 +87,24 @@ describe('a run', () => {
     expect(st.run.source).toMatchObject({ type: 'keyword', keyword: 'hose' });
   });
 
+  test('the page opens the next page itself, so Amazon sees a click, not a typed URL', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    await startIn(rig, 'hose');
+    await runUntilEnd(rig);
+    expect(served(rig, 'hose')).toEqual([1, 2, 3]);
+    expect(rig.tabUpdates).toEqual([]);
+  });
+
+  test('a page that does not answer GO_NEXT is moved with the tab URL instead', async () => {
+    const rig = createRig({ site: simpleSite(3) });
+    const { tab } = await startIn(rig, 'hose');
+    rig.ignoreGoNext(tab);
+    const run = await runUntilEnd(rig);
+    expect(served(rig, 'hose')).toEqual([1, 2, 3]);
+    expect(rig.tabUpdates).toHaveLength(2);
+    expect(run).toMatchObject({ reason: 'complete' });
+  });
+
   test('waits 2 to 4 seconds between pages', async () => {
     const rig = createRig({ site: simpleSite(3), random: () => 0.5 });
     await startIn(rig, 'wait');
