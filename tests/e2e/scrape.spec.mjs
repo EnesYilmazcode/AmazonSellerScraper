@@ -84,19 +84,26 @@ test('real markup: Chromium scrapes the saved yoga mat page like the parser does
   expect(page1.filter((r) => /\/sspa\//.test(r.url))).toEqual([]);
 });
 
-test('a captcha at page 2 ends the run as blocked', async ({ ext }) => {
+test('a captcha at page 2 waits for the user, then the run goes on from that page', async ({ ext }) => {
+  let solved = false;
   const served = await serveAmazon(ext.context, ({ keyword, page }) =>
-    page === 2 ? { body: CAPTCHA() } : { body: searchPage(keyword, page, { last: page >= 4 }) });
+    page === 2 && !solved ? { body: CAPTCHA() } : { body: searchPage(keyword, page, { last: page >= 3 }) });
   const tab = await openSearch(ext, 'usb cable');
   const store = await extPage(ext);
   await clickStart(ext, tab);
-  const s = await waitForState(store, (x) => !x.isScrapingActive && x.scrapeRunPages?.length >= 1, { timeout: 30000 });
-  await sleep(2500);
+  await waitForState(store, () => pagesOf(served, 'usb cable').length >= 2, { timeout: 30000 });
+  await sleep(4000);
+  const waiting = await getState(store);
+  expect(waiting.isScrapingActive).toBe(true);
+  expect(waiting.results.map((r) => r.asin)).toEqual(allAsins('usb cable', [1]));
 
-  expect(pagesOf(served, 'usb cable')).toEqual([1, 2]);
-  expect(s.results.map((r) => r.asin)).toEqual(allAsins('usb cable', [1]));
-
-  expect(endReason(s)).toBe('blocked');
+  // The user ticks the box; Amazon loads page 2 again.
+  solved = true;
+  await tab.reload();
+  const s = await waitForState(store, ended, { timeout: 60000 });
+  expect(pagesOf(served, 'usb cable')).toEqual([1, 2, 2, 3]);
+  expect(s.results.map((r) => r.asin)).toEqual(allAsins('usb cable', [1, 2, 3]));
+  expect(endReason(s)).toBe('complete');
 });
 
 test('duplicates across pages are stored once', async ({ ext }) => {

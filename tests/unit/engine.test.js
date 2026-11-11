@@ -105,32 +105,47 @@ describe('a run', () => {
     expect(run).toMatchObject({ reason: 'complete' });
   });
 
-  test('waits 2 to 4 seconds between pages', async () => {
+  test('waits 5 to 9 seconds between pages', async () => {
     const rig = createRig({ site: simpleSite(3), random: () => 0.5 });
     await startIn(rig, 'wait');
-    await settle(2500);
+    await settle(6500);
     expect(served(rig, 'wait')).toEqual([1]);
     await settle(1000);
     expect(served(rig, 'wait')).toEqual([1, 2]);
   });
 
-  test('a captcha at page 2 ends the run as blocked', async () => {
+  test('a captcha at page 2 waits for the user, and ends as blocked if nobody solves it', async () => {
     const rig = createRig({ site: simpleSite(4, { captchaAt: 2 }) });
     await startIn(rig, 'usb');
-    const run = await runUntilEnd(rig);
-    await settle(5000);
-
+    await settle(15000);
     expect(served(rig, 'usb')).toEqual([1, 2]);
+    expect(await rig.run()).toMatchObject({ state: 'running', page: 1 });
+    expect((await rig.run()).checkAt).toEqual(expect.any(Number));
+    const run = await runUntilEnd(rig, Run.CHECK_WAIT_MS + 60000);
     expect(run).toMatchObject({ state: 'blocked', reason: 'blocked' });
     expect((await results(rig)).map((r) => r.asin)).toEqual([0, 1, 2, 3].map((i) => asinFor('usb', 1, i)));
   });
 
-  test('page 2 sent to the Amazon /checkpoint bot check ends the run as blocked, not interrupted', async () => {
-    const base = simpleSite(4);
+  test('a captcha solved in the tab lets the run go on from that page', async () => {
+    let solved = false;
+    const base = simpleSite(3);
+    const rig = createRig({ site: (url) => (pageNo(url) === 2 && !solved ? CAPTCHA : base(url)) });
+    const { tab } = await startIn(rig, 'solve');
+    await settle(15000);
+    expect((await rig.run()).checkAt).toEqual(expect.any(Number));
+    solved = true;
+    rig.goTo(tab, 'https://www.amazon.com/s?k=solve&page=2');
+    const run = await runUntilEnd(rig, 60000);
+    expect(run).toMatchObject({ reason: 'complete', page: 3, itemCount: 12 });
+  });
+
+  test('page 2 sent to the Amazon /checkpoint waits, then goes on once the box is ticked', async () => {
+    const base = simpleSite(3);
     const CHECK = 'https://www.amazon.com/checkpoint/continue?token=t';
+    let held = true;
     const site = (url) => {
       if (url.startsWith('https://www.amazon.com/checkpoint/')) return page('<p>Check the box to continue.</p><label><input type="checkbox"> I am human</label>', null);
-      return pageNo(url) === 2 ? null : base(url);
+      return pageNo(url) === 2 && held ? null : base(url);
     };
     const rig = createRig({ site });
     const { tab } = await startIn(rig, 'chk');
@@ -140,9 +155,16 @@ describe('a run', () => {
       await settle(500);
     }
     rig.goTo(tab, CHECK);
-    const run = await runUntilEnd(rig);
-    expect(run).toMatchObject({ reason: 'blocked' });
-    expect((await results(rig)).map((r) => r.asin)).toEqual([0, 1, 2, 3].map((i) => asinFor('chk', 1, i)));
+    await settle(120000);
+    const waiting = await rig.run();
+    expect(waiting).toMatchObject({ state: 'running', page: 1 });
+    expect(waiting.checkAt).toEqual(expect.any(Number));
+    const st = await rig.tab(tab, { type: 'RUN_STATUS' }).catch(() => null);
+    if (st && st.run) expect(st.run.waitingCheck).toBe(true);
+    held = false;
+    rig.goTo(tab, 'https://www.amazon.com/s?k=chk&page=2');
+    const run = await runUntilEnd(rig, 60000);
+    expect(run).toMatchObject({ reason: 'complete', page: 3, itemCount: 12 });
   });
 
   test('the page cap in settings ends the run on that page', async () => {
@@ -368,7 +390,7 @@ describe('a page that never reports', () => {
     await startIn(rig, 'lost');
     await settle();
     rig.drop('PAGE_READY');
-    await settle(4000);
+    await settle(9500);
     expect(served(rig, 'lost')).toEqual([1, 2]);
     expect((await rig.run()).page).toBe(1);
     rig.drop();
@@ -382,7 +404,7 @@ describe('a page that never reports, continued', () => {
     const site = simpleSite(3);
     const rig = createRig({ site: (url) => (pageNo(url) === 2 ? null : site(url)) });
     await startIn(rig, 'away');
-    await settle(4000);
+    await settle(9500);
     expect(served(rig, 'away')).toEqual([1, 2]);
     rig.goTo((await rig.run()).tabId, 'https://example.com/');
     const run = await runUntilEnd(rig, 60000);
@@ -394,7 +416,7 @@ describe('a page that never reports, continued', () => {
     let slow = true;
     const rig = createRig({ site: (url) => (pageNo(url) === 2 && slow ? null : site(url)) });
     const { tab } = await startIn(rig, 'slowly');
-    await settle(4000);
+    await settle(9500);
     await settle(25000);
     expect(await rig.run()).toMatchObject({ state: 'running', awaiting: true });
     slow = false;
