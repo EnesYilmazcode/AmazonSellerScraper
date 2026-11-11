@@ -1,5 +1,5 @@
 /**
- * @fileoverview "AI chat settings" in the popup: the user's own Gemini key.
+ * @fileoverview The "Gemini key" setting in the popup: the user's own key.
  *
  * The key is kept in chrome.storage.local under geminiApiKey. Only the
  * popup writes it and only the service worker reads it; the chat widget on
@@ -41,15 +41,15 @@ const AiKey = (() => {
         if (!input || !saveBtn || !clearBtn || !status) return Promise.resolve();
 
         const show = (set, message) => {
-            status.textContent = message || (set ? 'Key saved. The chat button on Amazon is ready.' : 'No key set. AI chat is off.');
-            input.placeholder = set ? 'Key saved (hidden). Paste a new one to replace it.' : 'Paste your Gemini API key';
+            status.textContent = message || '';
+            input.placeholder = set ? 'Paste a new key to replace it' : 'Paste your Gemini API key';
             clearBtn.classList.toggle('hidden', !set);
         };
 
         saveBtn.addEventListener('click', async () => {
             if (await save(input.value)) {
                 input.value = '';
-                show(true);
+                show(true, 'Key saved.');
             } else {
                 show(await hasKey(), 'That does not look like a Gemini API key.');
             }

@@ -86,3 +86,12 @@ test('safe new keys such as minimum_chrome_version pass', () => {
   m.version_name = '2.1 beta';
   assert.deepEqual(checkPermissionLock(m, live), []);
 });
+
+test('externally_connectable passes only as the reviewed ProScan-site value', () => {
+  const ok = clone();
+  ok.externally_connectable = { matches: ['https://proscanbot.web.app/*', 'https://proscanbot.firebaseapp.com/*'] };
+  assert.deepEqual(checkPermissionLock(ok, live), []);
+  const wide = clone();
+  wide.externally_connectable = { matches: ['https://*/*'] };
+  assert.deepEqual(checkPermissionLock(wide, live), ['new manifest key "externally_connectable"']);
+});

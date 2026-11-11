@@ -433,6 +433,27 @@ const Exporter = {
     },
 
     /**
+     * The file for `format` (xlsx, csv or json), with the spread columns
+     * when the run has spread data. The popup and the service worker both
+     * make files here.
+     *
+     * @param {string} format
+     * @param {Object[]} results
+     * @param {Object} [spread=null] - ASIN to offers, from spread analysis
+     * @returns {{blob: Blob, filename: string}}
+     */
+    build(format, results, spread = null) {
+        const withSpread = spread && Object.keys(spread).length > 0 ? spread : null;
+        if (format === 'xlsx') {
+            const report = typeof Analyzer !== 'undefined' ? Analyzer.generateFullReport(results) : null;
+            return this.exportToExcel(results, report);
+        }
+        if (format === 'csv') return this.exportToCSV(results, withSpread);
+        if (format === 'json') return this.exportToJSON(results, true);
+        throw new Error(`unknown export format: ${format}`);
+    },
+
+    /**
      * Trigger a file download using the Chrome Downloads API.
      * Opens a save-as dialog and cleans up the object URL after download.
      *

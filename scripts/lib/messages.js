@@ -25,6 +25,15 @@ const Msg = (() => {
         PAGE_RESULT: { to: 'worker', from: 'tab' },
         HEARTBEAT: { to: 'worker', from: 'tab' },
 
+        // The dock on the page -> worker. The run is always bound to the
+        // sender's own tab (sender.tab.id), never to a tab id in the message.
+        START_RUN_HERE: { to: 'worker', from: 'tab' },
+        STOP_RUN_HERE: { to: 'worker', from: 'tab' },
+        RUN_STATUS: { to: 'worker', from: 'tab' },
+        SAVE_SETTINGS: { to: 'worker', from: 'tab' },
+        DOWNLOAD: { to: 'worker', from: 'tab' },
+        OPEN_SETTINGS: { to: 'worker', from: 'tab' },
+
         // Spread analysis in the tab
         GET_RESULTS: { to: 'worker', from: 'any' },
         SPREAD_RESULT: { to: 'worker', from: 'tab' },
@@ -44,6 +53,7 @@ const Msg = (() => {
         PING: { to: 'tab' },
         PARSE_PAGE: { to: 'tab' },
         RUN_ENDED: { to: 'tab' },
+        RUN_PROGRESS: { to: 'tab' },
         START_SPREAD_ANALYSIS: { to: 'tab' },
         STOP_SPREAD_ANALYSIS: { to: 'tab' },
 

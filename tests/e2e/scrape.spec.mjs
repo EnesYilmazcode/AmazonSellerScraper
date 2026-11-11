@@ -280,11 +280,17 @@ test('with cloud sync off, the popup shows no sign-in and no Export to ProScan',
 test('with cloud sync on, sign-in is folded away and offers sign-up and a password reset', async ({ ext }) => {
   test.skip(!Flags.CLOUD_SYNC, 'cloud sync is off in this build');
   const popup = await extPage(ext);
-  await expect(popup.locator('#actionButton')).toBeVisible();
+  // No Amazon tab here, so the popup shows no Scrape button.
+  await expect(popup.locator('#actionButton')).toBeHidden();
   await expect(popup.locator('#authPanel')).toBeVisible();
   await expect(popup.locator('#authForm')).toBeHidden();
   await popup.click('#authPanel summary');
   await expect(popup.locator('#authForm')).toBeVisible();
+  // Google first; email and password sit behind one quiet link.
+  await expect(popup.locator('#authGoogleBtn')).toBeVisible();
+  await expect(popup.locator('#authEmail')).toBeHidden();
+  await popup.click('#authEmailToggle');
+  await expect(popup.locator('#authEmail')).toBeVisible();
   await expect(popup.locator('#authSignUpLink')).toHaveAttribute('href', /^https:\/\/proscanbot\.web\.app\/dashboard\//);
   await expect(popup.locator('#authResetBtn')).toBeVisible();
   await expect(popup.locator('#exportToProScanBtn')).toBeHidden();
@@ -344,19 +350,22 @@ test('the page cap in settings ends the run as complete', async ({ ext }) => {
   expect(endReason(s)).toBe('complete');
 });
 
-test('Start on a captcha page changes nothing and says why', async ({ ext }) => {
+test('a captcha page offers no Scrape, says why and changes nothing', async ({ ext }) => {
   await serveAmazon(ext.context, () => ({ body: CAPTCHA() }));
   const store = await extPage(ext);
   await seedRun(store, [{ asin: 'B0KEEP0001', name: 'kept' }]);
   const tab = await openSearch(ext, 'robot');
-  const popup = await clickStart(ext, tab);
-  await sleep(1000);
+  const popup = await ext.context.newPage();
+  await popup.goto(`chrome-extension://${ext.extId}/popup/popup.html`);
+  await aimPopupAt(popup, tab);
+  await expect(popup.locator('#hereTitle')).toHaveText('Nothing to scrape yet');
+  await expect(popup.locator('#hereSub')).toContainText(/captcha/i);
+  await expect(popup.locator('#actionButton')).toBeHidden();
   const s = await getState(store);
 
   expect(s.results.map((r) => r.asin)).toEqual(['B0KEEP0001']);
   expect(s.run.runId).toBe('seeded');
   expect(s.isScrapingActive).toBeFalsy();
-  expect(await popup.textContent('#status')).toMatch(/captcha/);
 });
 
 test('Start on a tab left over from an update offers a reload, then runs', async ({ ext }) => {

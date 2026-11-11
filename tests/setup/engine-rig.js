@@ -73,6 +73,7 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
     tabs: {
       sendMessage(tabId, message, opts, cb) {
         const tab = tabs.get(tabId);
+        if (tab) (tab.inbox = tab.inbox || []).push(message);
         setImmediate(() => {
           if (!tab || !tab.listener) return withError('Could not establish connection. Receiving end does not exist.', () => cb());
           let answered = false;
@@ -113,6 +114,10 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
     router.on('HEARTBEAT', (m, s) => engine.heartbeat(m, s));
     router.on('GET_RESULTS', () => engine.getResults());
     router.on('SPREAD_RESULT', (m) => engine.spreadResult(m));
+    router.on('START_RUN_HERE', (m, s) => engine.startHere(m, s));
+    router.on('STOP_RUN_HERE', () => engine.stop());
+    router.on('RUN_STATUS', (m, s) => engine.status(s));
+    router.on('SAVE_SETTINGS', (m) => engine.saveSettings(m));
     worker = { engine, router, timers };
     return worker;
   }
@@ -185,6 +190,12 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
     /** Messages of these types from tabs are lost, as when the worker is not up. */
     drop(...types) { dropped.clear(); types.forEach((t) => dropped.add(t)); },
     tabCtx: (id) => tabs.get(id).ctx,
+    /** A content script message to the worker from tab `tabId`, as a promise. */
+    tab(tabId, message) {
+      return new Promise((resolve) => fromTab(tabId, message, (r) => resolve(r === undefined ? null : r)));
+    },
+    /** Messages the worker sent to tab `tabId` that the page did not handle. */
+    toTab: (tabId) => (tabs.get(tabId) && tabs.get(tabId).inbox) || [],
     /** A popup message to the worker. */
     popup(message) {
       return new Promise((resolve) => {

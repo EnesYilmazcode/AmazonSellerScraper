@@ -136,15 +136,23 @@ export async function clickStart(ext, tab) {
   return popup;
 }
 
+// A real popup opens on the tab it was clicked from, so it reads that tab
+// at load. Patch tabs.query before any popup script runs, then reload.
 export async function aimPopupAt(popup, tab) {
   const url = tab.url();
-  await popup.evaluate((target) => {
+  // Init scripts pile up across calls, so the last target wins and the patch goes in once.
+  await popup.addInitScript((target) => {
+    window.__aim = target;
+    if (window.__aimed) return;
+    window.__aimed = true;
     const orig = chrome.tabs.query.bind(chrome.tabs);
     chrome.tabs.query = (q, cb) => orig({}, (tabs) => {
-      const hit = tabs.filter((t) => t.url === target);
+      const hit = tabs.filter((t) => t.url === window.__aim);
       return cb ? cb(hit) : hit;
     });
   }, url);
+  await popup.reload();
+  await popup.waitForLoadState('domcontentloaded');
 }
 
 /** Polls until fn(state) is truthy or the timeout passes; returns the last state. */

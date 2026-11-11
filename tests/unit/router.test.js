@@ -81,3 +81,16 @@ test('the popup open in a tab is still a page, not a content script', async () =
   expect(await call(r, { type: 'PAGE_READY' }, popupTab)).toBe('no answer');
   expect(await call(r, { type: 'PAGE_READY' }, { id: 'ext', tab: { id: 9 }, url: 'https://www.amazon.com/s?k=a' })).toEqual({ idle: true });
 });
+
+test('the dock messages come from a tab only, never from a page or another extension', async () => {
+  const r = createRouter({ extensionId: 'ext', log: quiet });
+  const types = ['START_RUN_HERE', 'STOP_RUN_HERE', 'RUN_STATUS', 'SAVE_SETTINGS', 'DOWNLOAD', 'OPEN_SETTINGS'];
+  const h = jest.fn(() => ({ ok: true }));
+  types.forEach((t) => r.on(t, h));
+  for (const t of types) {
+    expect(await call(r, { type: t }, PAGE)).toBe('no answer');
+    expect(await call(r, { type: t }, { id: 'other', tab: { id: 1 } })).toBe('no answer');
+    expect(await call(r, { type: t }, TAB)).toEqual({ ok: true });
+  }
+  expect(h).toHaveBeenCalledTimes(types.length);
+});

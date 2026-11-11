@@ -1,7 +1,10 @@
 import { auth, db as firestore } from './firebase-init.js';
+import { USE_EMULATOR } from './firebase-config.js';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithCredential,
+  GoogleAuthProvider,
   sendPasswordResetEmail,
   signOut,
 } from 'firebase/auth/web-extension';
@@ -14,6 +17,16 @@ import Run from '../lib/run.js';
 import Flags from '../lib/flags.js';
 import Migrate from '../lib/migrate.js';
 import Msg from '../lib/messages.js';
+import XLSX from '../../libs/xlsx.full.min.js';
+import Analyzer from '../modules/analyzer.js';
+import SpreadAnalyzer from '../modules/spread-analyzer.js';
+import Exporter from '../modules/exporter.js';
+import Download from './download.js';
+
+// exporter.js reads these as globals, as it does in the popup.
+globalThis.XLSX = XLSX;
+globalThis.Analyzer = Analyzer;
+globalThis.SpreadAnalyzer = SpreadAnalyzer;
 
 /**
  * @fileoverview Background Service Worker
@@ -51,6 +64,31 @@ router.on(Msg.T.GET_STATE, () => engine.getState());
 router.on(Msg.T.PAGE_READY, (m, sender) => engine.pageReady(m, sender));
 router.on(Msg.T.PAGE_RESULT, (m, sender) => thenFlush(engine.pageResult(m, sender)));
 router.on(Msg.T.HEARTBEAT, (m, sender) => engine.heartbeat(m, sender));
+
+// The dock on the page. The run is always the sender's own tab.
+router.on(Msg.T.START_RUN_HERE, (m, sender) => engine.startHere({ maxPages: m.maxPages }, sender));
+router.on(Msg.T.STOP_RUN_HERE, () => thenFlush(engine.stop()));
+router.on(Msg.T.RUN_STATUS, (m, sender) => engine.status(sender));
+router.on(Msg.T.SAVE_SETTINGS, (m) => engine.saveSettings({ maxPages: m.maxPages, suggest: m.suggest }));
+router.on(Msg.T.DOWNLOAD, (m) =>
+  Download.deliver({
+    Exporter,
+    getState: () => engine.getState(),
+    download: (opts) => chrome.downloads.download(opts),
+  }, m.format).catch((err) => {
+    console.warn('[ProScan] Download failed:', err && err.message);
+    return { error: 'failed', message: 'ProScan could not make the file. Try again.' };
+  }));
+// Keys and passwords are typed on ProScan's own page, never on Amazon's.
+router.on(Msg.T.OPEN_SETTINGS, async (m, sender) => {
+  const section = m.section === 'sync' ? 'sync' : 'key';
+  const tab = sender.tab || {};
+  const opts = { url: chrome.runtime.getURL(`popup/popup.html#${section}`) };
+  if (typeof tab.index === 'number') opts.index = tab.index + 1;
+  if (typeof tab.id === 'number') opts.openerTabId = tab.id;
+  await chrome.tabs.create(opts);
+  return { ok: true };
+});
 
 // Spread analysis
 router.on(Msg.T.GET_RESULTS, () => engine.getResults());
@@ -108,6 +146,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => { flushIfEnded(engine.ta
 // dropped the session without the user signing out.
 
 const DASHBOARD_URL = 'https://proscanbot.web.app/dashboard/';
+const CONNECT_URL = USE_EMULATOR ? 'http://localhost:5173/dashboard/connect' : `${DASHBOARD_URL}connect`;
 const FLUSH_DELAY_MS = 3000;
 let flushTimer = null;
 
@@ -244,6 +283,7 @@ router.on(Msg.T.PROSCAN_AUTH_STATE, async () => {
     failed: user ? await sync.failed(user.uid).catch(() => 0) : 0,
     lastSync: lastSync || null,
     dashboardUrl: DASHBOARD_URL,
+    connectUrl: CONNECT_URL,
   };
 });
 
@@ -255,6 +295,33 @@ router.on(Msg.T.PROSCAN_SIGN_IN, (m) =>
       return { user: publicUser(cred.user) };
     })
     .catch((err) => ({ error: friendlyAuthError(err) })));
+
+// The dashboard's /connect page hands over a Google ID token after the user
+// picks an account, so the popup never asks for a password. Only ProScan's
+// own site can reach this (manifest externally_connectable), and the origin
+// is checked again here.
+const HANDOFF_ORIGINS = USE_EMULATOR
+  ? ['https://proscanbot.web.app', 'https://proscanbot.firebaseapp.com', 'http://localhost:5173']
+  : ['https://proscanbot.web.app', 'https://proscanbot.firebaseapp.com'];
+
+async function handleHandoff(msg, sender) {
+  if (!msg || msg.type !== 'PROSCAN_GOOGLE_HANDOFF') return { ok: false, error: 'unknown' };
+  if (!sender || !HANDOFF_ORIGINS.includes(sender.origin)) return { ok: false, error: 'origin' };
+  if (typeof msg.idToken !== 'string' || !msg.idToken) return { ok: false, error: 'token' };
+  try {
+    const cred = await signInWithCredential(auth, GoogleAuthProvider.credential(msg.idToken));
+    await rememberAccount(cred.user);
+    scheduleFlush(0);
+    return { ok: true, email: cred.user.email || null };
+  } catch (err) {
+    return { ok: false, error: (err && err.code) || 'sign-in' };
+  }
+}
+
+chrome.runtime.onMessageExternal?.addListener((msg, sender, respond) => {
+  handleHandoff(msg, sender).then(respond);
+  return true;
+});
 
 // The same answer whether or not the account exists.
 router.on(Msg.T.PROSCAN_RESET_PASSWORD, async (m) => {

@@ -27,12 +27,14 @@ export const COPY_FILES = [
   'popup/ai-key.js',
   'popup/popup.css',
   'scripts/content/scraper.js',
-  'scripts/content/chatbot.js',
   'scripts/content/offer-fetcher.js',
+  'scripts/content/dock-styles.js',
+  'scripts/content/dock.js',
   'scripts/lib/parsers.js',
   'scripts/lib/messages.js',
   'scripts/lib/run.js',
   'scripts/lib/flags.js',
+  'scripts/lib/page-kind.js',
   'scripts/modules/price.js',
   'scripts/modules/delta.js',
   'scripts/modules/storage.js',
@@ -40,7 +42,6 @@ export const COPY_FILES = [
   'scripts/modules/spread-analyzer.js',
   'scripts/modules/exporter.js',
   'libs/xlsx.full.min.js',
-  'styles/chatbot.css',
   'assets/icons/icon16.png',
   'assets/icons/icon48.png',
   'assets/icons/icon128.png',
@@ -61,6 +62,8 @@ export function manifestForEnv(base, env) {
       /connect-src ([^;]*)/,
       (_, list) => `connect-src ${list} ${EMULATOR_ORIGINS.join(' ')}`
     );
+    // The local dashboard dev server may hand a Google sign-in over.
+    m.externally_connectable = { matches: [...m.externally_connectable.matches, 'http://localhost:5173/*'] };
     return m;
   }
   if (/localhost|127\.0\.0\.1/.test(JSON.stringify(m))) {
