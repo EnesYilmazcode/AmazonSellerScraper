@@ -99,6 +99,9 @@ const elements = {
     authEmail: document.getElementById('authEmail'),
     authPassword: document.getElementById('authPassword'),
     authSignInBtn: document.getElementById('authSignInBtn'),
+    authGoogleBtn: document.getElementById('authGoogleBtn'),
+    authEmailToggle: document.getElementById('authEmailToggle'),
+    authEmailForm: document.getElementById('authEmailForm'),
     authError: document.getElementById('authError'),
     authAccount: document.getElementById('authAccount'),
     authStatusEmail: document.getElementById('authStatusEmail'),
@@ -579,12 +582,15 @@ function resetSignInButton() {
  *
  * @async
  */
+let connectUrl = 'https://proscanbot.web.app/dashboard/connect';
+
 async function initializeAuthUI() {
     // Sign-in only serves the cloud export, which is off in this build.
     if (!Flags.CLOUD_SYNC) return;
     document.getElementById('authPanel').classList.remove('hidden');
     const response = await sendToWorker({ type: Msg.T.PROSCAN_AUTH_STATE });
     if (response && response.dashboardUrl) elements.authSignUpLink.href = response.dashboardUrl;
+    connectUrl = (response && response.connectUrl) || connectUrl;
     if (response && response.user) {
         showSignedIn(response.user);
         showSyncState(response);
@@ -690,6 +696,17 @@ async function handleExportToProScan() {
 
 // ProScan cloud auth + export
 elements.authSignInBtn.addEventListener('click', handleSignIn);
+elements.authGoogleBtn.addEventListener('click', () => {
+    chrome.tabs.create({ url: `${connectUrl}?ext=${chrome.runtime.id}` });
+});
+elements.authEmailToggle.addEventListener('click', () => {
+    elements.authEmailForm.classList.remove('hidden');
+    elements.authEmailToggle.classList.add('hidden');
+});
+// A sign-in finished on the dashboard's connect page.
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.account && changes.account.newValue) initializeAuthUI();
+});
 elements.authSignOutBtn.addEventListener('click', handleSignOut);
 elements.authResetBtn.addEventListener('click', handleResetPassword);
 elements.exportToProScanBtn.addEventListener('click', handleExportToProScan);

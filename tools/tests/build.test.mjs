@@ -27,7 +27,7 @@ test('prod build has no emulator wiring and passes the permission lock', async (
   }
 });
 
-test('dev build points at demo-proscan and only widens connect-src', async () => {
+test('dev build points at demo-proscan and only widens connect-src and the dashboard origin', async () => {
   const dir = tmp('dev');
   try {
     await buildExtension({ env: 'dev', outDir: dir });
@@ -37,7 +37,9 @@ test('dev build points at demo-proscan and only widens connect-src', async () =>
     const m = manifest(dir);
     assert.match(m.content_security_policy.extension_pages, /connect-src [^;]*http:\/\/127\.0\.0\.1:9099/);
     assert.deepEqual(m.host_permissions, live.host_permissions);
-    assert.deepEqual(checkPermissionLock(m, live), []);
+    // The local dashboard may hand over a sign-in; dev builds never ship.
+    assert.ok(m.externally_connectable.matches.includes('http://localhost:5173/*'));
+    assert.deepEqual(checkPermissionLock(m, live), ['new manifest key "externally_connectable"']);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

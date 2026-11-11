@@ -22,6 +22,13 @@ export const OPAQUE_KEYS = [
   'key',
 ];
 
+// Exact values of an opaque key that were reviewed and may ship. Anything
+// else under that key still fails. externally_connectable shows no install
+// warning; this one only lets ProScan's own site message the extension.
+export const APPROVED_OPAQUE = {
+  externally_connectable: { matches: ['https://proscanbot.web.app/*', 'https://proscanbot.firebaseapp.com/*'] },
+};
+
 // Top-level keys a manifest may add over the live one. Every other new key
 // fails, so an unknown key (chrome_settings_overrides, devtools_page,
 // automation, ...) cannot slip past the lock.
@@ -91,6 +98,7 @@ export function checkPermissionLock(candidate, live) {
   }
   for (const key of OPAQUE_KEYS) {
     if (!(key in candidate)) continue;
+    if (key in APPROVED_OPAQUE && JSON.stringify(candidate[key]) === JSON.stringify(APPROVED_OPAQUE[key])) continue;
     if (JSON.stringify(candidate[key]) !== JSON.stringify(live[key])) {
       problems.push(key in live ? `"${key}" changed` : `new manifest key "${key}"`);
     }

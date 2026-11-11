@@ -8,6 +8,7 @@ jest.mock('../../scripts/background/firebase-init.js', () => ({
   auth: { currentUser: { uid: 'u1', email: 'u1@example.test', displayName: null } },
   db: {},
 }));
+jest.mock('../../scripts/background/firebase-config.js', () => ({ USE_EMULATOR: false }));
 jest.mock('firebase/auth/web-extension', () => {
   const listeners = [];
   return {
@@ -18,6 +19,11 @@ jest.mock('firebase/auth/web-extension', () => {
       return () => {};
     },
     signInWithEmailAndPassword: async () => ({}),
+    signInWithCredential: async (_a, cred) => {
+      if (cred.idToken === 'bad') throw Object.assign(new Error('x'), { code: 'auth/invalid-credential' });
+      return { user: { uid: 'g1', email: 'g1@example.test' } };
+    },
+    GoogleAuthProvider: { credential: (idToken) => ({ idToken }) },
     sendPasswordResetEmail: async () => {},
     signOut: async () => {},
   };
@@ -39,6 +45,7 @@ const messageListeners = [];
 const installedListeners = [];
 const startupListeners = [];
 const tabUpdatedListeners = [];
+const externalListeners = [];
 
 beforeAll(() => {
   chrome.runtime.id = 'test-extension';
@@ -46,6 +53,7 @@ beforeAll(() => {
   chrome.runtime.onInstalled = { addListener: (fn) => installedListeners.push(fn) };
   chrome.runtime.onStartup = { addListener: (fn) => startupListeners.push(fn) };
   chrome.tabs.onUpdated = { addListener: (fn) => tabUpdatedListeners.push(fn) };
+  chrome.runtime.onMessageExternal = { addListener: (fn) => externalListeners.push(fn) };
   require('../../scripts/background/service-worker.js');
 });
 
@@ -86,6 +94,29 @@ test('a password reset answers the same whether or not the account exists (F-56)
   const st = await send({ type: 'PROSCAN_RESET_PASSWORD', email: 'nobody@example.test' });
   expect(st).toEqual({ ok: true, message: 'If an account exists for nobody@example.test, a reset link is on its way.' });
   expect(await send({ type: 'PROSCAN_RESET_PASSWORD', email: '' })).toMatchObject({ error: expect.any(String) });
+});
+
+function sendExternal(msg, origin) {
+  return new Promise((resolve) => externalListeners[0](msg, { origin, id: undefined }, resolve));
+}
+
+test('the dashboard hands over a Google sign-in, and it is remembered', async () => {
+  const r = await sendExternal({ type: 'PROSCAN_GOOGLE_HANDOFF', idToken: 'tok' }, 'https://proscanbot.web.app');
+  expect(r).toEqual({ ok: true, email: 'g1@example.test' });
+  expect(chrome.storage.local._getStore().account).toEqual({ uid: 'g1', email: 'g1@example.test' });
+});
+
+test('a handoff from any other site is refused', async () => {
+  const r = await sendExternal({ type: 'PROSCAN_GOOGLE_HANDOFF', idToken: 'tok' }, 'https://evil.example');
+  expect(r).toEqual({ ok: false, error: 'origin' });
+  expect(chrome.storage.local._getStore().account).toBeUndefined();
+});
+
+test('a bad or missing token fails cleanly', async () => {
+  const o = 'https://proscanbot.web.app';
+  expect(await sendExternal({ type: 'PROSCAN_GOOGLE_HANDOFF', idToken: 'bad' }, o)).toEqual({ ok: false, error: 'auth/invalid-credential' });
+  expect(await sendExternal({ type: 'PROSCAN_GOOGLE_HANDOFF' }, o)).toEqual({ ok: false, error: 'token' });
+  expect(await sendExternal({ type: 'OTHER' }, o)).toEqual({ ok: false, error: 'unknown' });
 });
 
 test('messages meant for the popup or a tab are left alone', async () => {

@@ -1,7 +1,10 @@
 import { auth, db as firestore } from './firebase-init.js';
+import { USE_EMULATOR } from './firebase-config.js';
 import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithCredential,
+  GoogleAuthProvider,
   sendPasswordResetEmail,
   signOut,
 } from 'firebase/auth/web-extension';
@@ -143,6 +146,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => { flushIfEnded(engine.ta
 // dropped the session without the user signing out.
 
 const DASHBOARD_URL = 'https://proscanbot.web.app/dashboard/';
+const CONNECT_URL = USE_EMULATOR ? 'http://localhost:5173/dashboard/connect' : `${DASHBOARD_URL}connect`;
 const FLUSH_DELAY_MS = 3000;
 let flushTimer = null;
 
@@ -279,6 +283,7 @@ router.on(Msg.T.PROSCAN_AUTH_STATE, async () => {
     failed: user ? await sync.failed(user.uid).catch(() => 0) : 0,
     lastSync: lastSync || null,
     dashboardUrl: DASHBOARD_URL,
+    connectUrl: CONNECT_URL,
   };
 });
 
@@ -290,6 +295,33 @@ router.on(Msg.T.PROSCAN_SIGN_IN, (m) =>
       return { user: publicUser(cred.user) };
     })
     .catch((err) => ({ error: friendlyAuthError(err) })));
+
+// The dashboard's /connect page hands over a Google ID token after the user
+// picks an account, so the popup never asks for a password. Only ProScan's
+// own site can reach this (manifest externally_connectable), and the origin
+// is checked again here.
+const HANDOFF_ORIGINS = USE_EMULATOR
+  ? ['https://proscanbot.web.app', 'https://proscanbot.firebaseapp.com', 'http://localhost:5173']
+  : ['https://proscanbot.web.app', 'https://proscanbot.firebaseapp.com'];
+
+async function handleHandoff(msg, sender) {
+  if (!msg || msg.type !== 'PROSCAN_GOOGLE_HANDOFF') return { ok: false, error: 'unknown' };
+  if (!sender || !HANDOFF_ORIGINS.includes(sender.origin)) return { ok: false, error: 'origin' };
+  if (typeof msg.idToken !== 'string' || !msg.idToken) return { ok: false, error: 'token' };
+  try {
+    const cred = await signInWithCredential(auth, GoogleAuthProvider.credential(msg.idToken));
+    await rememberAccount(cred.user);
+    scheduleFlush(0);
+    return { ok: true, email: cred.user.email || null };
+  } catch (err) {
+    return { ok: false, error: (err && err.code) || 'sign-in' };
+  }
+}
+
+chrome.runtime.onMessageExternal?.addListener((msg, sender, respond) => {
+  handleHandoff(msg, sender).then(respond);
+  return true;
+});
 
 // The same answer whether or not the account exists.
 router.on(Msg.T.PROSCAN_RESET_PASSWORD, async (m) => {

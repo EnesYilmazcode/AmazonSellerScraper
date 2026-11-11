@@ -79,16 +79,20 @@
                 <div class="fold-body">
                     <div class="auth-form" id="authForm">
                         <div class="notice hidden" id="authNotice"></div>
-                        <label class="sr" for="authEmail">Email</label>
-                        <input type="email" id="authEmail" class="field" placeholder="Email" autocomplete="username">
-                        <label class="sr" for="authPassword">Password</label>
-                        <input type="password" id="authPassword" class="field" placeholder="Password" autocomplete="current-password">
-                        <button id="authSignInBtn" class="secondary">Sign in</button>
-                        <div class="notice error hidden" id="authError" role="alert"></div>
-                        <div class="row">
-                            <a id="authSignUpLink" href="https://proscanbot.web.app/dashboard/" target="_blank" rel="noopener">Create an account</a>
-                            <button type="button" id="authResetBtn" class="quiet">Forgot password?</button>
+                        <button id="authGoogleBtn" class="secondary">Continue with Google</button>
+                        <button type="button" id="authEmailToggle" class="quiet">Use email instead</button>
+                        <div class="auth-form hidden" id="authEmailForm">
+                            <label class="sr" for="authEmail">Email</label>
+                            <input type="email" id="authEmail" class="field" placeholder="Email" autocomplete="username">
+                            <label class="sr" for="authPassword">Password</label>
+                            <input type="password" id="authPassword" class="field" placeholder="Password" autocomplete="current-password">
+                            <button id="authSignInBtn" class="secondary">Sign in</button>
+                            <div class="row">
+                                <a id="authSignUpLink" href="https://proscanbot.web.app/dashboard/" target="_blank" rel="noopener">Create an account</a>
+                                <button type="button" id="authResetBtn" class="quiet">Forgot password?</button>
+                            </div>
                         </div>
+                        <div class="notice error hidden" id="authError" role="alert"></div>
                     </div>
                     <div class="auth-account hidden" id="authAccount">
                         <span class="auth-account-email" id="authStatusEmail"></span>

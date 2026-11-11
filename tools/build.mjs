@@ -62,6 +62,8 @@ export function manifestForEnv(base, env) {
       /connect-src ([^;]*)/,
       (_, list) => `connect-src ${list} ${EMULATOR_ORIGINS.join(' ')}`
     );
+    // The local dashboard dev server may hand a Google sign-in over.
+    m.externally_connectable = { matches: [...m.externally_connectable.matches, 'http://localhost:5173/*'] };
     return m;
   }
   if (/localhost|127\.0\.0\.1/.test(JSON.stringify(m))) {
