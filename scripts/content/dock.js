@@ -638,6 +638,10 @@
         let meta = null;
         if (r.reason === 'stopped') meta = h('p', { class: 'meta', text: 'Stopped' });
         else if (r.reason !== 'complete') meta = h('p', { class: 'meta warn', text: (Run.MESSAGES && Run.MESSAGES[r.reason]) || 'The run ended early.' });
+        // A one-page store finishes in a second; say so, or the rescrape looks like it did nothing.
+        else if (r.finishedAt && Date.now() - (typeof r.finishedAt === 'number' ? r.finishedAt : Date.parse(r.finishedAt)) < 60000) {
+            meta = h('p', { class: 'meta', text: `Done just now, ${(r.page || 1) === 1 ? '1 page' : `${fmt(r.page)} pages`}` });
+        }
         const again = scrapable && page.startable && !ui.spread
             ? h('button', {
                 class: 'again', 'data-k': 'again', 'aria-label': 'Scrape again', title: 'Scrape again', disabled: ui.busy === 'start',
