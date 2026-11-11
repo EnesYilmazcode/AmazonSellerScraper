@@ -1,0 +1,12 @@
+{
+  "type": "search",
+  "synthetic": true,
+  "url": "https://www.amazon.com/s?k=yoga+mat&page=3",
+  "source": "Hand-written from the Amazon captcha form (validateCaptcha, captchacharacters).",
+  "kind": "captcha",
+  "asins": [],
+  "placements": 0,
+  "sponsored": 0,
+  "next": null,
+  "total": 0
+}

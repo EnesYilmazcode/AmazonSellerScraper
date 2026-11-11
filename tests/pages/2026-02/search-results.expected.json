@@ -1,0 +1,29 @@
+{
+  "type": "search",
+  "synthetic": true,
+  "url": "https://www.amazon.com/s?k=test+widgets",
+  "source": "Copy of tests/fixtures/amazon-search-results.html (hand-written to the Feb 2026 selectors).",
+  "kind": "results",
+  "asins": [
+    "B0TEST001",
+    "B0TEST002",
+    "B0TEST003",
+    "B0TEST004"
+  ],
+  "placements": 4,
+  "sponsored": 0,
+  "next": "/s?k=test+widgets&page=2",
+  "nextExact": false,
+  "total": 523,
+  "minFill": 0.75,
+  "spot": {
+    "B0TEST001": {
+      "name": "Test Widget Pro 2000",
+      "priceCents": 2999
+    },
+    "B0TEST003": {
+      "name": "Mystery Item No Data",
+      "priceCents": null
+    }
+  }
+}

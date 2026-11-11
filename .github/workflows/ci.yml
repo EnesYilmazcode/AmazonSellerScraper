@@ -43,3 +43,35 @@ jobs:
           name: store-zip
           path: dist-zips/*.zip
           if-no-files-found: error
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The upgrade scenarios check out the v2.0 store commit.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Full Chromium, not the headless shell: extensions need it. The browser
+      # version is pinned by the @playwright/test version in package.json.
+      - name: Install Chromium
+        run: npx playwright install --with-deps --no-shell chromium
+
+      - name: Chromium harness
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-report
+          path: |
+            tests/e2e/.report
+            tests/e2e/.results

@@ -18,6 +18,8 @@ AmazonSellerScraper/
 │   │   ├── scraper.js        # DOM scraping on Amazon pages
 │   │   ├── chatbot.js        # Floating AI chatbot widget (Shadow DOM)
 │   │   └── offer-fetcher.js  # Seller price fetching for spread analysis
+│   ├── lib/
+│   │   └── parsers.js        # Pure search/offer parsing (global Parsers)
 │   ├── background/
 │   │   └── service-worker.js # Message routing + Gemini API calls
 │   └── modules/
@@ -93,7 +95,7 @@ AmazonSellerScraper/
 
 ## Testing
 
-### JavaScript (Jest + JSDOM) — 214 tests
+### JavaScript (Jest + JSDOM)
 
 ```bash
 npm test              # Run all JS tests

@@ -14,6 +14,7 @@ module.exports = {
   coverageDirectory: 'coverage',
   collectCoverageFrom: [
     'scripts/modules/*.js',
+    'scripts/lib/*.js',
     'scripts/content/scraper.js',
     'scripts/content/offer-fetcher.js',
     '!**/node_modules/**'

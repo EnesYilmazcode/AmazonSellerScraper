@@ -1,0 +1,13 @@
+{
+  "type": "offers",
+  "synthetic": true,
+  "url": "https://www.amazon.com/gp/offer-listing/B0TEST001",
+  "source": "Copy of tests/fixtures/amazon-offer-classic.html. The live classic URL redirects to the product page (F-32).",
+  "offers": {
+    "prices": [
+      22.5,
+      28,
+      19.99
+    ]
+  }
+}

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head><title>Amazon Search Results Test Fixture</title></head>
+<body>
+<div class="s-main-slot">
+
+  <!-- Product 1: All fields present via primary selectors + Prime -->
+  <div class="s-result-item" data-asin="B0TEST001">
+    <h2><span>Test Widget Pro 2000</span></h2>
+    <div class="a-price" data-a-size="xl">
+      <span class="a-offscreen">$29.99</span>
+    </div>
+    <div data-cy="reviews-ratings-slot">
+      <span class="a-icon-alt">4.5 out of 5 stars</span>
+    </div>
+    <a aria-label="12,847 ratings" href="#">(12.8K)</a>
+    <a class="a-link-normal s-no-outline" href="/dp/B0TEST001/ref=sr_1_1"></a>
+    <i class="a-icon a-icon-prime"></i>
+  </div>
+
+  <!-- Product 2: Fallback selectors only (no data-a-size="xl", uses star-mini, text review count) -->
+  <div class="s-result-item" data-asin="B0TEST002">
+    <h2><span>Budget Gadget Basic</span></h2>
+    <div class="a-price">
+      <span class="a-offscreen">$9.99</span>
+    </div>
+    <span class="a-icon-star-mini">
+      <span class="a-icon-alt">3.8 out of 5 stars</span>
+    </span>
+    <span class="a-size-mini puis-normal-weight-text s-underline-text">(247)</span>
+    <a class="a-link-normal s-no-outline" href="/dp/B0TEST002/ref=sr_1_2"></a>
+  </div>
+
+  <!-- Product 3: Missing price, no rating, no reviews (edge case) -->
+  <div class="s-result-item" data-asin="B0TEST003">
+    <h2><span>Mystery Item No Data</span></h2>
+    <a class="a-link-normal s-no-outline" href="/dp/B0TEST003/ref=sr_1_3"></a>
+  </div>
+
+  <!-- Empty ASIN placeholder (should be filtered out by :not([data-asin=""]) ) -->
+  <div class="s-result-item" data-asin=""></div>
+
+  <!-- Product 4: Uses legacy star-small rating and K-suffix reviews -->
+  <div class="s-result-item" data-asin="B0TEST004">
+    <h2><span>Legacy Star Product</span></h2>
+    <div class="a-price" data-a-size="xl">
+      <span class="a-offscreen">$49.99</span>
+    </div>
+    <i class="a-icon-star-small">
+      <span class="a-icon-alt">4.2 out of 5 stars</span>
+    </i>
+    <span class="a-size-mini puis-normal-weight-text s-underline-text">(1.5K)</span>
+    <a class="a-link-normal s-no-outline" href="/dp/B0TEST004/ref=sr_1_4"></a>
+    <span class="s-prime"></span>
+  </div>
+
+</div>
+
+<!-- Results count header -->
+<h2 class="a-size-base a-spacing-small a-spacing-top-small">
+  <span>1-48 of 523 results for "test widgets"</span>
+</h2>
+
+<!-- Pagination: next button NOT disabled (more pages available) -->
+<span class="s-pagination-next"></span>
+</body>
+</html>
