@@ -460,6 +460,38 @@ h1 {
     color: var(--color-text-primary);
 }
 
+/* AI chat settings */
+.ai-settings summary {
+    cursor: pointer;
+    list-style: none;
+    margin-bottom: 0;
+}
+
+.ai-settings[open] summary {
+    margin-bottom: var(--spacing-sm);
+}
+
+.ai-key-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: stretch;
+}
+
+.ai-key-actions .auth-signout {
+    margin-top: var(--spacing-xs);
+}
+
+.ai-key-status,
+.ai-key-help {
+    margin-top: var(--spacing-sm);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-muted);
+}
+
+.ai-key-help a {
+    color: var(--color-accent-green);
+}
+
 /* Cloud Export */
 .export-cloud-button {
     width: 100%;

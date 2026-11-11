@@ -52,6 +52,37 @@ const Price = {
     },
 
     /**
+     * The first US dollar amount in `text` ("$19.99", "US$ 1,299"), in
+     * cents. Null for any other currency ("€19,99", "CDN$ 24.99") or when
+     * there is no amount, so a foreign price never passes as USD.
+     *
+     * @param {string|null|undefined} text
+     * @returns {number|null}
+     */
+    usdToCents(text) {
+        if (typeof text !== 'string') return null;
+        const m = text.match(/(?:^|[^A-Za-z$])(?:US)?\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?!\d)(?![.,]\d)/);
+        if (!m) return null;
+        const dollars = parseInt(m[1].replace(/,/g, ''), 10);
+        const cents = m[2] ? parseInt(m[2].padEnd(2, '0'), 10) : 0;
+        return dollars * 100 + cents;
+    },
+
+    /**
+     * The currency a price string is in: 'USD' for a dollar amount, the
+     * symbol or code in front of the number otherwise, or null.
+     *
+     * @param {string|null|undefined} text
+     * @returns {string|null}
+     */
+    currencyOf(text) {
+        if (typeof text !== 'string' || !/\d/.test(text)) return null;
+        if (this.usdToCents(text) !== null) return 'USD';
+        const m = text.trim().match(/^([^\d\s]+)\s*\d/) || text.trim().match(/\d\s*([^\d\s.,]+)$/);
+        return m ? m[1] : 'unknown';
+    },
+
+    /**
      * Format integer cents back into a display string.
      *
      * @param {number|null|undefined} cents - Integer cents

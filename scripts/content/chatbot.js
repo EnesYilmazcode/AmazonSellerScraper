@@ -9,7 +9,8 @@
  * - IIFE wraps the entire module for scope isolation
  * - Shadow DOM (closed mode) prevents Amazon CSS interference
  * - Communicates with service-worker.js via chrome.runtime.sendMessage
- * - Reads product data from chrome.storage.local (populated by scraper.js)
+ * - The worker holds the Gemini key and the scanned products; this script
+ *   only sends the question and a short history, and renders answers as text
  *
  * Widget Components:
  * - Toggle button: circular icon (bottom-right corner, max z-index)
@@ -40,6 +41,15 @@
 
     /** @type {HTMLElement} Product count badge element */
     let badgeEl;
+
+    /** @type {HTMLElement} First AI bubble, rewritten from the chat status */
+    let greetingEl;
+
+    /** @type {{role: string, text: string}[]} Recent turns, sent for follow-ups */
+    const history = [];
+    const MAX_HISTORY = 6;
+
+    const NO_KEY_TEXT = 'AI chat needs your own Gemini API key. Open the ProScan popup and paste it under "AI chat settings".';
 
     // Asset URLs resolved via chrome.runtime for extension context
     const LOGO_URL = chrome.runtime.getURL('assets/icons/icon128.png');
@@ -74,7 +84,7 @@
                     <button class="proscan-close">&times;</button>
                 </div>
                 <div class="proscan-messages" id="ps-messages">
-                    <div class="proscan-bubble ai">Ask me anything about the products on this page.</div>
+                    <div class="proscan-bubble ai" id="ps-greeting"></div>
                 </div>
                 <div class="proscan-input-row">
                     <input class="proscan-input" id="ps-input" type="text" placeholder="e.g. What's the best deal under $30?" />
@@ -92,6 +102,7 @@
         inputEl = shadow.getElementById('ps-input');
         sendBtn = shadow.getElementById('ps-send');
         badgeEl = shadow.getElementById('ps-badge');
+        greetingEl = shadow.getElementById('ps-greeting');
 
         // Toggle panel open/close
         toggle.addEventListener('click', () => {
@@ -99,7 +110,7 @@
             panel.classList.toggle('open', isOpen);
             if (isOpen) {
                 inputEl.focus();
-                updateProductBadge();
+                refreshStatus();
             }
         });
 
@@ -114,18 +125,54 @@
             if (e.key === 'Enter') sendMessage();
         });
 
-        updateProductBadge();
+        refreshStatus();
+    }
+
+    /** True while this content script still belongs to a loaded extension. */
+    function alive() {
+        try {
+            return !!(chrome.runtime && chrome.runtime.id);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function unreachableText() {
+        return alive()
+            ? 'Could not reach ProScan. Reload this page and try again.'
+            : 'ProScan was updated. Reload this page to use the chat.';
+    }
+
+    function plural(n, word) {
+        return n + ' ' + word + (n !== 1 ? 's' : '');
     }
 
     /**
-     * Update the product count badge in the chat header.
-     * Reads the current result count from chrome.storage.local.
+     * Ask the worker whether a key is set and which run the chat covers,
+     * then update the badge and greeting to match.
      */
-    function updateProductBadge() {
-        chrome.storage.local.get(['results'], (data) => {
-            const count = (data.results || []).length;
-            badgeEl.textContent = count + ' product' + (count !== 1 ? 's' : '');
-        });
+    async function refreshStatus() {
+        let st = null;
+        try {
+            st = await chrome.runtime.sendMessage({ type: 'CHAT_STATUS' });
+        } catch (e) {
+            st = null;
+        }
+        if (!st) {
+            greetingEl.textContent = unreachableText();
+            return;
+        }
+        const count = st.productCount || 0;
+        badgeEl.textContent = plural(count, 'product');
+        if (!st.hasKey) {
+            greetingEl.textContent = NO_KEY_TEXT;
+        } else if (!count) {
+            greetingEl.textContent = 'No scanned products yet. Start a scan from the ProScan popup, then ask me about it.';
+        } else {
+            const parts = [st.source, st.pages ? plural(st.pages, 'page') : ''].filter(Boolean);
+            const from = parts.length ? ' (' + parts.join(', ') + ')' : '';
+            greetingEl.textContent = 'Ask me about the ' + plural(count, 'product') + ' from your last ProScan scan' + from + '.';
+        }
     }
 
     /**
@@ -150,8 +197,8 @@
      * Flow:
      * 1. Read user input and display as user bubble
      * 2. Show "Thinking..." loading bubble
-     * 3. Read scraped products from chrome.storage.local
-     * 4. Send CHAT_MESSAGE to service worker with question + product context
+     * 3. Send CHAT_MESSAGE to the service worker with the question and history
+     * 4. The worker answers from the current run, or returns an error
      * 5. Update loading bubble with AI response (or error)
      * 6. Re-enable input for next question
      *
@@ -168,27 +215,19 @@
         const loadingBubble = addBubble('Thinking...', 'ai loading');
 
         try {
-            // Read products from storage for context
-            const data = await chrome.storage.local.get(['results']);
-            const products = (data.results || []).map(p => ({
-                name: p.name,
-                asin: p.asin,
-                price: p.price,
-                rating: p.rating,
-                reviewCount: p.reviewCount,
-                isPrime: p.isPrime
-            }));
-
-            // Send to service worker for Gemini API call
+            // The worker adds the key and the current run's products
             const response = await chrome.runtime.sendMessage({
                 type: 'CHAT_MESSAGE',
                 question: question,
-                products: products
+                history: history.slice(-MAX_HISTORY)
             });
 
             if (response && response.answer) {
+                // Model output is text, never HTML
                 loadingBubble.textContent = response.answer;
                 loadingBubble.className = 'proscan-bubble ai';
+                history.push({ role: 'user', text: question }, { role: 'model', text: response.answer });
+                history.splice(0, Math.max(0, history.length - MAX_HISTORY));
             } else if (response && response.error) {
                 loadingBubble.textContent = response.error;
                 loadingBubble.className = 'proscan-bubble ai error';
@@ -197,7 +236,7 @@
                 loadingBubble.className = 'proscan-bubble ai error';
             }
         } catch (err) {
-            loadingBubble.textContent = 'Something went wrong. Check the extension popup for API key setup.';
+            loadingBubble.textContent = unreachableText();
             loadingBubble.className = 'proscan-bubble ai error';
         }
 

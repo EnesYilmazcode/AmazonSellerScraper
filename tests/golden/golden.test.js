@@ -8,37 +8,11 @@
  * A test.failing passes on any error, a crash included, so every page also
  * gets plain checks that must hold today: the parsers run without throwing
  * and return the right shape. A broken harness or parser fails those.
- *
- * NEW-PARSE-1 has no audit finding: the header count selector does not match
- * the "of over 10,000 results" header, so total comes back 0.
  */
 const Parsers = require('../../scripts/lib/parsers');
 const { corpus, parseDoc } = require('../setup/corpus');
 
 const KNOWN = {
-  '2026-09/search-yoga-mat': {
-    'each ASIN once': 'F-27',
-    'only search-result cards': 'F-27',
-    'sponsored count': 'F-16',
-    'no sspa ad links': 'F-16',
-    'next href is the page link': 'F-15',
-    'total results': 'NEW-PARSE-1',
-  },
-  '2026-09/search-title-recipe-synthetic': {
-    'each ASIN once': 'F-27',
-    'sponsored count': 'F-16',
-    'no sspa ad links': 'F-16',
-    'next href is the page link': 'F-15',
-    'spot B0SPONS001': 'F-17',
-    'spot B0UNITONLY': 'F-17',
-  },
-  '2026-09/search-no-pagination-synthetic': {
-    'page kind': 'F-15',
-    'next page': 'F-15',
-  },
-  '2026-09/interstitial-akamai': { 'page kind': 'F-12' },
-  '2026-09/captcha-synthetic': { 'page kind': 'F-12' },
-  '2026-09/product-dp': { 'page kind': 'F-11' },
   '2026-09/aod-pinned-only': {
     'seller prices': 'F-30',
     'total offer count': 'F-37',
@@ -88,6 +62,16 @@ for (const page of corpus()) {
       check(id, 'only search-result cards', () => {
         const found = [...new Set(parsed.products.map((p) => p.asin))].sort();
         expect(found).toEqual([...exp.asins].sort());
+      });
+
+      check(id, 'placement count', () => {
+        expect(parsed.placements).toBe(exp.placements);
+      });
+
+      check(id, 'organic ranks run 1..n', () => {
+        const ranks = parsed.products.flatMap((p) => p.placements).map((pl) => pl.rank).filter((r) => r !== null);
+        expect(ranks.sort((x, y) => x - y)).toEqual(ranks.map((_, i) => i + 1));
+        expect(ranks.length).toBe(exp.placements - exp.sponsored);
       });
 
       check(id, 'sponsored count', () => {

@@ -28,15 +28,163 @@ describe('Parsers.parseSearchPage', () => {
     expect(r.nextHref).toBeNull();
   });
 
-  test('no result cards is empty', () => {
-    const doc = parseDoc(page('<p>nothing</p>'), URL_P1);
+  test('no result cards and a "No results for" block is empty', () => {
+    const doc = parseDoc(page('<div class="s-main-slot"><div><span>No results for </span><span>zzqx</span></div></div>'), URL_P1);
     const r = Parsers.parseSearchPage(doc, URL_P1);
-    expect(r).toEqual({ kind: 'empty', products: [], nextHref: null, total: 0, fill: { asin: 0, title: 0, price: 0 } });
+    expect(r).toEqual({ kind: 'empty', products: [], placements: 0, nextHref: null, total: 0, fill: { asin: 0, title: 0, price: 0 } });
+  });
+
+  test('no result cards and no "No results" marker is unreadable, not empty', () => {
+    expect(Parsers.parseSearchPage(parseDoc(page('<p>nothing</p>'), URL_P1), URL_P1).kind).toBe('unreadable');
+  });
+
+  test('a 503 error page served at a search URL is unreadable', () => {
+    const url = 'https://www.amazon.com/s?k=yoga+mat&page=3';
+    const html = '<!DOCTYPE html><html><head><title>Sorry! Something went wrong!</title></head>'
+      + '<body><a href="/ref=cs_503_logo"><img alt="Amazon.com"></a><b>Sorry! Something went wrong on our end.</b>'
+      + '<img src="https://images-na.ssl-images-amazon.com/images/G/01/error/500_503.png" alt="Dogs of Amazon"></body></html>';
+    expect(Parsers.parseSearchPage(parseDoc(html, url), url).kind).toBe('unreadable');
+  });
+
+  test('renamed result cards inside .s-main-slot are unreadable', () => {
+    const url = 'https://www.amazon.com/s?k=yoga+mat&page=3';
+    const body = '<div class="s-main-slot"><div class="s-card-v2" data-item="B0AAAA0001"><h2><span>Mat</span></h2></div></div>';
+    expect(Parsers.parseSearchPage(parseDoc(page(body), url), url).kind).toBe('unreadable');
+  });
+
+  test('the next page is the Next link itself, resolved against the page', () => {
+    const next = '<a class="s-pagination-next" href="/s?k=widget&amp;page=2&amp;qid=9&amp;ref=sr_pg_1">Next</a>';
+    const r = Parsers.parseSearchPage(parseDoc(page(card('B0A', '$1.00') + next), URL_P1), URL_P1);
+    expect(r.kind).toBe('results');
+    expect(r.nextHref).toBe('https://www.amazon.com/s?k=widget&page=2&qid=9&ref=sr_pg_1');
+  });
+
+  test('a storefront with no Next link but more results in the header goes on to the next page', () => {
+    const url = 'https://www.amazon.com/s?me=A3GPGTUC31E362';
+    const header = '<h2 class="a-size-base a-spacing-small a-spacing-top-small a-text-normal"><span>1-16 of 59 results</span></h2>';
+    const r = Parsers.parseSearchPage(parseDoc(page(header + card('B0A', '$1.00')), url), url);
+    expect(r.kind).toBe('results');
+    expect(r.nextHref).toBe('https://www.amazon.com/s?me=A3GPGTUC31E362&page=2&ref=sr_pg_2');
+  });
+
+  test('the header reaching the total is the last page', () => {
+    const url = 'https://www.amazon.com/s?me=A3GPGTUC31E362&page=4';
+    const header = '<h2 class="a-size-base a-spacing-small a-spacing-top-small a-text-normal"><span>49-59 of 59 results</span></h2>';
+    const r = Parsers.parseSearchPage(parseDoc(page(header + card('B0A', '$1.00')), url), url);
+    expect(r.kind).toBe('last');
+    expect(r.nextHref).toBeNull();
+  });
+
+  test('no pagination strip at all is the last page', () => {
+    const r = Parsers.parseSearchPage(parseDoc(page(card('B0A', '$1.00')), URL_P1), URL_P1);
+    expect(r.kind).toBe('last');
+    expect(r.nextHref).toBeNull();
+  });
+
+  test.each([
+    ['a captcha form', '<form action="/errors/validateCaptcha"><input id="captchacharacters"></form>', URL_P1, 'captcha'],
+    ['a Robot Check title', '<title>Robot Check</title><p>x</p>', URL_P1, 'captcha'],
+    ['a sign-in form', '<form name="signIn"><input id="ap_email"></form>', 'https://www.amazon.com/ap/signin?x=1', 'signin'],
+    ['a meta refresh bot check', '<meta http-equiv="refresh" content="5; URL=/s?k=a">', URL_P1, 'interstitial'],
+    ['a search page with no cards', '<div class="s-main-slot"></div>', URL_P1, 'unreadable'],
+    ['an s-no-results component', '<div class="s-main-slot"><div data-component-type="s-no-results"></div></div>', URL_P1, 'empty'],
+    ['a product page', '<div id="dp">Echo Dot</div>', 'https://www.amazon.com/dp/B09B8V1LZ3', 'unknown'],
+  ])('a page with %s is %s', (_label, body, url, kind) => {
+    expect(Parsers.classifyPage(parseDoc(page(body), url), url)).toBe(kind);
+    expect(Parsers.parseSearchPage(parseDoc(page(body), url), url).kind).toBe(kind);
   });
 
   test('fill counts products with a price', () => {
     const doc = parseDoc(page(card('B0A', '$1.00') + card('B0B', null)), URL_P1);
     expect(Parsers.parseSearchPage(doc, URL_P1).fill).toEqual({ asin: 1, title: 1, price: 0.5 });
+  });
+});
+
+describe('Parsers dedupe (F-27)', () => {
+  const ad = (asin) => `<div class="s-result-item AdHolder" data-asin="${asin}"><h2><span>Ad ${asin}</span></h2>`
+    + '<div class="a-price" data-a-size="xl"><span class="a-offscreen">$5.00</span></div></div>';
+
+  test('an ASIN shown as an ad and as a result is one product with both placements', () => {
+    const doc = parseDoc(page(ad('B0A') + card('B0B', '$2.00') + card('B0A', '$5.00')), URL_P1);
+    const r = Parsers.parseSearchPage(doc, URL_P1);
+    expect(r.products.map((p) => p.asin)).toEqual(['B0A', 'B0B']);
+    expect(r.placements).toBe(3);
+    const a = r.products[0];
+    expect(a.sponsored).toBe(true);
+    expect(a.organicRank).toBe(2);
+    expect(a.name).toBe('Item B0A');
+    expect(a.placements).toEqual([
+      { position: 1, sponsored: true, rank: null },
+      { position: 3, sponsored: false, rank: 2 },
+    ]);
+    expect(r.products[1]).toMatchObject({ sponsored: false, organicRank: 1 });
+  });
+
+  test('an ad-only product has no organic rank', () => {
+    const r = Parsers.parseSearchPage(parseDoc(page(ad('B0A')), URL_P1), URL_P1);
+    expect(r.products[0]).toMatchObject({ sponsored: true, organicRank: null });
+  });
+
+  test('cards outside s-search-result are ignored when the page marks its results', () => {
+    const result = (asin) => card(asin, '$1.00').replace('class="s-result-item"', 'class="s-result-item" data-component-type="s-search-result"');
+    const doc = parseDoc(page(result('B0A') + card('B0WIDGET', '$9.00') + result('B0B')), URL_P1);
+    expect(Parsers.parseSearchPage(doc, URL_P1).products.map((p) => p.asin)).toEqual(['B0A', 'B0B']);
+  });
+});
+
+describe('Parsers.scrapeProduct fields', () => {
+  const one = (html) => parseDoc(page(html), URL_P1).querySelector('[data-asin]');
+
+  test('a price in another currency keeps its currency and no amount', () => {
+    const p = Parsers.scrapeProduct(one(card('B0EUR', '€19,99')));
+    expect(p.price).toBeNull();
+    expect(p.priceCents).toBeNull();
+    expect(p.currency).toBe('€');
+  });
+
+  test('a dollar price is USD', () => {
+    const p = Parsers.scrapeProduct(one(card('B0USD', '$1,299.99')));
+    expect(p).toMatchObject({ price: '$1,299.99', priceCents: 129999, currency: 'USD' });
+  });
+
+  test('a card with a single rating counts it', () => {
+    const html = '<div class="s-result-item" data-asin="B0ONE"><a aria-label="1 rating" href="#r">(1)</a></div>';
+    expect(Parsers.scrapeProduct(one(html)).reviewCount).toBe(1);
+  });
+
+  test('the url is the /dp/ page, never the sspa ad redirect (F-16)', () => {
+    const html = '<div class="s-result-item" data-asin="B0AD1"><a class="a-link-normal s-no-outline" href="/sspa/click?url=%2Fx%2Fdp%2FB0AD1"></a></div>';
+    expect(Parsers.scrapeProduct(one(html)).url).toBe('https://www.amazon.com/dp/B0AD1');
+  });
+
+  test.each([
+    ['the Sponsored label', '<span class="puis-sponsored-label-text">Sponsored</span>', ''],
+    ['an sspa link', '<a href="/sspa/click?url=x">x</a>', ''],
+    ['an AdHolder card', '', ' AdHolder'],
+  ])('a card with %s is sponsored (F-16)', (_label, inner, cls) => {
+    const html = `<div class="s-result-item${cls}" data-asin="B0AD2">${inner}</div>`;
+    expect(Parsers.scrapeProduct(one(html)).sponsored).toBe(true);
+  });
+
+  test('the title is the linked h2, not the brand h2 above it (F-17)', () => {
+    const html = '<div class="s-result-item" data-asin="B0T1"><h2><span>Acme</span></h2><a href="/dp/B0T1"><h2><span>Acme Widget Pro</span></h2></a></div>';
+    expect(Parsers.scrapeProduct(one(html)).name).toBe('Acme Widget Pro');
+  });
+
+  test('a unit price or list price is not the price (F-17)', () => {
+    const html = '<div class="s-result-item" data-asin="B0U1">'
+      + '<span class="a-price a-text-price"><span class="a-offscreen">$0.35</span></span>'
+      + '<div data-cy="secondary-offer-recipe"><span class="a-price"><span class="a-offscreen">$8.99</span></span></div></div>';
+    expect(Parsers.scrapeProduct(one(html)).priceCents).toBeNull();
+  });
+
+  test('a plain card is not sponsored', () => {
+    expect(Parsers.scrapeProduct(one(card('B0ORG', '$1.00'))).sponsored).toBe(false);
+  });
+
+  test('a card with no title, rating or reviews has nulls, not 0 or N/A', () => {
+    const p = Parsers.scrapeProduct(one('<div class="s-result-item" data-asin="B0BARE"></div>'));
+    expect(p).toMatchObject({ name: null, price: null, priceCents: null, rating: null, reviewCount: null });
   });
 });
 

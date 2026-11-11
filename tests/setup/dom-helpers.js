@@ -25,9 +25,11 @@ function quietConsole() {
  * @param {string} scriptPath - Relative path from project root to the script file
  * @param {string} html - HTML content to load into the DOM
  * @param {string} [url='https://www.amazon.com/s?k=test&page=1'] - Page URL
+ * @param {Object} [options]
+ * @param {Object} [options.flags] - Overrides for scripts/lib/flags.js, e.g. { CLOUD_SYNC: true }
  * @returns {Object} VM context with all script functions accessible
  */
-function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=test&page=1') {
+function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=test&page=1', options = {}) {
   const dom = new JSDOM(html, { url, runScripts: 'outside-only', virtualConsole: quietConsole() });
 
   // Polyfill innerText (JSDOM doesn't implement it)
@@ -84,10 +86,12 @@ function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=t
   // declarations share one lexical environment only within a single
   // runInContext call, so they are concatenated ahead of the target script.
   let preamble = '';
-  for (const rel of ['scripts/modules/price.js', 'scripts/lib/parsers.js', 'scripts/modules/delta.js']) {
+  for (const rel of ['scripts/modules/price.js', 'scripts/lib/parsers.js', 'scripts/lib/run.js', 'scripts/lib/flags.js', 'scripts/modules/delta.js']) {
     const dep = path.resolve(__dirname, '../../', rel);
     if (fs.existsSync(dep)) preamble += fs.readFileSync(dep, 'utf8') + '\n';
   }
+  if (options.flags) preamble += `Object.assign(Flags, ${JSON.stringify(options.flags)});
+`;
   const code = fs.readFileSync(absolutePath, 'utf8');
 
   vm.runInContext(preamble + code, context);

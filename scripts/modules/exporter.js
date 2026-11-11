@@ -35,58 +35,102 @@ const Exporter = {
         return `${sanitizedName}_scraped_data_${date}.${format}`;
     },
 
+    /** A cell starting with one of these runs as a formula in a spreadsheet. */
+    FORMULA_START: /^[=+\-@\t\r]/,
+
     /**
-     * Export product data as CSV.
-     * Includes proper escaping for fields containing commas or quotes.
-     * If spread data is available, includes spread columns.
+     * One CSV cell (RFC 4180). Text is always quoted, with inner quotes
+     * doubled, and text that a spreadsheet would run as a formula gets a
+     * leading apostrophe. Numbers are written bare; null is an empty cell.
+     *
+     * @param {*} value
+     * @returns {string}
+     */
+    csvCell(value) {
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'number') return Number.isFinite(value) ? String(value) : '';
+        let text = String(value);
+        if (this.FORMULA_START.test(text)) text = "'" + text;
+        return '"' + text.replace(/"/g, '""') + '"';
+    },
+
+    /**
+     * The product's price in dollars, or null when it has no USD price.
+     * Uses priceCents; older records carry only the display string.
+     *
+     * @param {Object} item
+     * @returns {number|null}
+     */
+    priceDollars(item) {
+        let cents = item ? item.priceCents : null;
+        if (cents === undefined) {
+            const P = typeof Price !== 'undefined' ? Price : require('./price.js');
+            cents = typeof item.price === 'number' ? P.priceToCents(item.price) : P.usdToCents(item.price);
+        }
+        return typeof cents === 'number' && Number.isFinite(cents) ? cents / 100 : null;
+    },
+
+    /**
+     * Export product data as CSV: UTF-8 with a BOM so Excel reads accents
+     * and symbols, CRLF line ends, and every field through csvCell. Price
+     * is a plain number of dollars. If spread data is available, includes
+     * spread columns.
      *
      * @param {Object[]} results - Array of product objects
      * @param {Object} [spreadResults=null] - Optional map of ASIN → spread data
      * @returns {{blob: Blob, filename: string}} CSV blob and suggested filename
      */
     exportToCSV(results, spreadResults = null) {
+        return {
+            blob: new Blob([this.buildCSV(results, spreadResults)], { type: 'text/csv;charset=utf-8;' }),
+            filename: this.getFileName(results, 'csv')
+        };
+    },
+
+    /**
+     * The CSV text behind exportToCSV.
+     *
+     * @param {Object[]} results
+     * @param {Object} [spreadResults=null]
+     * @returns {string}
+     */
+    buildCSV(results, spreadResults = null) {
         const hasSpread = spreadResults && Object.keys(spreadResults).length > 0;
-        const headers = ['Product Name', 'ASIN', 'Price', 'Rating', 'Review Count', 'URL'];
+        const headers = ['Product Name', 'ASIN', 'Price (USD)', 'Rating', 'Review Count', 'URL'];
         if (hasSpread) {
             headers.push('Seller Count', 'Min Offer', 'Max Offer', 'Price Spread', 'CV %', 'Arbitrage Score');
         }
-        const rows = [headers.join(',')];
+        const num = (v) => (typeof v === 'number' ? v : null);
+        const rows = [headers];
 
         results.forEach(item => {
             const row = [
-                `"${(item.name || '').replace(/"/g, '""')}"`,
-                item.asin || '',
-                item.price || '',
-                item.rating || '',
-                item.reviewCount || '',
-                `"${item.url || ''}"`
+                item.name,
+                item.asin,
+                this.priceDollars(item),
+                num(item.rating),
+                num(item.reviewCount),
+                item.url
             ];
 
             if (hasSpread) {
                 const spread = spreadResults[item.asin];
-                if (spread && spread.sellerPrices && typeof SpreadAnalyzer !== 'undefined') {
-                    const metrics = SpreadAnalyzer.calculateSpread(spread.sellerPrices);
-                    if (metrics) {
-                        const score = SpreadAnalyzer.calculateArbitrageScore(metrics);
-                        row.push(metrics.sellerCount, metrics.minPrice, metrics.maxPrice,
-                                 metrics.absoluteSpread, metrics.coefficientOfVariation, score);
-                    } else {
-                        row.push('', '', '', '', '', '');
-                    }
+                const metrics = spread && spread.sellerPrices && typeof SpreadAnalyzer !== 'undefined'
+                    ? SpreadAnalyzer.calculateSpread(spread.sellerPrices)
+                    : null;
+                if (metrics) {
+                    row.push(metrics.sellerCount, metrics.minPrice, metrics.maxPrice,
+                             metrics.absoluteSpread, metrics.coefficientOfVariation,
+                             SpreadAnalyzer.calculateArbitrageScore(metrics));
                 } else {
-                    row.push('', '', '', '', '', '');
+                    row.push(null, null, null, null, null, null);
                 }
             }
 
-            rows.push(row.join(','));
+            rows.push(row);
         });
 
-        const csvContent = rows.join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        return {
-            blob,
-            filename: this.getFileName(results, 'csv')
-        };
+        return '\uFEFF' + rows.map(row => row.map(v => this.csvCell(v)).join(',')).join('\r\n') + '\r\n';
     },
 
     /**
@@ -158,47 +202,31 @@ const Exporter = {
      * @returns {Object} XLSX.js worksheet object
      */
     createDataSheet(results) {
-        // Calculate averages
-        const validPrices = results
-            .map(r => parseFloat(String(r.price).replace(/[^0-9.]/g, '')))
-            .filter(p => !isNaN(p) && p > 0);
-        const validRatings = results
-            .map(r => parseFloat(r.rating))
-            .filter(r => !isNaN(r) && r > 0);
+        // Unknown values stay empty cells; only real numbers are averaged.
+        const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+        const mean = (values) => {
+            const known = values.filter(v => v !== null);
+            return known.length ? Math.round((known.reduce((a, b) => a + b, 0) / known.length) * 100) / 100 : null;
+        };
+        const rows = results.map(item => [
+            item.name || '',
+            item.asin || '',
+            this.priceDollars(item),
+            num(item.rating),
+            num(item.reviewCount)
+        ]);
 
-        const avgPrice = validPrices.length > 0
-            ? (validPrices.reduce((a, b) => a + b, 0) / validPrices.length).toFixed(2)
-            : 0;
-        const avgRating = validRatings.length > 0
-            ? (validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(2)
-            : 0;
-
-        // Build worksheet data
         const wsData = [
             ['Amazon Product Analysis Report', '', '', '', ''],
             [],
             ['Report Details', '', '', 'Summary Statistics', ''],
             ['Generated Date:', new Date().toLocaleDateString(), '', 'Total Products:', results.length],
-            ['Time:', new Date().toLocaleTimeString(), '', 'Average Rating:', parseFloat(avgRating)],
-            ['Status:', 'Complete', '', 'Average Price:', parseFloat(avgPrice)],
+            ['Time:', new Date().toLocaleTimeString(), '', 'Average Rating:', mean(rows.map(r => r[3]))],
+            ['Status:', 'Complete', '', 'Average Price:', mean(rows.map(r => r[2]))],
             [],
-            ['Product Name', 'ASIN', 'Price ($)', 'Rating', 'Review Count']
+            ['Product Name', 'ASIN', 'Price ($)', 'Rating', 'Review Count'],
+            ...rows
         ];
-
-        // Add data rows
-        results.forEach(item => {
-            const price = parseFloat(String(item.price).replace(/[^0-9.]/g, '')) || 0;
-            const rating = parseFloat(item.rating) || 0;
-            const reviewCount = parseInt(item.reviewCount) || 0;
-
-            wsData.push([
-                item.name || '',
-                item.asin || '',
-                price,
-                rating,
-                reviewCount
-            ]);
-        });
 
         const ws = XLSX.utils.aoa_to_sheet(wsData);
 
@@ -270,11 +298,12 @@ const Exporter = {
         // Add top opportunities if available
         if (analysisReport && analysisReport.topOpportunities) {
             analysisReport.topOpportunities.slice(0, 10).forEach(opp => {
+                const score = opp.opportunityScore;
                 chartData.push([
                     opp.name?.substring(0, 40) || '',
-                    opp.price || '',
-                    opp.rating || '',
-                    opp.opportunityScore?.toFixed(1) || ''
+                    this.priceDollars(opp),
+                    typeof opp.rating === 'number' ? opp.rating : null,
+                    typeof score === 'number' ? Math.round(score * 10) / 10 : null
                 ]);
             });
         }

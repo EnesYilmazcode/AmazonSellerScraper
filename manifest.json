@@ -30,6 +30,8 @@
             "js": [
                 "scripts/modules/price.js",
                 "scripts/lib/parsers.js",
+                "scripts/lib/run.js",
+                "scripts/lib/flags.js",
                 "scripts/modules/delta.js",
                 "scripts/content/scraper.js",
                 "scripts/content/chatbot.js",

@@ -61,18 +61,65 @@ const Delta = {
      * observed the values. Missing numeric fields become null (not 0) to
      * preserve the "unknown vs zero" distinction.
      *
+     * A field this scrape could not read keeps the previous snapshot's value,
+     * so one failed parse does not wipe the baseline. `carried` then maps the
+     * field to when that value was last actually seen. `firstSeenAt`, set
+     * by the 2.0 migration, carries over unchanged.
+     *
      * @param {Object} product - Scraped product
-     * @returns {{priceCents: number|null, rating: number|null, reviewCount: number|null, runId: string|null, scrapedAt: string|null}}
+     * @param {Object|null} [prev] - The snapshot this one replaces
+     * @returns {{priceCents: number|null, rating: number|null, reviewCount: number|null, runId: string|null, scrapedAt: string|null, carried?: Object}}
      */
-    snapshot(product) {
+    snapshot(product, prev = null) {
         const numOrNull = (v) => (typeof v === 'number' ? v : null);
-        return {
+        const snap = {
             priceCents: numOrNull(product.priceCents),
             rating: numOrNull(product.rating),
             reviewCount: numOrNull(product.reviewCount),
             runId: typeof product.runId === 'string' ? product.runId : null,
             scrapedAt: typeof product.scrapedAt === 'string' ? product.scrapedAt : null
         };
+        const carried = {};
+        for (const field of ['priceCents', 'rating', 'reviewCount']) {
+            if (snap[field] !== null || !prev || numOrNull(prev[field]) === null) continue;
+            snap[field] = prev[field];
+            carried[field] = (prev.carried && prev.carried[field]) || prev.scrapedAt || null;
+        }
+        if (Object.keys(carried).length) snap.carried = carried;
+        if (prev && prev.firstSeenAt) snap.firstSeenAt = prev.firstSeenAt;
+        return snap;
+    },
+
+    /** lastValues keeps at most this many ASINs... */
+    MAX_ENTRIES: 5000,
+    /** ...none last seen more than this many days ago. A year keeps a 2.0 user's February scrape. */
+    MAX_AGE_DAYS: 365,
+
+    /**
+     * Bound lastValues so it cannot fill the storage quota (F-26). Drops
+     * snapshots older than MAX_AGE_DAYS, then keeps the MAX_ENTRIES most
+     * recently seen. A snapshot with no date counts as oldest but is not
+     * dropped for age alone.
+     *
+     * @param {Object} lastValues - asin -> snapshot
+     * @param {{max?: number, maxAgeDays?: number, now?: number}} [opts]
+     * @returns {Object} A new, bounded map
+     */
+    prune(lastValues, { max = this.MAX_ENTRIES, maxAgeDays = this.MAX_AGE_DAYS, now = Date.now() } = {}) {
+        const cutoff = now - maxAgeDays * 86400000;
+        const seen = (snap) => {
+            const t = Date.parse((snap && snap.scrapedAt) || '');
+            return Number.isNaN(t) ? null : t;
+        };
+        let entries = Object.entries(lastValues || {}).filter(([, snap]) => {
+            const t = seen(snap);
+            return t === null || t >= cutoff;
+        });
+        if (entries.length > max) {
+            entries.sort((a, b) => (seen(b[1]) ?? -Infinity) - (seen(a[1]) ?? -Infinity));
+            entries = entries.slice(0, max);
+        }
+        return Object.fromEntries(entries);
     }
 };
 

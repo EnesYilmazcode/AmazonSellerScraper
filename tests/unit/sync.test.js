@@ -165,6 +165,23 @@ describe('sync.js — syncToCloud', () => {
     expect(run.data.pagesDone).toBe(2);
   });
 
+  test('counts every placement and sponsored card, and skips a missing name (F-27, F-28)', async () => {
+    const bundle = seedBundle();
+    bundle.syncQueue[0].placements = [
+      { page: 1, position: 1, sponsored: true, rank: null },
+      { page: 1, position: 4, sponsored: false, rank: 3 },
+    ];
+    bundle.syncQueue[1].name = null;
+    bundle.syncQueue[1].url = 'https://www.amazon.com/sspa/click?url=x';
+    await syncToCloud(UID, bundle);
+    const startMs = Date.parse('2026-06-21T10:00:00.000Z');
+    const run = findWrite(`workspaces/${UID}/runs/k_wireless-mouse_${startMs}`);
+    expect(run.data.counters).toMatchObject({ placements: 3, uniqueAsins: 2, sponsored: 1 });
+    const seen = findWrite(`workspaces/${UID}/products/B0SEEN00002`);
+    expect(seen.data).not.toHaveProperty('name');
+    expect(seen.data.url).toBe('https://www.amazon.com/dp/B0SEEN00002');
+  });
+
   test('writes the source spine doc with lastRunId', async () => {
     await syncToCloud(UID, seedBundle());
     const src = findWrite(`workspaces/${UID}/sources/k_wireless-mouse`);
