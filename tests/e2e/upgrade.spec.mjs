@@ -1,7 +1,7 @@
 // Upgrade in place from an older build: load it unpacked, scrape, then swap
 // the folder to the current build and reload, as a Chrome Web Store
 // auto-update does. From the live store build (v2.0, commit 7c2ba1c), and
-// from 2.1 (commit 40be432) in the middle of a run. Based on the audit's
+// from 2.1 (commit 4ed57b8) in the middle of a run. Based on the audit's
 // upgrade harness.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,7 +15,7 @@ import {
 import { serveAmazon, simplePlan, asinFor } from './lib/amazon.mjs';
 
 const LIVE_REV = '7c2ba1c';
-const V21_REV = '40be432';
+const V21_REV = '4ed57b8'; // tip of rebuild/p2-v2.1, the 2.1 store zip
 const V20 = path.join(BUILD_DIR, 'v2.0');
 const V21 = path.join(BUILD_DIR, 'v2.1');
 const SLOT = path.join(BUILD_DIR, 'upgrade-slot');
