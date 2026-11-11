@@ -221,7 +221,7 @@ exports[`current price, rating and review parsers rating and review strings 1`] 
 
 exports[`current scraper behavior on the corpus 2026-02/aod-synthetic 1`] = `
 {
-  "currentItemCount": undefined,
+  "currentItemCount": 0,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/gp/aod/ajax?asin=B0TEST001&page=2&ref=sr_pg_2",
@@ -232,16 +232,17 @@ exports[`current scraper behavior on the corpus 2026-02/aod-synthetic 1`] = `
   "results": [],
   "runPage": 0,
   "runPages": [],
-  "runStatus": "interrupted",
+  "runStatus": null,
   "sent": [
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
   ],
+  "started": "refused",
 }
 `;
 
 exports[`current scraper behavior on the corpus 2026-02/offer-classic-synthetic 1`] = `
 {
-  "currentItemCount": undefined,
+  "currentItemCount": 0,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/gp/offer-listing/B0TEST001?page=2&ref=sr_pg_2",
@@ -252,10 +253,11 @@ exports[`current scraper behavior on the corpus 2026-02/offer-classic-synthetic 
   "results": [],
   "runPage": 0,
   "runPages": [],
-  "runStatus": "interrupted",
+  "runStatus": null,
   "sent": [
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
   ],
+  "started": "refused",
 }
 `;
 
@@ -311,9 +313,10 @@ exports[`current scraper behavior on the corpus 2026-02/search-lastpage 1`] = `
   ],
   "runStatus": "complete",
   "sent": [
-    "UPDATE_PROGRESS",
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
+    "PAGE_RESULT",
   ],
+  "started": "started",
 }
 `;
 
@@ -461,14 +464,16 @@ exports[`current scraper behavior on the corpus 2026-02/search-results 1`] = `
   ],
   "runStatus": "running",
   "sent": [
-    "UPDATE_PROGRESS",
+    "PAGE_READY",
+    "PAGE_RESULT",
   ],
+  "started": "started",
 }
 `;
 
 exports[`current scraper behavior on the corpus 2026-09/aod-pinned-only 1`] = `
 {
-  "currentItemCount": undefined,
+  "currentItemCount": 0,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/gp/product/ajax/aodAjaxMain/?asin=B09B8V1LZ3&page=2&ref=sr_pg_2",
@@ -479,16 +484,17 @@ exports[`current scraper behavior on the corpus 2026-09/aod-pinned-only 1`] = `
   "results": [],
   "runPage": 0,
   "runPages": [],
-  "runStatus": "interrupted",
+  "runStatus": null,
   "sent": [
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
   ],
+  "started": "refused",
 }
 `;
 
 exports[`current scraper behavior on the corpus 2026-09/captcha-synthetic 1`] = `
 {
-  "currentItemCount": undefined,
+  "currentItemCount": 0,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/s?k=yoga+mat&page=4&ref=sr_pg_4",
@@ -499,16 +505,17 @@ exports[`current scraper behavior on the corpus 2026-09/captcha-synthetic 1`] = 
   "results": [],
   "runPage": 0,
   "runPages": [],
-  "runStatus": "blocked",
+  "runStatus": null,
   "sent": [
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
   ],
+  "started": "refused",
 }
 `;
 
 exports[`current scraper behavior on the corpus 2026-09/interstitial-akamai 1`] = `
 {
-  "currentItemCount": undefined,
+  "currentItemCount": 0,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/s?k=usb+c+cable&page=3&ref=sr_pg_3",
@@ -519,16 +526,17 @@ exports[`current scraper behavior on the corpus 2026-09/interstitial-akamai 1`] 
   "results": [],
   "runPage": 0,
   "runPages": [],
-  "runStatus": "blocked",
+  "runStatus": null,
   "sent": [
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
   ],
+  "started": "refused",
 }
 `;
 
 exports[`current scraper behavior on the corpus 2026-09/product-dp 1`] = `
 {
-  "currentItemCount": undefined,
+  "currentItemCount": 0,
   "helpers": {
     "hasNext": false,
     "nextUrl": "https://www.amazon.com/dp/B09B8V1LZ3?page=2&ref=sr_pg_2",
@@ -539,10 +547,11 @@ exports[`current scraper behavior on the corpus 2026-09/product-dp 1`] = `
   "results": [],
   "runPage": 0,
   "runPages": [],
-  "runStatus": "interrupted",
+  "runStatus": null,
   "sent": [
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
   ],
+  "started": "refused",
 }
 `;
 
@@ -628,9 +637,10 @@ exports[`current scraper behavior on the corpus 2026-09/search-no-pagination-syn
   ],
   "runStatus": "complete",
   "sent": [
-    "UPDATE_PROGRESS",
-    "SCRAPING_COMPLETE",
+    "PAGE_READY",
+    "PAGE_RESULT",
   ],
+  "started": "started",
 }
 `;
 
@@ -754,8 +764,10 @@ exports[`current scraper behavior on the corpus 2026-09/search-title-recipe-synt
   ],
   "runStatus": "running",
   "sent": [
-    "UPDATE_PROGRESS",
+    "PAGE_READY",
+    "PAGE_RESULT",
   ],
+  "started": "started",
 }
 `;
 
@@ -2559,7 +2571,9 @@ exports[`current scraper behavior on the corpus 2026-09/search-yoga-mat 1`] = `
   ],
   "runStatus": "running",
   "sent": [
-    "UPDATE_PROGRESS",
+    "PAGE_READY",
+    "PAGE_RESULT",
   ],
+  "started": "started",
 }
 `;

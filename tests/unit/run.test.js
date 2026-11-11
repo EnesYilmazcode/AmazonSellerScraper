@@ -8,10 +8,12 @@ const page = (kind, extra = {}) => ({
   ...extra,
 });
 
+const running = (opts) => Run.transition(Run.create(opts), 'running');
+
 describe('Run.create', () => {
-  test('starts running, bound to its tab', () => {
+  test('starts in starting, bound to its tab', () => {
     const r = Run.create({ runId: 'r1', tabId: 7, maxPages: 5, now: 1000 });
-    expect(r).toMatchObject({ runId: 'r1', tabId: 7, status: 'running', page: 0, maxPages: 5, heartbeat: 1000 });
+    expect(r).toMatchObject({ runId: 'r1', tabId: 7, state: 'starting', reason: null, page: 0, maxPages: 5, heartbeat: 1000 });
   });
 
   test.each([[undefined], [0], [-3], ['x'], [2.5]])('maxPages %p falls back to the default', (n) => {
@@ -23,8 +25,47 @@ describe('Run.create', () => {
   });
 });
 
+describe('the state machine', () => {
+  test('no run is idle', () => {
+    expect(Run.stateOf(null)).toBe('idle');
+    expect(Run.stateOf({ status: 'running' })).toBe('idle');
+  });
+
+  test('a run goes starting, running, stopping, stopped', () => {
+    let r = Run.create({ runId: 'r', tabId: 1 });
+    r = Run.transition(r, 'running');
+    r = Run.transition(r, 'stopping');
+    r = Run.finish(r, 'stopped', 9);
+    expect(r).toMatchObject({ state: 'stopped', reason: 'stopped', finishedAt: 9 });
+  });
+
+  test.each(Object.entries(Run.END_STATE))('ending for %s leaves the run %s', (reason, state) => {
+    expect(Run.finish(running({ runId: 'r', tabId: 1 }), reason)).toMatchObject({ state, reason });
+    expect(Run.isEnded(Run.finish(running({ runId: 'r', tabId: 1 }), reason))).toBe(true);
+  });
+
+  test('an ended run cannot be reopened or ended twice', () => {
+    const ended = Run.finish(running({ runId: 'r', tabId: 1 }), 'complete');
+    expect(() => Run.transition(ended, 'running')).toThrow(/cannot go from done to running/);
+    expect(() => Run.finish(ended, 'stopped')).toThrow();
+  });
+
+  test('stopping cannot go back to running', () => {
+    const r = Run.transition(running({ runId: 'r', tabId: 1 }), 'stopping');
+    expect(Run.canTransition('stopping', 'running')).toBe(false);
+    expect(() => Run.transition(r, 'running')).toThrow();
+  });
+
+  test('every state is known and only live states are active', () => {
+    expect(Run.STATES).toEqual(['idle', 'starting', 'running', 'stopping', 'stopped', 'blocked', 'failed', 'done']);
+    for (const s of Run.STATES) {
+      expect(Run.isActive({ state: s })).toBe(['starting', 'running', 'stopping'].includes(s));
+    }
+  });
+});
+
 describe('Run ownership and staleness', () => {
-  const run = Run.create({ runId: 'r1', tabId: 7, now: 1000 });
+  const run = running({ runId: 'r1', tabId: 7, now: 1000 });
 
   test('only the run tab owns a running run', () => {
     expect(Run.owns(run, 7)).toBe(true);
@@ -41,7 +82,7 @@ describe('Run ownership and staleness', () => {
   });
 
   test('finish records the reason and the time', () => {
-    expect(Run.finish(run, 'blocked', 5000)).toMatchObject({ status: 'blocked', finishedAt: 5000, nextHref: null });
+    expect(Run.finish(run, 'blocked', 5000)).toMatchObject({ state: 'blocked', reason: 'blocked', finishedAt: 5000, nextHref: null });
   });
 });
 
@@ -92,7 +133,7 @@ describe('Run text', () => {
   });
 
   test('only complete reads as success', () => {
-    const run = Run.create({ runId: 'r', tabId: 1 });
+    const run = running({ runId: 'r', tabId: 1 });
     expect(Run.describe(Run.finish(run, 'complete'), 3)).toEqual({ text: 'Scraping complete! 3 products found.', type: 'success' });
     for (const reason of ['stopped', 'blocked', 'selectors_broken', 'storage_full', 'interrupted', 'updated']) {
       expect(Run.describe(Run.finish(run, reason), 3).type).toBe('warning');
@@ -126,5 +167,14 @@ describe('Run.expects', () => {
   test('a run with no next page, or not running, expects nothing', () => {
     expect(Run.expects({ ...run, nextHref: null }, run.nextHref)).toBe(false);
     expect(Run.expects(Run.finish(run, 'complete'), run.nextHref)).toBe(false);
+  });
+});
+
+describe('Run.sourceOf', () => {
+  const now = Date.parse('2026-09-01T00:00:00Z');
+  test('a storefront, a keyword search and junk', () => {
+    expect(Run.sourceOf('https://www.amazon.com/s?me=A1B2&k=x', now)).toMatchObject({ type: 'storefront', sellerId: 'A1B2', keyword: null });
+    expect(Run.sourceOf('https://www.amazon.com/s?k=yoga+mat', now)).toMatchObject({ type: 'keyword', sellerId: null, keyword: 'yoga mat', startedAt: '2026-09-01T00:00:00.000Z' });
+    expect(Run.sourceOf('not a url', now)).toMatchObject({ type: 'keyword', sellerId: null, keyword: null });
   });
 });

@@ -7,10 +7,11 @@
  *
  * Flow:
  * 1. Receives START_SPREAD_ANALYSIS message from popup
- * 2. Reads product ASINs from chrome.storage
+ * 2. Asks the service worker for the last run's products (GET_RESULTS)
  * 3. For each ASIN, fetches the offer listing page
  * 4. Parses seller prices using DOMParser + cascading selectors
- * 5. Stores spread data back in chrome.storage
+ * 5. Sends each product's spread data to the worker (SPREAD_RESULT), which
+ *    stores it; this script never writes storage
  * 6. Sends progress updates to popup
  *
  * Rate limiting: 2-second delay between requests to avoid Amazon throttling.
@@ -21,6 +22,30 @@
 
 /** @type {boolean} Whether spread analysis is currently running */
 let isAnalyzing = false;
+
+/** False once the extension was updated or removed under this page. */
+function offersAlive() {
+    try {
+        return !!(chrome.runtime && chrome.runtime.id);
+    } catch (e) {
+        return false;
+    }
+}
+
+/** Sends `message` to the extension; resolves null when nothing answers. */
+function tell(message) {
+    return new Promise(resolve => {
+        if (!offersAlive()) return resolve(null);
+        try {
+            chrome.runtime.sendMessage(message, response => {
+                if (chrome.runtime.lastError) return resolve(null);
+                resolve(response || null);
+            });
+        } catch (e) {
+            resolve(null);
+        }
+    });
+}
 
 // Pure parsing lives in scripts/lib/parsers.js. These names stay for the fetch
 // loop below and for the unit tests that load this file.
@@ -112,8 +137,8 @@ async function runSpreadAnalysis(products) {
     console.log(`[ProScan Spread] Starting analysis for ${total} products`);
 
     for (let i = 0; i < total; i++) {
-        // Check if user cancelled
-        if (!isAnalyzing) {
+        // Check if user cancelled, or the extension went away
+        if (!isAnalyzing || !offersAlive()) {
             console.log('[ProScan Spread] Analysis cancelled by user');
             break;
         }
@@ -139,14 +164,12 @@ async function runSpreadAnalysis(products) {
             console.log(`[ProScan Spread] No offers found for ${asin}`);
         }
 
-        // Save progress to storage incrementally
-        await new Promise(resolve => {
-            chrome.storage.local.set({ spreadResults }, resolve);
-        });
+        // The worker stores it
+        await tell({ type: Msg.T.SPREAD_RESULT, asin, data: spreadResults[asin] });
 
         // Send progress update to popup
-        chrome.runtime.sendMessage({
-            type: 'SPREAD_PROGRESS',
+        tell({
+            type: Msg.T.SPREAD_PROGRESS,
             current: i + 1,
             total: total,
             asin: asin,
@@ -162,13 +185,8 @@ async function runSpreadAnalysis(products) {
     // Analysis complete
     isAnalyzing = false;
 
-    // Final save
-    await new Promise(resolve => {
-        chrome.storage.local.set({ spreadResults, isSpreadAnalyzing: false }, resolve);
-    });
-
-    chrome.runtime.sendMessage({
-        type: 'SPREAD_ANALYSIS_COMPLETE',
+    tell({
+        type: Msg.T.SPREAD_ANALYSIS_COMPLETE,
         totalAnalyzed: Object.keys(spreadResults).length
     });
 
@@ -183,34 +201,32 @@ async function runSpreadAnalysis(products) {
  * - STOP_SPREAD_ANALYSIS: Cancel the running analysis
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'START_SPREAD_ANALYSIS') {
+    if (!offersAlive() || !request) return false;
+
+    if (request.type === Msg.T.START_SPREAD_ANALYSIS) {
         if (isAnalyzing) {
             sendResponse({ status: 'already_running' });
-            return true;
+            return false;
         }
 
-        // Read products from storage and start analysis
-        chrome.storage.local.get(['results'], (data) => {
-            const products = data.results || [];
+        tell({ type: Msg.T.GET_RESULTS }).then((data) => {
+            const products = (data && data.results) || [];
             if (products.length === 0) {
                 sendResponse({ status: 'no_products' });
                 return;
             }
-
-            chrome.storage.local.set({ isSpreadAnalyzing: true }, () => {
-                runSpreadAnalysis(products);
-                sendResponse({ status: 'started', total: products.length });
-            });
+            runSpreadAnalysis(products);
+            sendResponse({ status: 'started', total: products.length });
         });
 
         return true; // Keep channel open for async response
     }
 
-    if (request.type === 'STOP_SPREAD_ANALYSIS') {
+    if (request.type === Msg.T.STOP_SPREAD_ANALYSIS) {
         isAnalyzing = false;
         sendResponse({ status: 'stopping' });
-        return true;
+        return false;
     }
 
-    return true;
+    return false;
 });

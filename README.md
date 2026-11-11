@@ -58,11 +58,14 @@ ProScan is a Chrome extension that scrapes Amazon product listings across multip
 
 ```
 User clicks "Start Scraping"
-  → popup.js pings the tab (offers a reload if ProScan is not loaded there)
-  → popup.js creates a run bound to that tab and sends START_SCRAPING
-  → scraper.js classifies the page, then extracts products
-  → Results and run progress stored in chrome.storage.local
-  → Follows the page's Next link after a 2 to 4 second delay
+  → popup.js sends START_RUN to the service worker
+  → The worker pings the tab (the popup offers a reload if ProScan is not
+    loaded there), makes a run bound to that tab and asks it to parse
+  → scraper.js classifies the page, extracts products and sends PAGE_RESULT;
+    it never writes storage and never navigates
+  → The worker saves the page to IndexedDB in one transaction
+  → After a 2 to 4 second delay the worker opens the page's Next link
+    with tabs.update, and the new page reports in
   → Repeats until the last page or the page cap (settings.maxPages, default 20)
   → The run ends with a reason: complete, stopped, blocked (captcha,
     bot check, sign-in), selectors_broken, storage_full, interrupted or
@@ -76,7 +79,7 @@ User clicks "Start Scraping"
 ```
 User types question in floating widget
   → chatbot.js sends CHAT_MESSAGE (question + last few turns) to service-worker.js
-  → Service worker reads the user's key and the current run from storage
+  → Service worker reads the user's key and the latest run from its storage
   → scripts/lib/chat.js builds the Gemini request (model id is GEMINI_MODEL there)
   → Response displayed in chat bubble as plain text
 ```
@@ -173,10 +176,12 @@ The Jest suite includes a golden corpus of saved Amazon pages (`tests/pages/`, s
 
 ## Chrome APIs Used
 
-- `chrome.storage.local` -- Persistent state and product data
-- `chrome.runtime.sendMessage` / `onMessage` -- Inter-script messaging
+- `chrome.storage.local` -- Settings and the schema version only
+- `chrome.storage.session` -- The live run record, written by the service worker
+- IndexedDB (the extension's own origin, no permission) -- Runs, products, pages, lastValues and the sync outbox. Starting a run keeps the 10 newest runs and removes older ones, except runs still waiting to sync.
+- `chrome.runtime.sendMessage` / `onMessage` -- Messages, all listed in `scripts/lib/messages.js`
 - `chrome.downloads` -- File export downloads
-- `chrome.tabs` -- Active tab communication
+- `chrome.tabs` -- Messages to the run's tab, `tabs.update` for the next page, and `onRemoved` / `onUpdated` to notice the tab going away (none of these need the `tabs` permission)
 
 ## Project Structure
 
@@ -189,17 +194,21 @@ AmazonSellerScraper/
 │   └── popup.js                  # UI state management and export handling
 ├── scripts/
 │   ├── content/
-│   │   ├── scraper.js            # Scrape loop: storage, messages, pagination
+│   │   ├── scraper.js            # Parses a search page and reports it to the worker
 │   │   ├── chatbot.js            # Floating AI chatbot (Shadow DOM)
 │   │   └── offer-fetcher.js      # Seller offer page fetching for spread analysis
 │   ├── lib/
 │   │   ├── parsers.js            # Pure search and offer page parsing
-│   │   ├── run.js                # The scrape run record and its end reasons
-│   │   ├── flags.js              # Build flags (cloud sync is off in 2.1)
+│   │   ├── messages.js           # Every message type and who may send it
+│   │   ├── run.js                # The run state machine and its end reasons
+│   │   ├── flags.js              # Build flags (cloud sync is off until 2.3)
 │   │   ├── migrate.js            # Storage schema migrations (schemaVersion)
 │   │   └── chat.js               # Gemini request builder and run scoping
 │   ├── background/
-│   │   └── service-worker.js     # Message routing + Gemini API
+│   │   ├── service-worker.js     # Wires the router, the engine, the chat and migrations
+│   │   ├── router.js             # The one message router
+│   │   ├── engine.js             # Runs scrapes; the only writer of run data
+│   │   └── db.js                 # IndexedDB stores
 │   └── modules/
 │       ├── storage.js            # Chrome storage abstraction layer
 │       ├── analyzer.js           # Analytics engine + opportunity scoring

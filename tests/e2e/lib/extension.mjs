@@ -45,8 +45,83 @@ export async function extPage(ext) {
   return page;
 }
 
+/**
+ * Everything the extension has stored, read from an extension page without
+ * waking the service worker. From 2.2 the run is in chrome.storage.session
+ * and its data in IndexedDB; this folds them into the keys older builds kept
+ * in chrome.storage.local, so one scenario reads the same on any build:
+ * results and scrapeRunPages are the latest run's, run is its record,
+ * lastValues is keyed by ASIN and outbox lists what waits for sync.
+ */
 export async function getState(page) {
-  return page.evaluate(() => chrome.storage.local.get(null));
+  return page.evaluate(async () => {
+    const state = await chrome.storage.local.get(null);
+    const session = chrome.storage.session ? await chrome.storage.session.get(null) : {};
+    // Opening a database that does not exist would create an empty one.
+    const names = indexedDB.databases ? (await indexedDB.databases()).map((d) => d.name) : [];
+    if (!names.includes('proscan')) return { ...state, ...session };
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('proscan');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const all = (store, index, key) => new Promise((resolve, reject) => {
+      if (!db.objectStoreNames.contains(store)) return resolve([]);
+      const s = db.transaction(store).objectStore(store);
+      const req = index ? s.index(index).getAll(key) : s.getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    try {
+      const meta = await all('meta');
+      const latest = (meta.find((m) => m.key === 'latestRunId') || {}).value;
+      const runs = await all('runs');
+      const liveRun = session.run || null;
+      const runId = (liveRun && liveRun.runId) || latest;
+      const run = liveRun && liveRun.runId === runId ? liveRun : runs.find((r) => r.runId === runId);
+      const results = runId ? (await all('products', 'runId', runId)).sort((a, b) => a.n - b.n) : [];
+      const pages = runId ? (await all('placements', 'runId', runId)).sort((a, b) => a.pageIndex - b.pageIndex) : [];
+      const lastValues = {};
+      (await all('lastValues')).forEach(({ asin, ...snap }) => { lastValues[asin] = snap; });
+      const out = {
+        ...state,
+        results,
+        scrapeRunPages: pages,
+        lastValues,
+        outbox: await all('outbox'),
+        scrapeRuns: Object.fromEntries(runs.map((r) => [r.runId, r.source])),
+        isScrapingActive: !!run && ['starting', 'running', 'stopping'].includes(run.state),
+      };
+      if (run) out.run = run;
+      return out;
+    } finally {
+      db.close();
+    }
+  });
+}
+
+/** True once the run in `state` has ended. */
+export const ended = (state) => !!(state.run && (state.run.reason || (state.run.status && state.run.status !== 'running')));
+
+/**
+ * Seeds a finished run with `rows` as the latest run, the way a past scrape
+ * leaves it. Asks the worker for its state first, so the database exists.
+ */
+export async function seedRun(page, rows, runId = 'seeded') {
+  await page.evaluate(() => new Promise((r) => chrome.runtime.sendMessage({ type: 'GET_STATE' }, r)));
+  await page.evaluate(({ rows, runId }) => new Promise((resolve, reject) => {
+    const req = indexedDB.open('proscan');
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(['runs', 'products', 'meta'], 'readwrite');
+      tx.objectStore('runs').put({ runId, state: 'done', reason: 'complete', itemCount: rows.length, source: null });
+      rows.forEach((row, n) => tx.objectStore('products').put({ ...row, runId, n }));
+      tx.objectStore('meta').put({ key: 'latestRunId', value: runId });
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  }), { rows, runId });
 }
 
 /**
@@ -90,6 +165,8 @@ export async function waitForState(page, fn, { timeout = 20000, interval = 250 }
  */
 export function endReason(state) {
   if (state.scrapeEndReason) return state.scrapeEndReason;
+  if (state.run && state.run.reason) return state.run.reason;
+  if (state.run && state.run.state) return state.run.state;
   if (state.run && state.run.status) return state.run.status;
   return state.isScrapingActive ? 'running' : 'complete';
 }

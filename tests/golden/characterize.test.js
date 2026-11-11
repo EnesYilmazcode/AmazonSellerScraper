@@ -1,9 +1,12 @@
 /**
+ * @jest-environment node
+ *
  * Records what today's code does on every corpus page, bugs included, so
  * refactors can prove they changed nothing. The snapshot is the contract:
  * update it only in a commit that means to change behavior.
  */
 const { loadContentScript } = require('../setup/dom-helpers');
+const { createRig, settle } = require('../setup/engine-rig');
 const { corpus } = require('../setup/corpus');
 const Analyzer = require('../../scripts/modules/analyzer');
 const Price = require('../../scripts/modules/price');
@@ -16,56 +19,49 @@ const PRICE_STRINGS = [
   'Was: $30.00 Now: $20.00', 'N/A', '', null, 19.99,
 ];
 
-// Fake timers keep the 2 second page navigation from firing.
-beforeAll(() => jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask', 'Date'] }));
+beforeAll(() => jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] }));
 afterAll(() => jest.useRealTimers());
 
 function attempt(fn) {
   try { return fn(); } catch (e) { return `throws ${e.constructor.name}`; }
 }
 
-// Lets the scraper's promise chains settle; the storage mock is synchronous.
-async function flush() {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-}
-
+/**
+ * Starts a run on the page through the service worker engine and the real
+ * content script (tests/setup/engine-rig.js), then lets the page delay pass
+ * once to see where the run goes next. Other pages answer 404.
+ */
 async function runScrape(page) {
-  let listener = null;
-  const sent = [];
-  const origAdd = chrome.runtime.onMessage.addListener;
-  const origSend = chrome.runtime.sendMessage;
-  chrome.runtime.onMessage.addListener = (fn) => { listener = fn; };
-  chrome.runtime.sendMessage = (msg) => { sent.push(msg.type); };
-  chrome.storage.local._reset();
-  try {
-    const ctx = loadContentScript('scripts/content/scraper.js', page.html, page.expected.url);
-    const run = { ...Run.create({ runId: 'run-golden', tabId: 1, now: 0 }), startedAt: 0, heartbeat: 0 };
-    chrome.storage.local.set({ scrapeRunId: 'run-golden', scrapeRunPageIndex: 0, run, isScrapingActive: true });
-    listener({ type: 'START_SCRAPING', runId: 'run-golden', tabId: 1 }, {}, () => {});
-    await flush();
-    const store = chrome.storage.local._getStore();
-    const nav = ctx.console.log.mock.calls.map((c) => c[0]).filter((l) => /Navigating/.test(l));
-    return {
-      sent,
-      nav,
-      isScrapingActive: store.isScrapingActive,
-      runStatus: store.run.status,
-      runPage: store.run.page,
-      currentItemCount: store.currentItemCount,
-      runPages: (store.scrapeRunPages || []).map(({ pageIndex, count, url }) => ({ pageIndex, count, url })),
-      results: (store.results || []).map((r) => ({ ...r, scrapedAt: typeof r.scrapedAt })),
-      helpers: {
-        total: ctx.getTotalResults(),
-        hasNext: ctx.hasNextPage(),
-        nextUrl: ctx.getNextPageUrl(),
-      },
-    };
-  } finally {
-    chrome.storage.local._reset();
-    chrome.runtime.onMessage.addListener = origAdd;
-    chrome.runtime.sendMessage = origSend;
-    jest.clearAllTimers();
-  }
+  const rig = createRig({ site: (url) => (url === page.expected.url ? page.html : null), random: () => 0 });
+  const tabId = rig.openTab(page.expected.url);
+  await settle();
+  const started = await rig.popup({ type: 'START_RUN', tabId });
+  await settle();
+  const st = await rig.popup({ type: 'GET_STATE' });
+  const sent = rig.sent.map((m) => m.type);
+  const before = st.run || {};
+  await settle(4000);
+  const nav = rig.served.slice(1).map((s) => `[ProScan] Navigating to next page: ${s.url}`);
+  const ctx = rig.tabCtx(tabId);
+  const runId = before.runId;
+  return {
+    started: started.ok ? 'started' : started.error,
+    sent,
+    nav,
+    isScrapingActive: Run.isActive(before),
+    runStatus: before.reason || before.state || null,
+    runPage: before.page || 0,
+    currentItemCount: before.itemCount || 0,
+    runPages: (st.pages || []).map(({ pageIndex, count, url }) => ({ pageIndex, count, url })),
+    results: (st.results || []).map(({ n, ...r }) => ({
+      ...r, runId: r.runId === runId ? 'run-golden' : r.runId, scrapedAt: typeof r.scrapedAt,
+    })),
+    helpers: ctx ? {
+      total: ctx.getTotalResults(),
+      hasNext: ctx.hasNextPage(),
+      nextUrl: ctx.getNextPageUrl(),
+    } : null,
+  };
 }
 
 describe('current scraper behavior on the corpus', () => {

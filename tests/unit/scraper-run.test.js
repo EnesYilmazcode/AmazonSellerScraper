@@ -1,11 +1,11 @@
 /**
- * The scraper's run handling: tab ownership, Stop and the page cap. The
- * Chromium harness in tests/e2e covers the same in a real browser.
+ * The content script's side of a run: it parses and reports, and nothing
+ * else. Tab ownership, Stop and the page cap now live in the service
+ * worker and are tested in engine.test.js, over this same script.
  */
 const fs = require('fs');
 const path = require('path');
 const { loadContentScript } = require('../setup/dom-helpers');
-const Run = require('../../scripts/lib/run');
 
 const html = fs.readFileSync(path.join(__dirname, '../pages/2026-09/search-title-recipe-synthetic.html'), 'utf8');
 const URL1 = 'https://www.amazon.com/s?k=widget';
@@ -16,7 +16,7 @@ const settle = async () => {
 
 let listener;
 let sent;
-let tabIdForWorker;
+let replies;
 const orig = {};
 
 beforeEach(() => {
@@ -26,12 +26,13 @@ beforeEach(() => {
   orig.id = chrome.runtime.id;
   listener = null;
   sent = [];
-  tabIdForWorker = null;
+  replies = {};
   chrome.runtime.id = 'test-extension';
   chrome.runtime.onMessage.addListener = (fn) => { listener = fn; };
   chrome.runtime.sendMessage = (msg, cb) => {
-    sent.push(msg.type);
-    if (msg.type === 'WHO_AM_I' && cb) cb({ tabId: tabIdForWorker });
+    sent.push(msg);
+    const r = replies[msg.type];
+    if (cb) cb(typeof r === 'function' ? r(msg) : r);
   };
   chrome.storage.local._reset();
 });
@@ -40,120 +41,145 @@ afterEach(() => {
   chrome.runtime.onMessage.addListener = orig.add;
   chrome.runtime.sendMessage = orig.send;
   chrome.runtime.id = orig.id;
-  chrome.storage.local._reset();
   jest.clearAllTimers();
   jest.useRealTimers();
 });
 
-function seedRun(extra = {}) {
-  const run = { ...{ ...Run.create({ runId: 'r1', tabId: 5 }), nextHref: URL1 }, ...extra };
-  chrome.storage.local.set({ run, scrapeRunId: 'r1', scrapeRunPageIndex: 0, isScrapingActive: true });
-  return run;
-}
+const types = () => sent.map((m) => m.type);
 
-test('a page load in another tab does not join the run', async () => {
-  seedRun();
-  tabIdForWorker = 9;
+test('on load it says PAGE_READY and nothing more when the tab has no run', async () => {
+  replies.PAGE_READY = { idle: true };
   loadContentScript('scripts/content/scraper.js', html, URL1);
   await settle();
-  expect(chrome.storage.local._getStore().results).toBeUndefined();
-  expect(sent).toEqual(['WHO_AM_I']);
-});
-
-test('a page load in the run tab scrapes and schedules the next page', async () => {
-  seedRun();
-  tabIdForWorker = 5;
-  const ctx = loadContentScript('scripts/content/scraper.js', html, URL1);
+  jest.advanceTimersByTime(10000);
   await settle();
-  const store = chrome.storage.local._getStore();
-  expect(store.results.length).toBeGreaterThan(0);
-  expect(store.run).toMatchObject({ status: 'running', page: 1, lastUrl: URL1 });
-  expect(ctx.console.log.mock.calls.some((c) => /Navigating to next page/.test(c[0]))).toBe(true);
+  expect(types()).toEqual(['PAGE_READY']);
+  expect(sent[0].url).toBe(URL1);
 });
 
-test('Stop cancels the pending page and records the run as stopped', async () => {
-  seedRun();
-  tabIdForWorker = 5;
+test('asked to parse on load, it reports the page and then keeps a heartbeat', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 2 };
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  replies.HEARTBEAT = { active: true };
   loadContentScript('scripts/content/scraper.js', html, URL1);
   await settle();
-  const respond = jest.fn();
-  expect(listener({ type: 'STOP_SCRAPING', runId: 'r1' }, {}, respond)).toBe(true);
+  const report = sent.find((m) => m.type === 'PAGE_RESULT');
+  expect(report).toMatchObject({ runId: 'r1', page: 2, url: URL1 });
+  expect(report.result.kind).toBe('results');
+  expect(report.result.products.length).toBeGreaterThan(0);
+  jest.advanceTimersByTime(4100);
   await settle();
-  expect(respond).toHaveBeenCalledWith({ stopped: true });
-  expect(jest.getTimerCount()).toBe(0);
-  expect(chrome.storage.local._getStore().run.status).toBe('stopped');
-  expect(chrome.storage.local._getStore().isScrapingActive).toBe(false);
+  expect(types().filter((t) => t === 'HEARTBEAT')).toHaveLength(2);
 });
 
-test('Stop during a page save still ends the run as stopped', async () => {
-  seedRun();
-  tabIdForWorker = 5;
-  const realSet = chrome.storage.local.set;
-  let held = null;
-  chrome.storage.local.set = (items, cb) => {
-    if (items.results && !held) { held = () => realSet.call(chrome.storage.local, items, cb); return; }
-    return realSet.call(chrome.storage.local, items, cb);
-  };
-  try {
-    loadContentScript('scripts/content/scraper.js', html, URL1);
+test('the heartbeat stops when the worker says the run is over', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 1 };
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  replies.HEARTBEAT = { active: false };
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  for (let i = 0; i < 3; i++) {
+    jest.advanceTimersByTime(2000);
     await settle();
-    expect(held).not.toBeNull();
-    const respond = jest.fn();
-    listener({ type: 'STOP_SCRAPING', runId: 'r1' }, {}, respond);
-    await settle();
-    held();
-    await settle();
-  } finally {
-    chrome.storage.local.set = realSet;
   }
-  expect(chrome.storage.local._getStore().run.status).toBe('stopped');
-  expect(jest.getTimerCount()).toBe(0);
+  expect(types().filter((t) => t === 'HEARTBEAT')).toHaveLength(1);
 });
 
-test('the page cap ends the run on that page', async () => {
-  seedRun({ maxPages: 1 });
-  tabIdForWorker = 5;
+test('the last page stops the heartbeat, and RUN_ENDED does too', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 1 };
+  replies.PAGE_RESULT = { ok: true, next: 'end' };
   loadContentScript('scripts/content/scraper.js', html, URL1);
   await settle();
-  const store = chrome.storage.local._getStore();
-  expect(store.run.status).toBe('complete');
-  expect(store.isScrapingActive).toBe(false);
-  expect(jest.getTimerCount()).toBe(0);
+  jest.advanceTimersByTime(6000);
+  await settle();
+  expect(types()).toEqual(['PAGE_READY', 'PAGE_RESULT']);
+
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  listener({ type: 'PARSE_PAGE', runId: 'r2', page: 1 }, {}, () => {});
+  jest.advanceTimersByTime(0);
+  await settle();
+  listener({ type: 'RUN_ENDED', runId: 'r2' }, {}, () => {});
+  jest.advanceTimersByTime(6000);
+  await settle();
+  expect(types().filter((t) => t === 'HEARTBEAT')).toEqual([]);
 });
 
-test('START without a run id is refused', () => {
+test('a page is reported once per run, however often it is asked', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 1 };
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  const respond = jest.fn();
+  expect(listener({ type: 'PARSE_PAGE', runId: 'r1', page: 1 }, {}, respond)).toBe(false);
+  expect(respond).toHaveBeenCalledWith({ ok: true });
+  jest.advanceTimersByTime(0);
+  await settle();
+  expect(types().filter((t) => t === 'PAGE_RESULT')).toHaveLength(1);
+});
+
+test('a page whose report never got through is reported again when asked', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 1 };
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  for (let i = 0; i < 3; i++) {
+    jest.advanceTimersByTime(1000);
+    await settle();
+  }
+  expect(types().filter((t) => t === 'PAGE_RESULT')).toHaveLength(3);
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  listener({ type: 'PARSE_PAGE', runId: 'r1', page: 1 }, {}, jest.fn());
+  jest.advanceTimersByTime(0);
+  await settle();
+  expect(types().filter((t) => t === 'PAGE_RESULT')).toHaveLength(4);
+});
+
+test('with no answer from a starting worker it tries again', async () => {
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  expect(types()).toEqual(['PAGE_READY']);
+  replies.PAGE_READY = { idle: true };
+  jest.advanceTimersByTime(1000);
+  await settle();
+  expect(types()).toEqual(['PAGE_READY', 'PAGE_READY']);
+});
+
+test('PARSE_PAGE without a run id is refused', () => {
   loadContentScript('scripts/content/scraper.js', html, URL1);
   const respond = jest.fn();
-  listener({ type: 'START_SCRAPING' }, {}, respond);
-  expect(respond).toHaveBeenCalledWith({ status: 'refused' });
+  listener({ type: 'PARSE_PAGE' }, {}, respond);
+  expect(respond).toHaveBeenCalledWith({ ok: false });
 });
 
-test('PING answers with the page kind', () => {
+test('PING answers with the page kind and URL', () => {
   loadContentScript('scripts/content/scraper.js', html, URL1);
   const respond = jest.fn();
   listener({ type: 'PING' }, {}, respond);
-  expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, kind: 'results' }));
+  expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: true, kind: 'results', url: URL1 }));
 });
 
-test('a different search typed in the run tab ends the run instead of joining it', async () => {
-  seedRun({ page: 1, lastUrl: URL1, nextHref: 'https://www.amazon.com/s?k=widget&page=2&ref=sr_pg_1' });
-  tabIdForWorker = 5;
-  loadContentScript('scripts/content/scraper.js', html, 'https://www.amazon.com/s?k=garden+hose');
-  await settle();
-  const store = chrome.storage.local._getStore();
-  expect(store.results).toBeUndefined();
-  expect(store.run.status).toBe('interrupted');
-  expect(store.isScrapingActive).toBe(false);
-  expect(jest.getTimerCount()).toBe(0);
-});
-
-test('a stale run is ended, not resumed, when its tab loads Amazon again', async () => {
-  seedRun({ heartbeat: Date.now() - Run.STALE_MS - 1000 });
-  tabIdForWorker = 5;
+test('it never writes storage', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 1 };
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  const set = jest.spyOn(chrome.storage.local, 'set');
   loadContentScript('scripts/content/scraper.js', html, URL1);
   await settle();
-  const store = chrome.storage.local._getStore();
-  expect(store.results).toBeUndefined();
-  expect(store.run.status).toBe('interrupted');
-  expect(jest.getTimerCount()).toBe(0);
+  jest.advanceTimersByTime(5000);
+  await settle();
+  expect(set).not.toHaveBeenCalled();
+  set.mockRestore();
+});
+
+test('after the extension is updated under the page it goes quiet (alive guard)', async () => {
+  replies.PAGE_READY = { parse: true, runId: 'r1', page: 1 };
+  replies.PAGE_RESULT = { ok: true, next: 'wait' };
+  loadContentScript('scripts/content/scraper.js', html, URL1);
+  await settle();
+  const before = sent.length;
+  chrome.runtime.id = undefined;
+  jest.advanceTimersByTime(6000);
+  await settle();
+  expect(sent.length).toBe(before);
+  const respond = jest.fn();
+  expect(listener({ type: 'PING' }, {}, respond)).toBe(false);
+  expect(respond).not.toHaveBeenCalled();
 });

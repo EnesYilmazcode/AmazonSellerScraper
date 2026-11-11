@@ -27,6 +27,7 @@ function quietConsole() {
  * @param {string} [url='https://www.amazon.com/s?k=test&page=1'] - Page URL
  * @param {Object} [options]
  * @param {Object} [options.flags] - Overrides for scripts/lib/flags.js, e.g. { CLOUD_SYNC: true }
+ * @param {Object} [options.globals] - Replaces context globals, e.g. a per-tab chrome and timers
  * @returns {Object} VM context with all script functions accessible
  */
 function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=test&page=1', options = {}) {
@@ -75,7 +76,8 @@ function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=t
     RegExp: global.RegExp,
     String: global.String,
     Number: global.Number,
-    JSON: global.JSON
+    JSON: global.JSON,
+    ...(options.globals || {})
   });
 
   const absolutePath = path.resolve(__dirname, '../../', scriptPath);
@@ -86,7 +88,7 @@ function loadContentScript(scriptPath, html, url = 'https://www.amazon.com/s?k=t
   // declarations share one lexical environment only within a single
   // runInContext call, so they are concatenated ahead of the target script.
   let preamble = '';
-  for (const rel of ['scripts/modules/price.js', 'scripts/lib/parsers.js', 'scripts/lib/run.js', 'scripts/lib/flags.js', 'scripts/modules/delta.js']) {
+  for (const rel of ['scripts/modules/price.js', 'scripts/lib/parsers.js', 'scripts/lib/messages.js', 'scripts/lib/run.js', 'scripts/lib/flags.js', 'scripts/modules/delta.js']) {
     const dep = path.resolve(__dirname, '../../', rel);
     if (fs.existsSync(dep)) preamble += fs.readFileSync(dep, 'utf8') + '\n';
   }

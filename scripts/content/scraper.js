@@ -1,35 +1,28 @@
 /**
- * @fileoverview Amazon Product DOM Scraper
+ * @fileoverview Amazon search page parser, in the page.
  *
- * Content script that extracts product data from Amazon search results
- * and seller pages. Uses a cascading selector strategy to handle
- * Amazon's frequently changing DOM structure.
+ * Parse only: this script never writes storage and never navigates. The
+ * service worker runs the scrape (scripts/background/engine.js).
  *
- * Selector Strategy:
- * Each data point (title, price, rating, reviews) has multiple selectors
- * ordered from most-stable to least-stable. The scraper tries each in
- * sequence and uses the first successful match. This makes the extension
- * resilient to Amazon A/B tests and layout changes.
+ * On load the script says PAGE_READY. When this tab owns the running run
+ * and the worker is waiting for a page, it answers with the page number,
+ * and the script parses the page (scripts/lib/parsers.js) and sends it back
+ * as PAGE_RESULT. While the worker waits to open the next page, the script
+ * sends a HEARTBEAT every few seconds, which also wakes a stopped worker.
+ * Other Amazon tabs get told they have no part in the run and stay quiet.
  *
- * Runs:
- * A run belongs to the tab it started in (see scripts/lib/run.js). On each
- * page load the script asks the service worker for its tab id and scrapes
- * only when that tab owns the running run, so other Amazon tabs never join
- * it. Each page is classified first, so a captcha ends the run as blocked
- * rather than complete. The next page is the page's own Next link, opened
- * after a 2 to 4 second delay, up to the run's page cap.
+ * Every call into the extension is guarded by alive(): after an update or
+ * a removal the old script stays in open tabs with no extension behind it.
  *
  * @module Scraper
  */
 
-/** Tab id of this page, once known. */
-let myTabId = null;
-/** Pending navigation to the next page. */
-let navTimer = null;
-/** Runs this document has already scraped, so no page is scraped twice. */
-const scrapedRuns = new Set();
-/** Runs stopped while this page was being saved. */
-const stoppedRuns = new Set();
+const HEARTBEAT_MS = 2000;
+const RETRY_MS = 1000;
+
+/** Pages this document already reported, by run and page number. */
+const reported = new Set();
+let heartbeatTimer = null;
 
 /** False once the extension was updated or removed under this page. */
 function alive() {
@@ -40,19 +33,14 @@ function alive() {
     }
 }
 
-function getRun() {
+/** Sends `message` to the worker; resolves null when nothing answers. */
+function send(message) {
     return new Promise(resolve => {
-        chrome.storage.local.get([Run.KEY], data => resolve((data && data[Run.KEY]) || null));
-    });
-}
-
-/** Asks the service worker which tab this page is in. */
-function whoAmI() {
-    return new Promise(resolve => {
+        if (!alive()) return resolve(null);
         try {
-            chrome.runtime.sendMessage({ type: 'WHO_AM_I' }, response => {
+            chrome.runtime.sendMessage(message, response => {
                 if (chrome.runtime.lastError) return resolve(null);
-                resolve(response && typeof response.tabId === 'number' ? response.tabId : null);
+                resolve(response || null);
             });
         } catch (e) {
             resolve(null);
@@ -60,39 +48,8 @@ function whoAmI() {
     });
 }
 
-/**
- * Resumes a run on page load when this tab owns it. Most Amazon pages have
- * no run, so storage is checked before the service worker is asked.
- */
-async function initialize() {
-    if (!alive()) return;
-    const run = await getRun();
-    if (!Run.isActive(run)) return;
-    const tabId = await whoAmI();
-    if (!Run.owns(run, tabId)) return;
-    myTabId = tabId;
-
-    // The tab went quiet for too long (it left Amazon, or the browser slept).
-    if (Run.isStale(run)) {
-        finishRun(run.runId, 'interrupted');
-        return;
-    }
-    // A reload of a page already scraped: go on from where the run was.
-    if (run.lastUrl === location.href) {
-        if (run.nextHref) scheduleNext(run.runId, run.nextHref);
-        return;
-    }
-    // Only the page the run opened is scraped. A search the user typed in
-    // this tab ends the run instead of joining it.
-    if (!Run.expects(run, location.href)) {
-        finishRun(run.runId, 'interrupted');
-        return;
-    }
-    scrapeCurrentPage(run.runId);
-}
-
-// Pure parsing lives in scripts/lib/parsers.js. These names stay for the page
-// logic below and for the unit tests that load this file.
+// Pure parsing lives in scripts/lib/parsers.js. These names stay for the
+// unit tests that load this file.
 var {
     getText, extractPrice, parseRatingText, extractRating, parseReviewText,
     extractReviewCount, hasPrimeBadge, scrapeProduct
@@ -110,225 +67,87 @@ function hasNextPage() {
     return Parsers.hasNextPage(document);
 }
 
-/**
- * Scrapes the current page into run `runId`.
- *
- * The page is parsed and classified first. A page that ends the run (the
- * last page, the page cap, a captcha) is saved together with the run's end
- * in one write. Otherwise the next page is opened after a short delay.
- *
- * @param {string} runId
- */
-function scrapeCurrentPage(runId) {
-    if (scrapedRuns.has(runId)) return;
-    scrapedRuns.add(runId);
+function parsePage() {
+    return Parsers.parseSearchPage(document, window.location.href);
+}
 
-    const page = Parsers.parseSearchPage(document, window.location.href);
-    const results = page.products;
-    console.log(`[ProScan] Page kind ${page.kind}, ${results.length} product listings`);
+function stopHeartbeat() {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+}
 
-    const syncing = Flags.CLOUD_SYNC;
-    const keys = [Run.KEY, 'currentItemCount', 'results', 'scrapeRunId', 'scrapeRunPageIndex', 'lastValues', 'scrapeRunPages'];
-    chrome.storage.local.get(
-        syncing ? [...keys, 'syncQueue'] : keys,
-        (data) => {
-            const run = data[Run.KEY];
-            if (!run || run.runId !== runId || !Run.isActive(run)) return;
+function startHeartbeat(runId) {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(async () => {
+        if (!alive()) return stopHeartbeat();
+        const reply = await send({ type: Msg.T.HEARTBEAT, runId });
+        if (reply && reply.active === false) stopHeartbeat();
+    }, HEARTBEAT_MS);
+}
 
-            const pageIndex = (data.scrapeRunPageIndex || 0) + 1; // 1-based page number
-            const ending = Run.outcome(page, pageIndex, run.maxPages);
-            const previousCount = data.currentItemCount || 0;
+/** Parses this page as page `page` of run `runId` and reports it, once. */
+function parseAndReport(runId, page) {
+    const key = runId + ':' + page;
+    if (reported.has(key)) return;
+    reported.add(key);
+    const result = parsePage();
+    console.log(`[ProScan] Page ${page} kind ${result.kind}, ${result.products.length} product listings`);
+    report({ type: Msg.T.PAGE_RESULT, runId, page, url: window.location.href, result }, 3);
+}
 
-            if (results.length === 0 || ending === 'selectors_broken') {
-                console.log(`[ProScan] Nothing to save on this page, run ends: ${ending}`);
-                finishRun(runId, ending || 'complete');
-                return;
-            }
+async function report(message, tries) {
+    const reply = await send(message);
+    if (!reply) {
+        // The worker may be starting up; it drops a page it already has.
+        if (tries > 1 && alive()) setTimeout(() => report(message, tries - 1), RETRY_MS);
+        // Never got through, so a later PARSE_PAGE may try again.
+        else reported.delete(message.runId + ':' + message.page);
+        return;
+    }
+    if (reply.next === 'wait') startHeartbeat(message.runId);
+    else stopHeartbeat();
+}
 
-            const runKey = data.scrapeRunId || runId;
-            const runResults = data.results || [];
-            // With sync off nothing is queued, so the queue cannot grow.
-            const syncQueue = syncing ? (data.syncQueue || []) : [];
-            const fresh = mergeRepeats(results, pageIndex, runKey, runResults, syncQueue);
-
-            chrome.runtime.sendMessage({
-                type: 'UPDATE_PROGRESS',
-                itemCount: fresh.length,
-                results: fresh
-            });
-
-            // Only an ASIN's first sighting in the run gets a delta, taken
-            // against the last run's snapshot, and rolls lastValues forward.
-            const lastValues = data.lastValues || {};
-            const stampedAt = new Date().toISOString();
-            fresh.forEach(product => {
-                product.runId = runKey;
-                product.pageIndex = pageIndex;
-                const prev = lastValues[product.asin] || null;
-                product.delta = Delta.computeDeltas(product, prev);
-                lastValues[product.asin] = Delta.snapshot(product, prev);
-            });
-
-            const newCount = previousCount + fresh.length;
-            if (syncing) syncQueue.push(...fresh);
-            const runPages = data.scrapeRunPages || [];
-            runPages.push({
-                runId: runKey, pageIndex, count: fresh.length, placements: page.placements,
-                scrapedAt: stampedAt, url: location.href
-            });
-
-            const now = Date.now();
-            let nextRun = { ...run, page: pageIndex, heartbeat: now, lastUrl: location.href, nextHref: page.nextHref };
-            if (ending) nextRun = Run.finish(nextRun, ending, now);
-
-            const save = {
-                results: [...runResults, ...fresh],
-                currentItemCount: newCount,
-                scrapeRunPageIndex: pageIndex,
-                lastValues: Delta.prune(lastValues),
-                scrapeRunPages: runPages,
-                [Run.KEY]: nextRun,
-                isScrapingActive: !ending
-            };
-            if (syncing) save.syncQueue = syncQueue;
-            chrome.storage.local.set(save, () => {
-                if (chrome.runtime.lastError) {
-                    console.warn('[ProScan] Could not save the page:', chrome.runtime.lastError.message);
-                    finishRun(runId, 'storage_full');
-                    return;
-                }
-                if (syncing) chrome.runtime.sendMessage({ type: 'ENQUEUE_SYNC', runId: runKey, pageIndex: pageIndex });
-
-                // Stop landed between the read and this write, which put the run back.
-                if (!ending && stoppedRuns.has(runId)) {
-                    finishRun(runId, 'stopped');
-                } else if (ending) {
-                    announceEnd(ending, newCount);
-                } else {
-                    scheduleNext(runId, page.nextHref);
-                }
-            });
-        }
-    );
+/** Tells the worker this page is up, and does what it says. */
+async function announce(tries = 3) {
+    if (!alive()) return;
+    const reply = await send({ type: Msg.T.PAGE_READY, url: window.location.href });
+    if (!reply) {
+        if (tries > 1) setTimeout(() => announce(tries - 1), RETRY_MS);
+        return;
+    }
+    if (reply.parse) parseAndReport(reply.runId, reply.page);
+    else if (reply.heartbeat) startHeartbeat(reply.runId);
 }
 
 /**
- * Folds this page's products into the run. Placements get the page number
- * and a run-wide organic rank. An ASIN already in the run only adds its
- * placements to the stored record (and its sync queue copy); the rest are
- * returned as new.
- */
-function mergeRepeats(products, pageIndex, runKey, runResults, syncQueue) {
-    const thisRun = runResults.filter(r => r.runId === runKey);
-    const organicBefore = thisRun.reduce(
-        (n, r) => n + (r.placements || []).filter(pl => !pl.sponsored).length, 0);
-    const known = new Map(thisRun.map(r => [r.asin, r]));
-
-    const fresh = [];
-    products.forEach(product => {
-        const placements = (product.placements || []).map(pl => ({
-            page: pageIndex,
-            ...pl,
-            rank: pl.rank === null ? null : pl.rank + organicBefore
-        }));
-        const firstRank = (placements.find(pl => pl.rank !== null) || {}).rank;
-        product.placements = placements;
-        product.organicRank = firstRank === undefined ? null : firstRank;
-
-        const seen = known.get(product.asin);
-        if (!seen) {
-            fresh.push(product);
-            return;
-        }
-        const queued = syncQueue.find(q => q.asin === product.asin && q.runId === runKey);
-        // The two can be one object when storage hands back shared references
-        new Set([seen, queued]).forEach(rec => {
-            if (!rec) return;
-            rec.placements = [...(rec.placements || []), ...placements];
-            rec.sponsored = !!rec.sponsored || product.sponsored;
-            if (rec.organicRank == null) rec.organicRank = product.organicRank;
-        });
-    });
-    return fresh;
-}
-
-/**
- * Opens `nextHref` after a 2 to 4 second delay, unless the run was stopped
- * or handed to another tab in the meantime.
- */
-function scheduleNext(runId, nextHref) {
-    clearTimeout(navTimer);
-    const delay = Run.pageDelay();
-    console.log(`[ProScan] Navigating to next page: ${nextHref}`);
-    navTimer = setTimeout(async () => {
-        navTimer = null;
-        if (!alive()) return;
-        const run = await getRun();
-        if (!run || run.runId !== runId || !Run.owns(run, myTabId)) return;
-        window.location.href = nextHref;
-    }, delay);
-}
-
-/**
- * Ends run `runId` with `reason`, unless it already ended or another run
- * replaced it. Resolves once storage has the result.
- */
-function finishRun(runId, reason) {
-    clearTimeout(navTimer);
-    navTimer = null;
-    return new Promise(resolve => {
-        chrome.storage.local.get([Run.KEY, 'currentItemCount'], (data) => {
-            const run = data[Run.KEY];
-            const count = data.currentItemCount || 0;
-            if (!run || run.runId !== runId || !Run.isActive(run)) return resolve(false);
-            chrome.storage.local.set({ [Run.KEY]: Run.finish(run, reason), isScrapingActive: false }, () => {
-                console.log(`[ProScan] Run ended: ${reason}. Total items: ${count}`);
-                announceEnd(reason, count);
-                resolve(true);
-            });
-        });
-    });
-}
-
-function announceEnd(reason, count) {
-    chrome.runtime.sendMessage({ type: 'SCRAPING_COMPLETE', reason, itemCount: count });
-}
-
-/**
- * Messages from the popup:
+ * Messages from the worker and the popup:
  * - PING: is this script alive, and what kind of page is this
- * - START_SCRAPING {runId, tabId}: the popup made run `runId` for this tab
- * - STOP_SCRAPING {runId}: cancel the pending page and end the run as stopped
+ * - PARSE_PAGE {runId, page}: parse this page for the run
+ * - RUN_ENDED: the run is over, stop the heartbeat
  */
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.type === 'PING') {
-        const page = Parsers.parseSearchPage(document, window.location.href);
-        sendResponse({ ok: true, kind: page.kind, count: page.products.length });
+    if (!alive() || !request) return false;
+
+    if (request.type === Msg.T.PING) {
+        const page = parsePage();
+        sendResponse({ ok: true, kind: page.kind, count: page.products.length, url: window.location.href });
         return false;
     }
 
-    if (request.type === 'START_SCRAPING') {
-        if (!request.runId) {
-            sendResponse({ status: 'refused' });
+    if (request.type === Msg.T.PARSE_PAGE) {
+        if (!request.runId || !request.page) {
+            sendResponse({ ok: false });
             return false;
         }
-        console.log('[ProScan] Starting scrape...');
-        if (typeof request.tabId === 'number') myTabId = request.tabId;
-        sendResponse({ status: 'started' });
-        scrapeCurrentPage(request.runId);
+        sendResponse({ ok: true });
+        setTimeout(() => parseAndReport(request.runId, request.page), 0);
         return false;
     }
 
-    if (request.type === 'STOP_SCRAPING') {
-        console.log('[ProScan] Stopping scrape...');
-        clearTimeout(navTimer);
-        navTimer = null;
-        getRun().then(run => {
-            const runId = request.runId || (run && run.runId);
-            if (runId) stoppedRuns.add(runId);
-            return finishRun(runId, 'stopped');
-        }).then(() => sendResponse({ stopped: true }));
-        return true;
+    if (request.type === Msg.T.RUN_ENDED) {
+        stopHeartbeat();
+        return false;
     }
 
     return false;
@@ -336,7 +155,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // At document_idle the load events may already have fired, so run now.
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize, { once: true });
+    document.addEventListener('DOMContentLoaded', () => announce(), { once: true });
 } else {
-    initialize();
+    announce();
 }
