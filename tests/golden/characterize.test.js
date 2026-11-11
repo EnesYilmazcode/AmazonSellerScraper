@@ -40,7 +40,7 @@ async function runScrape(page) {
   const st = await rig.popup({ type: 'GET_STATE' });
   const sent = rig.sent.map((m) => m.type);
   const before = st.run || {};
-  await settle(4000);
+  await settle(9500);
   const nav = rig.served.slice(1).map((s) => `[ProScan] Navigating to next page: ${s.url}`);
   const ctx = rig.tabCtx(tabId);
   const runId = before.runId;

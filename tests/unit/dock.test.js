@@ -272,3 +272,19 @@ test('keys typed in the dock do not reach the page', async () => {
   d.$('[data-k="compose"]').dispatchEvent(new d.w.KeyboardEvent('keydown', { key: '/', bubbles: true, composed: true }));
   expect(seen).toEqual([]);
 });
+
+test('a run that just finished says so, and a waiting run asks for the bot check', async () => {
+  const done = { state: 'done', reason: 'complete', page: 1, maxPages: 20, itemCount: 3, thisTab: true, finishedAt: Date.now(), source: { type: 'storefront', sellerId: 'A1' } };
+  const d = mount(SEARCH, YOGA, { RUN_STATUS: { ...IDLE, run: done, count: 3, summary: {} } });
+  await flush();
+  d.$('[data-k="launcher"]') && d.$('[data-k="launcher"]').click();
+  await flush();
+  expect(d.text()).toContain('Done just now, 1 page');
+
+  const waiting = { state: 'running', page: 1, maxPages: 20, itemCount: 55, thisTab: true, waitingCheck: true, source: { type: 'keyword', keyword: 'x' } };
+  const w = mount(SEARCH, YOGA, { RUN_STATUS: { ...IDLE, run: waiting, count: 55 } });
+  await flush();
+  w.$('[data-k="launcher"]') && w.$('[data-k="launcher"]').click();
+  await flush();
+  expect(w.text()).toMatch(/I am human/);
+});

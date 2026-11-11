@@ -135,6 +135,7 @@ function brief(run, tabId) {
         page: run.page || 0,
         maxPages: run.maxPages || Run.DEFAULT_MAX_PAGES,
         itemCount: run.itemCount || 0,
+        waitingCheck: Run.waitingForCheck(run),
         startedAt: run.startedAt || null,
         finishedAt: run.finishedAt || null,
         source: { type: src.type || null, sellerId: src.sellerId || null, keyword: src.keyword || null, name: src.name || null },
@@ -385,6 +386,12 @@ function createEngine({
                 return { parse: true, runId: run.runId, page: run.page + 1 };
             }
             if (url === run.lastUrl) return { heartbeat: true, runId: run.runId };
+            // Amazon sent the next page to its bot check instead.
+            // The user ticks the box and Amazon sends the tab back to that page.
+            if (run.awaiting && Run.isBotCheckUrl(url)) {
+                if (!run.checkAt) await saveRun({ ...run, checkAt: now() });
+                return { idle: true };
+            }
             // The tab went somewhere else while the next page was pending.
             await end(run, 'interrupted');
             return { idle: true };
@@ -400,6 +407,12 @@ function createEngine({
                 return { ok: false, ignored: true };
             }
             const ending = Run.outcome(result, page, run.maxPages);
+            // A captcha served at the page's own URL: wait for the user to solve
+            // it there; Amazon reloads the page and it is parsed again.
+            if ((result.kind === 'captcha' || result.kind === 'interstitial') && Run.waitingForCheck({ checkAt: run.checkAt || now() }, now())) {
+                if (!run.checkAt) await saveRun({ ...run, checkAt: now() });
+                return { ok: true, next: 'wait' };
+            }
             if (result.products.length === 0 || ending === 'selectors_broken') {
                 const ended = await end(run, ending || 'complete');
                 return { ok: true, next: 'end', reason: ended.reason };
@@ -446,7 +459,7 @@ function createEngine({
 
                 next = {
                     ...run, page, itemCount: run.itemCount + fresh.length, heartbeat: t,
-                    lastUrl: url, nextHref: result.nextHref || null, awaiting: false
+                    lastUrl: url, nextHref: result.nextHref || null, awaiting: false, checkAt: null
                 };
                 if (queuedPage.length && !next.syncUid) next.syncUid = queuedPage[0].put.uid;
                 if (ending) {
@@ -493,14 +506,23 @@ function createEngine({
                 run = { ...run, awaiting: true, expectUrl: run.nextHref, navigatedAt: t, navAt: null };
                 await saveRun(run);
                 log.log(`[ProScan] Navigating to next page: ${run.expectUrl}`);
-                try {
-                    await chrome.tabs.update(run.tabId, { url: run.expectUrl });
-                } catch (err) {
-                    await end(run, 'interrupted');
-                    return;
+                // The page follows the link itself; the tab URL is the fallback.
+                const went = await sendToTab(run.tabId, { type: Msg.T.GO_NEXT, url: run.expectUrl });
+                if (!went || !went.ok) {
+                    try {
+                        await chrome.tabs.update(run.tabId, { url: run.expectUrl });
+                    } catch (err) {
+                        await end(run, 'interrupted');
+                        return;
+                    }
                 }
                 // If the page never reports, ask it again.
                 schedule(PAGE_TIMEOUT_MS + 1000);
+                return;
+            }
+            if (run.checkAt) {
+                if (!Run.waitingForCheck(run, t)) await end(run, 'blocked');
+                else schedule(Math.min(Run.CHECK_WAIT_MS, 30000));
                 return;
             }
             if (run.awaiting && t - (run.navigatedAt || 0) > PAGE_TIMEOUT_MS) {

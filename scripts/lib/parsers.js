@@ -305,6 +305,9 @@ const Parsers = (() => {
         const path = url ? new URL(url).pathname : '';
         if (doc.querySelector('form[action*="validateCaptcha"], #captchacharacters')) return 'captcha';
         if (/robot check/i.test(doc.title || '')) return 'captcha';
+        // The 2026 bot check: /checkpoint/... with an "I am human" box.
+        if (/^\/(checkpoint|errors\/validateCaptcha)(\/|$)/i.test(path)) return 'captcha';
+        if (/I am human|Check the box to continue/i.test((doc.body && doc.body.textContent) || '')) return 'captcha';
         if (/^\/ap\/(signin|mfa|cvf)/.test(path) || doc.querySelector('form[name="signIn"], #ap_email, #ap_password')) return 'signin';
         const refresh = doc.querySelector('meta[http-equiv="refresh" i]');
         if (refresh || /bm-verify|_bm_|akamai/i.test(url || '')) return 'interstitial';

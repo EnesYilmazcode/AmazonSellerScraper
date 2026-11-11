@@ -153,7 +153,7 @@ describe('summarize', () => {
 test('brief keeps the run shape small', () => {
   const run = { runId: 'r', tabId: 3, state: 'running', page: 2, maxPages: 10, itemCount: 5, source: { type: 'keyword', keyword: 'x', url: 'u' } };
   expect(brief(run, 3)).toEqual({
-    runId: 'r', state: 'running', reason: null, page: 2, maxPages: 10, itemCount: 5, startedAt: null, finishedAt: null,
+    runId: 'r', state: 'running', reason: null, page: 2, maxPages: 10, itemCount: 5, waitingCheck: false, startedAt: null, finishedAt: null,
     source: { type: 'keyword', sellerId: null, keyword: 'x', name: null }, thisTab: true,
   });
   expect(brief(null, 3)).toBeNull();

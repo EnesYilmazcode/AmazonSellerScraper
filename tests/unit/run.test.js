@@ -127,9 +127,9 @@ describe('Run.outcome', () => {
 });
 
 describe('Run text', () => {
-  test('page delay is 2 to 4 seconds', () => {
-    expect(Run.pageDelay(0)).toBe(2000);
-    expect(Run.pageDelay(0.999)).toBeLessThan(4000);
+  test('page delay is 5 to 9 seconds', () => {
+    expect(Run.pageDelay(0)).toBe(5000);
+    expect(Run.pageDelay(0.999)).toBeLessThan(9000);
   });
 
   test('only complete reads as success', () => {

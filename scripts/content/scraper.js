@@ -145,6 +145,21 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return false;
     }
 
+    // Open the next page from inside the page, as a click on Next would, so
+    // Amazon sees a same-site navigation with a referrer. A tab URL set from
+    // the worker arrives with neither, and Amazon answers it with a bot check.
+    if (request.type === Msg.T.GO_NEXT) {
+        let next;
+        try { next = new URL(request.url, window.location.href); } catch (e) { next = null; }
+        if (!next || next.origin !== window.location.origin) {
+            sendResponse({ ok: false });
+            return false;
+        }
+        sendResponse({ ok: true });
+        setTimeout(() => window.location.assign(next.href), 0);
+        return false;
+    }
+
     if (request.type === Msg.T.RUN_ENDED) {
         stopHeartbeat();
         return false;

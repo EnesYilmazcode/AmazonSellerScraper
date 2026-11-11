@@ -84,6 +84,8 @@ describe('Parsers.parseSearchPage', () => {
   test.each([
     ['a captcha form', '<form action="/errors/validateCaptcha"><input id="captchacharacters"></form>', URL_P1, 'captcha'],
     ['a Robot Check title', '<title>Robot Check</title><p>x</p>', URL_P1, 'captcha'],
+    ['the checkpoint bot check', '<p>Check the box to continue.</p><label><input type="checkbox"> I am human</label>', 'https://www.amazon.com/checkpoint/continue?token=x', 'captcha'],
+    ['an "I am human" box on any path', '<label><input type="checkbox"> I am human</label>', URL_P1, 'captcha'],
     ['a sign-in form', '<form name="signIn"><input id="ap_email"></form>', 'https://www.amazon.com/ap/signin?x=1', 'signin'],
     ['a meta refresh bot check', '<meta http-equiv="refresh" content="5; URL=/s?k=a">', URL_P1, 'interstitial'],
     ['a search page with no cards', '<div class="s-main-slot"></div>', URL_P1, 'unreadable'],
