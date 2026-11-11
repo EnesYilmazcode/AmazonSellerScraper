@@ -125,6 +125,26 @@ describe('a run', () => {
     expect((await results(rig)).map((r) => r.asin)).toEqual([0, 1, 2, 3].map((i) => asinFor('usb', 1, i)));
   });
 
+  test('page 2 sent to the Amazon /checkpoint bot check ends the run as blocked, not interrupted', async () => {
+    const base = simpleSite(4);
+    const CHECK = 'https://www.amazon.com/checkpoint/continue?token=t';
+    const site = (url) => {
+      if (url.startsWith('https://www.amazon.com/checkpoint/')) return page('<p>Check the box to continue.</p><label><input type="checkbox"> I am human</label>', null);
+      return pageNo(url) === 2 ? null : base(url);
+    };
+    const rig = createRig({ site });
+    const { tab } = await startIn(rig, 'chk');
+    for (let t = 0; t < 20000; t += 500) {
+      const r = await rig.run();
+      if (r && r.page >= 1 && r.awaiting) break;
+      await settle(500);
+    }
+    rig.goTo(tab, CHECK);
+    const run = await runUntilEnd(rig);
+    expect(run).toMatchObject({ reason: 'blocked' });
+    expect((await results(rig)).map((r) => r.asin)).toEqual([0, 1, 2, 3].map((i) => asinFor('chk', 1, i)));
+  });
+
   test('the page cap in settings ends the run on that page', async () => {
     const rig = createRig({ site: simpleSite(5), local: { settings: { maxPages: 2 } } });
     await startIn(rig, 'cap');

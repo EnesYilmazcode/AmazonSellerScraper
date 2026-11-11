@@ -385,6 +385,11 @@ function createEngine({
                 return { parse: true, runId: run.runId, page: run.page + 1 };
             }
             if (url === run.lastUrl) return { heartbeat: true, runId: run.runId };
+            // Amazon sent the next page to its bot check instead.
+            if (run.awaiting && Run.isBotCheckUrl(url)) {
+                await end(run, 'blocked');
+                return { idle: true };
+            }
             // The tab went somewhere else while the next page was pending.
             await end(run, 'interrupted');
             return { idle: true };

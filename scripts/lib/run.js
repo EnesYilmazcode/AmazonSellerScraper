@@ -202,6 +202,15 @@ const Run = (() => {
         return { type, sellerId, keyword, url: url || null, startedAt: new Date(now).toISOString() };
     }
 
+    /** Amazon's bot-check pages: the 2026 checkpoint and the old captcha form. */
+    function isBotCheckUrl(url) {
+        try {
+            return /^\/(checkpoint|errors\/validateCaptcha)(\/|$)/i.test(new URL(url).pathname);
+        } catch (e) {
+            return false;
+        }
+    }
+
     /** Wait before the next page: 2 to 4 seconds. */
     function pageDelay(rand = Math.random()) {
         return 2000 + Math.floor(rand * 2000);
@@ -254,6 +263,7 @@ const Run = (() => {
         finish,
         outcome,
         pageDelay,
+        isBotCheckUrl,
         sourceOf,
         refusal,
         describe
