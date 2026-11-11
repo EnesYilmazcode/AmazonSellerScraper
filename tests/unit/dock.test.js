@@ -59,6 +59,10 @@ function mount(url, html, replies = {}, { session = {} } = {}) {
 
 const SEARCH = 'https://www.amazon.com/s?k=yoga+mat';
 
+// Each test parses a full saved Amazon page in jsdom; with every suite in
+// parallel on a laptop that can pass Jest's 5 s default.
+jest.setTimeout(30000);
+
 const windows = [];
 afterEach(() => { windows.splice(0).forEach((w) => w.close()); });
 
