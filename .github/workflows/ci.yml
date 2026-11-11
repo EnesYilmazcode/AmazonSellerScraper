@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Jest
+        run: npx jest
+
+      - name: Tool tests
+        run: npm run test:tools
+
+      - name: Build
+        run: npm run build
+
+      - name: Permission lock and version gate
+        run: npm run lock
+
+      - name: Secret scan
+        run: npm run scan:secrets
+
+      - name: Store zip gates
+        run: node tools/zip.mjs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-zip
+          path: dist-zips/*.zip
+          if-no-files-found: error
