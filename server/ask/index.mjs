@@ -3,33 +3,26 @@
 // POST {idToken, question, history, context: {products, total, source}}
 //   -> 200 {answer, left} | 4xx/5xx {error, code}
 //
-// The Gemini key never leaves AWS. Each Firebase user gets DAILY_LIMIT
+// The model runs on Amazon Bedrock in this account. Each Firebase user gets DAILY_LIMIT
 // questions a day and the whole service GLOBAL_LIMIT, counted in DynamoDB.
-// Spend is also capped on the Google side by the AI Studio project's monthly cap.
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 
 const Chat = createRequire(import.meta.url)('./chat.js');
 
 const PROJECT = process.env.FIREBASE_PROJECT || 'proscanbot';
 const TABLE = process.env.TABLE || 'proscan-ask-usage';
-const KEY_PARAM = process.env.KEY_PARAM || '/proscan/ask/gemini-key';
 const DAILY_LIMIT = Number(process.env.DAILY_LIMIT || 20);
 const GLOBAL_LIMIT = Number(process.env.GLOBAL_LIMIT || 2000);
 const MAX_BODY = 200_000;
-// AWS first (paid by AWS credits); Gemini while Bedrock refuses (quota 0, no access).
+// Answers come only from Amazon Bedrock, paid by the AWS credits.
 const BEDROCK_MODEL = process.env.BEDROCK_MODEL || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
-const BEDROCK_PAUSE_MS = 10 * 60 * 1000;
 const JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 
 const ddb = new DynamoDBClient({});
-const ssm = new SSMClient({});
 const bedrock = new BedrockRuntimeClient({});
-let bedrockOffUntil = 0;
-let geminiKey = null;
 let jwks = { keys: null, until: 0 };
 
 const reply = (status, body) => ({ statusCode: status, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -101,16 +94,9 @@ export function cleanContext(ctx) {
   };
 }
 
-async function gemini() {
-  if (geminiKey) return geminiKey;
-  const out = await ssm.send(new GetParameterCommand({ Name: KEY_PARAM, WithDecryption: true }));
-  geminiKey = out.Parameter.Value;
-  return geminiKey;
-}
 
-/** Bedrock's answer to the Gemini-shaped request chat.js built, or null to fall back. */
+/** Bedrock's answer to the request chat.js built (Gemini-shaped, converted here), or null. */
 async function askBedrock(body) {
-  if (!BEDROCK_MODEL || Date.now() < bedrockOffUntil) return null;
   const messages = body.contents.map((c) => ({
     role: c.role === 'model' ? 'assistant' : 'user',
     content: [{ text: c.parts.map((p) => p.text).join('') }],
@@ -125,9 +111,7 @@ async function askBedrock(body) {
     const text = (out.output?.message?.content || []).map((c) => c.text || '').join('').trim();
     return text || null;
   } catch (e) {
-    // Quota, access or model errors: use Gemini for a while instead of retrying every call.
-    console.warn('bedrock off', e.name, String(e.message).slice(0, 160));
-    bedrockOffUntil = Date.now() + BEDROCK_PAUSE_MS;
+    console.warn('bedrock', e.name, String(e.message).slice(0, 160));
     return null;
   }
 }
@@ -154,20 +138,7 @@ export async function handler(event) {
   if (used === false) return fail(429, 'DAILY', `You have used your ${DAILY_LIMIT} questions for today. They reset at midnight UTC.`);
 
   const { url, init } = Chat.buildRequest({ apiKey: 'unused', question, context, history: req.history });
-  const viaAws = await askBedrock(JSON.parse(init.body));
-  if (viaAws) return reply(200, { answer: Chat.checkCitations(viaAws, context), left: DAILY_LIMIT - used, via: 'aws' });
-  init.headers = { ...init.headers, 'x-goog-api-key': await gemini() };
-  let res;
-  try {
-    res = await fetch(url, { ...init, signal: AbortSignal.timeout(25000) });
-  } catch {
-    return fail(504, 'TIMEOUT', 'The AI took too long to answer. Try again.');
-  }
-  if (!res.ok) {
-    console.error('gemini', res.status, (await res.text()).slice(0, 500));
-    return fail(502, 'UPSTREAM', res.status === 429 ? 'ProScan AI is busy. Try again in a minute.' : 'ProScan AI could not answer right now.');
-  }
-  const text = Chat.extractText(await res.json().catch(() => null));
-  if (!text) return fail(502, 'EMPTY_ANSWER', 'The AI returned an empty answer. Try rephrasing.');
-  return reply(200, { answer: Chat.checkCitations(text, context), left: DAILY_LIMIT - used, via: 'gemini' });
+  const answer = await askBedrock(JSON.parse(init.body));
+  if (answer) return reply(200, { answer: Chat.checkCitations(answer, context), left: DAILY_LIMIT - used });
+  return fail(503, 'UNAVAILABLE', 'ProScan AI is not available right now. Try again later.');
 }
