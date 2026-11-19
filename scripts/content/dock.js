@@ -705,9 +705,10 @@
             out.push(h('div', { class: 'notice', role: 'alert' }, h('span', { text: alive() ? 'Could not reach ProScan. Reload this page and try again.' : 'ProScan was updated. Reload this page to ask.' })));
             return out;
         }
-        if (!cs.hasKey) {
-            out.push(lede('Add a free Gemini key to ask'));
-            out.push(h('button', { class: 'primary', 'data-k': 'add-key', 'data-first': true, onclick: () => openSettingsPage('key') }, 'Add key', icon('ext')));
+        if (!cs.hasKey && !cs.signedIn) {
+            out.push(lede('Sign in free to ask'));
+            out.push(h('button', { class: 'primary', 'data-k': 'sign-in-ask', 'data-first': true, onclick: () => openSettingsPage('sync') }, 'Sign in', icon('ext')));
+            out.push(h('button', { class: 'secondary compact', 'data-k': 'add-key', onclick: () => openSettingsPage('key') }, 'Use my own Gemini key', icon('ext')));
             return out;
         }
         if (count === 0) {

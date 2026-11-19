@@ -50,6 +50,12 @@ const router = createRouter({ extensionId: chrome.runtime.id });
 const chatDeps = {
   getStorage: (keys) => engine.chatData(keys),
   fetchFn: (url, init) => fetch(url, init),
+  // Free Ask through ProScan's server needs the dashboard sign-in.
+  getIdToken: async () => {
+    const user = Flags.CLOUD_SYNC ? await currentUser() : null;
+    return user ? user.getIdToken() : null;
+  },
+  signedIn: async () => Flags.CLOUD_SYNC && !!(await currentUser()),
 };
 
 // The run
