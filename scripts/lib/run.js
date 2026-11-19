@@ -117,7 +117,7 @@ const Run = (() => {
     }
 
     function isStale(run, now = Date.now()) {
-        return isActive(run) && now - (run.heartbeat || 0) > STALE_MS;
+        return isActive(run) && !waitingForCheck(run, now) && now - (run.heartbeat || 0) > STALE_MS;
     }
 
     /** True when `tabId` is the tab this live run belongs to. */
@@ -202,9 +202,26 @@ const Run = (() => {
         return { type, sellerId, keyword, url: url || null, startedAt: new Date(now).toISOString() };
     }
 
-    /** Wait before the next page: 2 to 4 seconds. */
+    /** Amazon's bot-check pages: the 2026 checkpoint and the old captcha form. */
+    function isBotCheckUrl(url) {
+        try {
+            return /^\/(checkpoint|errors\/validateCaptcha)(\/|$)/i.test(new URL(url).pathname);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /** Wait before the next page: 5 to 9 seconds, about how long a person spends on a page. */
     function pageDelay(rand = Math.random()) {
-        return 2000 + Math.floor(rand * 2000);
+        return 5000 + Math.floor(rand * 4000);
+    }
+
+    /** How long a run waits for the user to answer Amazon's bot check. */
+    const CHECK_WAIT_MS = 10 * 60 * 1000;
+
+    /** True while a run waits for the user to tick Amazon's "I am human" box. */
+    function waitingForCheck(run, now = Date.now()) {
+        return !!(run && run.checkAt && now - run.checkAt < CHECK_WAIT_MS);
     }
 
     /** What to tell the user about a page the run cannot start on. */
@@ -254,6 +271,9 @@ const Run = (() => {
         finish,
         outcome,
         pageDelay,
+        isBotCheckUrl,
+        waitingForCheck,
+        CHECK_WAIT_MS,
         sourceOf,
         refusal,
         describe

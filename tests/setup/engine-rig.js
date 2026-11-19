@@ -67,6 +67,7 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
   };
 
   // The worker's view of chrome.
+  const tabUpdates = [];
   const workerChrome = {
     storage: { session, local: localArea },
     runtime: { get lastError() { return lastError; }, id: EXT_ID },
@@ -78,6 +79,13 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
           if (!tab || !tab.listener) return withError('Could not establish connection. Receiving end does not exist.', () => cb());
           let answered = false;
           const respond = (r) => { if (!answered) { answered = true; cb(r); } };
+          // jsdom cannot navigate; a page told GO_NEXT loads the next URL here.
+          if (message.type === 'GO_NEXT') {
+            if (tab.followsLinks === false) return withError('The message port closed before a response was received.', () => cb());
+            respond({ ok: true });
+            setImmediate(() => navigate(tabId, message.url));
+            return;
+          }
           const held = tab.listener(message, { id: EXT_ID }, respond);
           if (!held && !answered) withError('The message port closed before a response was received.', () => cb());
         });
@@ -90,6 +98,7 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
       },
       async update(tabId, { url }) {
         if (!tabs.has(tabId)) throw new Error(`No tab with id: ${tabId}.`);
+        tabUpdates.push(url);
         setImmediate(() => navigate(tabId, url));
         return { id: tabId };
       },
@@ -187,6 +196,10 @@ function createRig({ site, flags, local = {}, now = () => Date.now(), random = (
       return (worker || startWorker()).engine.tabRemoved(id);
     },
     goTo(id, url) { navigate(id, url); },
+    /** URLs the worker loaded with tabs.update, the fallback path. */
+    tabUpdates,
+    /** A page that ignores GO_NEXT, as an older content script would. */
+    ignoreGoNext(id) { tabs.get(id).followsLinks = false; },
     /** Messages of these types from tabs are lost, as when the worker is not up. */
     drop(...types) { dropped.clear(); types.forEach((t) => dropped.add(t)); },
     tabCtx: (id) => tabs.get(id).ctx,

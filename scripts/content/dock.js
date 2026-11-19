@@ -512,8 +512,8 @@
             const cur = Math.min((r.page || 0) + 1, r.maxPages);
             const where = r.thisTab ? '' : ' in another tab';
             return launcherShell('running',
-                mainButton(`Open ProScan, scraping page ${cur} of ${r.maxPages}${where}`, `Page ${fmt(cur)} of ${fmt(r.maxPages)}`,
-                    `${plural(r.itemCount, 'product')} so far${where}`, mark({ ring: (r.page || 0) / r.maxPages }), false),
+                mainButton(`Open ProScan, scraping page ${cur} of ${r.maxPages}${where}`, r.waitingCheck ? 'Tick "I am human"' : `Page ${fmt(cur)} of ${fmt(r.maxPages)}`,
+                    r.waitingCheck ? 'ProScan goes on after' : `${plural(r.itemCount, 'product')} so far${where}`, mark({ ring: (r.page || 0) / r.maxPages }), false),
                 h('button', { class: 'pill outline', 'data-k': 'stop', disabled: ui.busy === 'stop', 'aria-label': `Stop scraping and keep ${plural(r.itemCount, 'product')}`, onclick: stopRun },
                     icon('stop'), 'Stop'));
         }
@@ -626,7 +626,9 @@
             h('div', { class: 'hero', role: 'status', 'aria-live': 'polite' },
                 tally(r.itemCount, stop),
                 ticks(r),
-                h('p', { class: 'meta', text: `Page ${fmt(cur)} of ${fmt(r.maxPages)}${r.thisTab ? '' : ', in another tab'}` })),
+                h('p', { class: 'meta', text: r.waitingCheck
+                    ? `Amazon wants you to tick "I am human"${r.thisTab ? ' on this page' : ' in the scraping tab'}. ProScan goes on after.`
+                    : `Page ${fmt(cur)} of ${fmt(r.maxPages)}${r.thisTab ? '' : ', in another tab'}` })),
             noticeEl()
         ];
     }
@@ -636,6 +638,10 @@
         let meta = null;
         if (r.reason === 'stopped') meta = h('p', { class: 'meta', text: 'Stopped' });
         else if (r.reason !== 'complete') meta = h('p', { class: 'meta warn', text: (Run.MESSAGES && Run.MESSAGES[r.reason]) || 'The run ended early.' });
+        // A one-page store finishes in a second; say so, or the rescrape looks like it did nothing.
+        else if (r.finishedAt && Date.now() - (typeof r.finishedAt === 'number' ? r.finishedAt : Date.parse(r.finishedAt)) < 60000) {
+            meta = h('p', { class: 'meta', text: `Done just now, ${(r.page || 1) === 1 ? '1 page' : `${fmt(r.page)} pages`}` });
+        }
         const again = scrapable && page.startable && !ui.spread
             ? h('button', {
                 class: 'again', 'data-k': 'again', 'aria-label': 'Scrape again', title: 'Scrape again', disabled: ui.busy === 'start',
