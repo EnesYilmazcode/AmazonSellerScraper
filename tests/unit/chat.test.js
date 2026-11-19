@@ -229,7 +229,7 @@ describe('answerQuestion', () => {
 describe('status', () => {
     test('reports whether a key is set without returning it', async () => {
         const st = await Chat.status({ getStorage: storageWith(baseData) });
-        expect(st).toEqual({ hasKey: true, productCount: 2, source: 'search "usb c cable"', pages: 2 });
+        expect(st).toEqual({ hasKey: true, signedIn: false, productCount: 2, source: 'search "usb c cable"', pages: 2 });
         expect(JSON.stringify(st)).not.toContain('test-key-123');
     });
 });
@@ -252,3 +252,46 @@ test('a storefront scan is labeled by its name when the run has one', () => {
     const bare = Chat.buildContext({ ...baseData, scrapeRunMeta: { type: 'storefront', sellerId: 'A1B2C3' } });
     expect(bare.source.label).toBe('storefront A1B2C3');
 });
+
+describe('free Ask through the ProScan server', () => {
+    const noKey = () => { const d = { ...baseData }; delete d[Chat.KEY_STORAGE]; return d; };
+    const ok = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+
+    test('without a key or a sign-in hook it still asks for a key', async () => {
+        const out = await Chat.answerQuestion({ question: 'hi' }, { getStorage: storageWith(noKey()), fetchFn: jest.fn() });
+        expect(out.code).toBe('NO_KEY');
+    });
+
+    test('signed out, it asks the user to sign in and sends nothing', async () => {
+        const fetchFn = jest.fn();
+        const out = await Chat.answerQuestion({ question: 'hi' }, { getStorage: storageWith(noKey()), fetchFn, getIdToken: async () => null });
+        expect(out.code).toBe('SIGN_IN');
+        expect(fetchFn).not.toHaveBeenCalled();
+    });
+
+    test('signed in, it posts the token, question and trimmed context, never a key', async () => {
+        const fetchFn = jest.fn(async () => ok({ answer: 'B0TEST0001 is cheapest.', left: 19 }));
+        const out = await Chat.answerQuestion({ question: 'cheapest?' }, { getStorage: storageWith(noKey()), fetchFn, getIdToken: async () => 'tok' });
+        expect(out).toEqual({ answer: 'B0TEST0001 is cheapest.', left: 19 });
+        const [url, init] = fetchFn.mock.calls[0];
+        expect(url).toBe(Chat.ASK_URL);
+        const sent = JSON.parse(init.body);
+        expect(sent.idToken).toBe('tok');
+        expect(sent.question).toBe('cheapest?');
+        expect(sent.context.products.length).toBeGreaterThan(0);
+        expect(init.body).not.toContain('test-key-123');
+    });
+
+    test('a server error comes back as its message', async () => {
+        const fetchFn = jest.fn(async () => ok({ code: 'DAILY', error: 'You have used your 20 questions for today.' }, 429));
+        const out = await Chat.answerQuestion({ question: 'x' }, { getStorage: storageWith(noKey()), fetchFn, getIdToken: async () => 'tok' });
+        expect(out).toEqual({ error: 'You have used your 20 questions for today.', code: 'DAILY' });
+    });
+
+    test('with a key set, the key path wins and the server is not used', async () => {
+        const fetchFn = jest.fn(async () => ok({ candidates: [{ content: { parts: [{ text: 'fine' }] } }] }));
+        await Chat.answerQuestion({ question: 'x' }, { getStorage: storageWith(baseData), fetchFn, getIdToken: async () => 'tok' });
+        expect(fetchFn.mock.calls[0][0]).toContain('generativelanguage.googleapis.com');
+    });
+});
+

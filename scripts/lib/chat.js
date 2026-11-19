@@ -26,6 +26,11 @@ const Chat = (() => {
         'gemini-3.1-flash-lite-preview',
     ];
 
+    // ProScan's own Ask server (AWS Lambda): signed-in users without a key
+    // ask through it, 20 questions a day. The key stays on the server.
+    const ASK_URL = 'https://zeo7jonp3g5w7qoxm72mmf7rfq0gfnsb.lambda-url.us-east-1.on.aws/';
+    const SIGN_IN_MESSAGE = 'Sign in to ProScan (free) to ask, or add your own Gemini key.';
+
     const KEY_STORAGE = 'geminiApiKey';
     const SETTING_HINT = 'Open the ProScan popup and paste your key under "AI chat settings".';
     const NO_KEY_MESSAGE = 'AI chat needs your own Gemini API key. ' + SETTING_HINT;
@@ -231,12 +236,13 @@ const Chat = (() => {
 
         const data = await deps.getStorage([KEY_STORAGE, ...RUN_KEYS]);
         const apiKey = typeof data[KEY_STORAGE] === 'string' ? data[KEY_STORAGE].trim() : '';
-        if (!apiKey) return { error: NO_KEY_MESSAGE, code: 'NO_KEY' };
+        if (!apiKey && !deps.getIdToken) return { error: NO_KEY_MESSAGE, code: 'NO_KEY' };
 
         const context = buildContext(data);
         if (!context.products.length) {
             return { error: 'No scanned products yet. Run a scan on an Amazon search page first.', code: 'NO_DATA' };
         }
+        if (!apiKey) return askServer(question, req.history, context, deps);
 
         const { url, init } = buildRequest({ apiKey, question, context, history: req.history });
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -263,12 +269,39 @@ const Chat = (() => {
         return { answer: checkCitations(text, context) };
     }
 
+    /** Asks ProScan's server with the user's Firebase ID token. Never throws. */
+    async function askServer(question, history, context, deps) {
+        const idToken = await deps.getIdToken().catch(() => null);
+        if (!idToken) return { error: SIGN_IN_MESSAGE, code: 'SIGN_IN' };
+        let response;
+        try {
+            response = await deps.fetchFn(deps.askUrl || ASK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ idToken, question, history: sanitizeHistory(history), context }),
+                signal: typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(deps.timeoutMs || TIMEOUT_MS) : undefined,
+            });
+        } catch (e) {
+            if (e && (e.name === 'AbortError' || e.name === 'TimeoutError')) {
+                return { error: 'ProScan AI took too long to answer. Try again.', code: 'TIMEOUT' };
+            }
+            return { error: 'Could not reach ProScan AI. Check your connection.', code: 'NETWORK' };
+        }
+        const out = await response.json().catch(() => null);
+        if (!response.ok || !out || typeof out.answer !== 'string') {
+            const error = out && typeof out.error === 'string' ? out.error.slice(0, 200) : 'ProScan AI error ' + response.status + '.';
+            return { error, code: (out && out.code) || 'HTTP_' + response.status };
+        }
+        return { answer: out.answer, left: typeof out.left === 'number' ? out.left : null };
+    }
+
     /** What the chat widget may know: whether a key is set, and the run it covers. */
     async function status(deps) {
         const data = await deps.getStorage([KEY_STORAGE, ...RUN_KEYS]);
         const context = buildContext(data);
         return {
             hasKey: typeof data[KEY_STORAGE] === 'string' && data[KEY_STORAGE].trim() !== '',
+            signedIn: deps.signedIn ? await deps.signedIn().catch(() => false) : false,
             productCount: context.total,
             source: context.source.label,
             pages: context.source.pages,
@@ -278,6 +311,8 @@ const Chat = (() => {
     return {
         GEMINI_MODEL,
         GEMINI_ORIGIN,
+        ASK_URL,
+        SIGN_IN_MESSAGE,
         RETIRED_MODELS,
         KEY_STORAGE,
         RUN_KEYS,

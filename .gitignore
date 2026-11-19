@@ -15,3 +15,4 @@ dist-zips/
 tests/e2e/.build/
 tests/e2e/.results/
 tests/e2e/.report/
+server/ask/.build/
