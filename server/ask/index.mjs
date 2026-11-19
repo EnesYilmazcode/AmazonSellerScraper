@@ -10,6 +10,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { DynamoDBClient, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import { BedrockRuntimeClient, ConverseCommand } from '@aws-sdk/client-bedrock-runtime';
 
 const Chat = createRequire(import.meta.url)('./chat.js');
 
@@ -19,10 +20,15 @@ const KEY_PARAM = process.env.KEY_PARAM || '/proscan/ask/gemini-key';
 const DAILY_LIMIT = Number(process.env.DAILY_LIMIT || 20);
 const GLOBAL_LIMIT = Number(process.env.GLOBAL_LIMIT || 2000);
 const MAX_BODY = 200_000;
+// AWS first (paid by AWS credits); Gemini while Bedrock refuses (quota 0, no access).
+const BEDROCK_MODEL = process.env.BEDROCK_MODEL || 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
+const BEDROCK_PAUSE_MS = 10 * 60 * 1000;
 const JWKS_URL = 'https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com';
 
 const ddb = new DynamoDBClient({});
 const ssm = new SSMClient({});
+const bedrock = new BedrockRuntimeClient({});
+let bedrockOffUntil = 0;
 let geminiKey = null;
 let jwks = { keys: null, until: 0 };
 
@@ -102,6 +108,30 @@ async function gemini() {
   return geminiKey;
 }
 
+/** Bedrock's answer to the Gemini-shaped request chat.js built, or null to fall back. */
+async function askBedrock(body) {
+  if (!BEDROCK_MODEL || Date.now() < bedrockOffUntil) return null;
+  const messages = body.contents.map((c) => ({
+    role: c.role === 'model' ? 'assistant' : 'user',
+    content: [{ text: c.parts.map((p) => p.text).join('') }],
+  }));
+  try {
+    const out = await bedrock.send(new ConverseCommand({
+      modelId: BEDROCK_MODEL,
+      system: [{ text: body.systemInstruction.parts[0].text }],
+      messages,
+      inferenceConfig: { maxTokens: 1024 },
+    }), { abortSignal: AbortSignal.timeout(20000) });
+    const text = (out.output?.message?.content || []).map((c) => c.text || '').join('').trim();
+    return text || null;
+  } catch (e) {
+    // Quota, access or model errors: use Gemini for a while instead of retrying every call.
+    console.warn('bedrock off', e.name, String(e.message).slice(0, 160));
+    bedrockOffUntil = Date.now() + BEDROCK_PAUSE_MS;
+    return null;
+  }
+}
+
 export async function handler(event) {
   if (event.requestContext?.http?.method !== 'POST') return fail(405, 'METHOD', 'POST only.');
   const raw = event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : (event.body || '');
@@ -123,7 +153,10 @@ export async function handler(event) {
   const used = await take(`u#${uid}#${day}`, DAILY_LIMIT, day);
   if (used === false) return fail(429, 'DAILY', `You have used your ${DAILY_LIMIT} questions for today. They reset at midnight UTC.`);
 
-  const { url, init } = Chat.buildRequest({ apiKey: await gemini(), question, context, history: req.history });
+  const { url, init } = Chat.buildRequest({ apiKey: 'unused', question, context, history: req.history });
+  const viaAws = await askBedrock(JSON.parse(init.body));
+  if (viaAws) return reply(200, { answer: Chat.checkCitations(viaAws, context), left: DAILY_LIMIT - used, via: 'aws' });
+  init.headers = { ...init.headers, 'x-goog-api-key': await gemini() };
   let res;
   try {
     res = await fetch(url, { ...init, signal: AbortSignal.timeout(25000) });
@@ -136,5 +169,5 @@ export async function handler(event) {
   }
   const text = Chat.extractText(await res.json().catch(() => null));
   if (!text) return fail(502, 'EMPTY_ANSWER', 'The AI returned an empty answer. Try rephrasing.');
-  return reply(200, { answer: Chat.checkCitations(text, context), left: DAILY_LIMIT - used });
+  return reply(200, { answer: Chat.checkCitations(text, context), left: DAILY_LIMIT - used, via: 'gemini' });
 }

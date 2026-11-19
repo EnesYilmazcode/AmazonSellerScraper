@@ -87,9 +87,13 @@ router.on(Msg.T.DOWNLOAD, (m) =>
   }));
 // Keys and passwords are typed on ProScan's own page, never on Amazon's.
 router.on(Msg.T.OPEN_SETTINGS, async (m, sender) => {
-  const section = m.section === 'sync' ? 'sync' : 'key';
+  const section = m.section === 'sync' || m.section === 'google' ? m.section : 'key';
   const tab = sender.tab || {};
-  const opts = { url: chrome.runtime.getURL(`popup/popup.html#${section}`) };
+  const opts = {
+    url: section === 'google'
+      ? `${CONNECT_URL}?ext=${chrome.runtime.id}`
+      : chrome.runtime.getURL(`popup/popup.html#${section}`),
+  };
   if (typeof tab.index === 'number') opts.index = tab.index + 1;
   if (typeof tab.id === 'number') opts.openerTabId = tab.id;
   await chrome.tabs.create(opts);
