@@ -236,8 +236,12 @@ test('a page that cannot be saved fails the run loudly (F-26)', async ({ ext }) 
     req.onsuccess = () => { req.result.close(); resolve(); };
     req.onerror = () => reject(req.error);
   }));
-  await sleep(6000);
-  const run = await popup.evaluate(async () => (await chrome.storage.session.get('run')).run);
+  // Pages are paced 5 to 9 s apart, so wait for the run to end, not a fixed time.
+  let run;
+  for (let t = 0; t < 120 && run?.state !== 'failed'; t++) {
+    await sleep(250);
+    run = await popup.evaluate(async () => (await chrome.storage.session.get('run')).run);
+  }
 
   expect(pagesOf(served, 'full disk')).toEqual([1, 2]);
   expect(run).toMatchObject({ state: 'failed', reason: 'storage_error', page: 1 });
