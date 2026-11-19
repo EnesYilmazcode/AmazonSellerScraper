@@ -208,7 +208,7 @@ test('a file too big for the worker to hand over is saved from the page', async 
   expect(clicks).toEqual([['big.csv', 'blob:x']]);
 });
 
-test('Ask with no key sends the user to ProScan settings, never asks for the key here', async () => {
+test('Ask signed out offers Google sign-in, never asks for a key', async () => {
   const d = mount(SEARCH, YOGA, {
     RUN_STATUS: IDLE, CHAT_STATUS: { hasKey: false, productCount: 12, source: 'search "yoga mat"' }, OPEN_SETTINGS: { ok: true },
   });
@@ -217,9 +217,11 @@ test('Ask with no key sends the user to ProScan settings, never asks for the key
   await flush();
   expect(d.$('.scope').textContent).toBe('12 products');
   expect(d.$$('input[type="password"]')).toEqual([]);
-  d.$('[data-k="add-key"]').click();
+  expect(d.$('[data-k="add-key"]')).toBeNull();
+  expect(d.$('[data-k="sign-in-ask"]').textContent).toBe('Continue with Google');
+  d.$('[data-k="sign-in-ask"]').click();
   await flush();
-  expect(d.sent.find((m) => m.type === 'OPEN_SETTINGS')).toEqual({ type: 'OPEN_SETTINGS', section: 'key' });
+  expect(d.sent.find((m) => m.type === 'OPEN_SETTINGS')).toEqual({ type: 'OPEN_SETTINGS', section: 'google' });
 });
 
 test('chat answers are text, and only the question and history go out', async () => {
